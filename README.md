@@ -90,13 +90,13 @@ Resources:
 
 ## Phase Roadmap
 
-- **Phase 0** — Project scaffold & core client ✅
-- **Phase 1** — Interactive session mode (send messages, stream responses)
-- **Phase 2** — Tool call handling (confirm/deny, view results)
-- **Phase 3** — Session management (list, resume, dispose)
-- **Phase 4** — Configuration & profiles (saved server connections)
-- **Phase 5** — Rich TUI (full terminal UI with panels)
-- **Phase 6** — George skill integration ✅
+- **Phase 0** — Project scaffold & core AHP client ✅
+- **Phase 1** — Connection management & server discovery ✅
+- **Phase 2** — Session lifecycle (create, list, inspect, close, history) ✅
+- **Phase 3** — Prompting & streaming (turns, tool calls, permissions, cancel) ✅
+- **Phase 4** — Output formatting & polish (JSON/quiet modes, spinners, exit codes, completions) ✅
+- **Phase 5** — Multi-client & advanced (watch, reconnect, auth, active client, browse) ✅
+- **Phase 6** — George skill integration (dispatch skill, integration docs) ✅
 
 ## License
 
