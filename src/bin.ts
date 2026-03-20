@@ -18,6 +18,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Command } from "commander";
 import pc from "picocolors";
@@ -43,6 +44,7 @@ import { TurnController } from "./prompt/index.js";
 import { ActionType } from "./protocol/actions.js";
 import { SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
 import type { SessionRecord } from "./session/index.js";
+import { SessionWatcher } from "./watch/index.js";
 
 const store = new ConnectionStore();
 const sessionStore = new SessionStore();
@@ -1428,6 +1430,229 @@ program
 		}
 	});
 
+// ── watch ────────────────────────────────────────────────────────────────────
+
+program
+	.command("watch")
+	.description("Attach to a session as an observer and stream all activity")
+	.argument("[id]", "Session ID")
+	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-s, --server <name>", "Server name")
+	.action(async (id: string | undefined, opts: { sessionName?: string; server?: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const record = await resolveSessionRecord(id, { name: opts.sessionName, server: opts.server });
+
+			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+			const formatter = formatterFromOpts(globalOpts);
+
+			await withConnection({ server: opts.server, config: cfg }, async (client) => {
+				const watcher = new SessionWatcher(client, record.sessionUri, formatter, {
+					statusOut: process.stderr,
+				});
+
+				const onSigint = () => watcher.stop();
+				process.on("SIGINT", onSigint);
+
+				if (globalOpts.format === "text") {
+					process.stderr.write(
+						pc.dim(
+							`[watch] Observing session ${pc.bold(record.id.slice(0, 8))}${record.name ? ` (${record.name})` : ""}...\n`,
+						),
+					);
+					process.stderr.write(pc.dim("[watch] Press Ctrl+C to detach.\n"));
+				}
+
+				try {
+					await watcher.watch();
+				} finally {
+					process.removeListener("SIGINT", onSigint);
+				}
+			});
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
+
+// ── browse ───────────────────────────────────────────────────────────────────
+
+program
+	.command("browse")
+	.description("Browse server filesystem")
+	.argument("[directory]", "Directory URI to browse (uses server default if omitted)")
+	.option("-s, --server <name>", "Server name")
+	.action(async (directory: string | undefined, opts: { server?: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+
+			await withConnection({ server: opts.server, config: cfg }, async (client) => {
+				const result = await client.browseDirectory(directory);
+
+				outputResult(
+					globalOpts,
+					() => {
+						if (result.entries.length === 0) {
+							console.log(pc.dim("Directory is empty."));
+							return;
+						}
+
+						// Sort: directories first, then files
+						const sorted = [...result.entries].sort((a, b) => {
+							if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+							return a.name.localeCompare(b.name);
+						});
+
+						for (const entry of sorted) {
+							const icon = entry.type === "directory" ? pc.blue("📁") : "📄";
+							const name = entry.type === "directory" ? pc.bold(entry.name) : entry.name;
+							console.log(`  ${icon} ${name}`);
+						}
+					},
+					result,
+				);
+			});
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
+
+// ── content ──────────────────────────────────────────────────────────────────
+
+program
+	.command("content")
+	.description("Fetch content by URI from the server")
+	.argument("<uri>", "Content reference URI")
+	.option("-s, --server <name>", "Server name")
+	.option("-o, --output <file>", "Write content to a file instead of stdout")
+	.action(async (uri: string, opts: { server?: string; output?: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+
+			await withConnection({ server: opts.server, config: cfg }, async (client) => {
+				const result = await client.fetchContent(uri);
+
+				const data =
+					result.encoding === "base64" ? Buffer.from(result.data, "base64") : Buffer.from(result.data, "utf-8");
+
+				if (opts.output) {
+					await fs.writeFile(opts.output, data);
+					if (globalOpts.format === "text") {
+						console.log(pc.green("✓"), `Wrote ${data.length} bytes to ${pc.bold(opts.output)}`);
+					}
+				} else if (globalOpts.format === "json") {
+					console.log(
+						JSON.stringify({
+							uri,
+							encoding: result.encoding,
+							mimeType: result.mimeType,
+							data: result.data,
+							size: data.length,
+						}),
+					);
+				} else {
+					process.stdout.write(data);
+				}
+			});
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
+
+// ── model ────────────────────────────────────────────────────────────────────
+
+program
+	.command("model")
+	.description("Switch the model for a session")
+	.argument("<model-id>", "Model ID to switch to")
+	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-s, --server <name>", "Server name")
+	.action(async (modelId: string, opts: { sessionName?: string; server?: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const record = await resolveSessionRecord(undefined, { name: opts.sessionName, server: opts.server });
+
+			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+
+			await withConnection({ server: opts.server, config: cfg }, async (client) => {
+				await client.subscribe(record.sessionUri);
+
+				client.dispatchAction({
+					type: ActionType.SessionModelChanged,
+					session: record.sessionUri,
+					model: modelId,
+				});
+
+				outputResult(globalOpts, () => console.log(pc.green("✓"), `Model change to ${pc.bold(modelId)} dispatched.`), {
+					sessionUri: record.sessionUri,
+					model: modelId,
+				});
+			});
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
+
+// ── agents ───────────────────────────────────────────────────────────────────
+
+program
+	.command("agents")
+	.description("List available agents and models on the server")
+	.option("-s, --server <name>", "Server name")
+	.action(async (opts: { server?: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+
+			await withConnection({ server: opts.server, config: cfg }, async (client) => {
+				const rootState = client.state.root;
+
+				outputResult(
+					globalOpts,
+					() => {
+						if (rootState.agents.length === 0) {
+							console.log(pc.dim("No agents available on this server."));
+							return;
+						}
+
+						for (const agent of rootState.agents) {
+							console.log(pc.bold(pc.cyan(agent.provider)), pc.dim("—"), agent.displayName);
+							if (agent.description) {
+								console.log(`  ${pc.dim(agent.description)}`);
+							}
+							if (agent.models.length > 0) {
+								console.log(`  ${pc.bold("Models:")}`);
+								for (const m of agent.models) {
+									console.log(`    ${pc.cyan(m.id)}${m.name ? ` — ${m.name}` : ""}`);
+								}
+							}
+							console.log();
+						}
+					},
+					rootState.agents.map((a) => ({
+						provider: a.provider,
+						displayName: a.displayName,
+						description: a.description,
+						models: a.models.map((m) => ({ id: m.id, name: m.name })),
+					})),
+				);
+			});
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
+
 // ── completions ──────────────────────────────────────────────────────────────
 
 const completions = program.command("completions").description("Generate shell completion scripts");
@@ -1524,6 +1749,11 @@ async function handleImplicitPrompt(): Promise<boolean> {
 			"prompt",
 			"exec",
 			"cancel",
+			"watch",
+			"browse",
+			"content",
+			"model",
+			"agents",
 			"completions",
 			"help",
 			"--help",

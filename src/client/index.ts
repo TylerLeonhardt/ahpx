@@ -257,3 +257,6 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 export { Transport, type TransportOptions } from "./transport.js";
 export { ProtocolLayer, RpcError, RpcTimeoutError, type ProtocolLayerOptions } from "./protocol.js";
 export { StateMirror } from "./state.js";
+export { ActiveClientManager } from "./active-client.js";
+export { ReconnectManager } from "./reconnect.js";
+export type { ReconnectOptions, ReconnectOutcome } from "./reconnect.js";
