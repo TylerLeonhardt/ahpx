@@ -32,7 +32,7 @@ import {
 	loadConfigWithSources,
 } from "./config/index.js";
 import type { AhpxConfig, ConfigSource } from "./config/index.js";
-import { AhpxError, ExitCode, NoSessionError, TimeoutError, UsageError } from "./errors.js";
+import { AhpxError, ExitCode, NoSessionError, TimeoutError, UsageError, extractErrorMessage } from "./errors.js";
 import { setVerbose } from "./logger.js";
 import { createFormatter, startSpinner } from "./output/index.js";
 import type { OutputFormat, OutputFormatter } from "./output/index.js";
@@ -209,13 +209,17 @@ function outputResult(globalOpts: GlobalOpts, textFn: () => void, data: unknown)
  * All command actions should use this wrapper.
  */
 function handleError(err: unknown, globalOpts?: GlobalOpts): void {
-	const message = err instanceof Error ? err.message : String(err);
+	const message = extractErrorMessage(err);
 	const exitCode = err instanceof AhpxError ? err.exitCode : ExitCode.Error;
 
 	if (globalOpts?.format === "json") {
 		console.log(JSON.stringify({ error: message, exitCode }));
 	} else if (globalOpts?.format !== "quiet" || exitCode !== ExitCode.Success) {
 		console.error(pc.red("✗"), message);
+	}
+
+	if (globalOpts?.verbose && err instanceof Error && err.stack) {
+		console.error(pc.dim(err.stack));
 	}
 
 	process.exitCode = exitCode;
@@ -253,7 +257,8 @@ program
 				outputResult(globalOpts, () => printServerInfo(client, result), serverInfoJson(client, result));
 			} catch (err) {
 				spinner.stop();
-				throw err;
+				if (err instanceof AhpxError) throw err;
+				throw new AhpxError(`Connection failed: ${extractErrorMessage(err)}`, ExitCode.Error);
 			}
 		} catch (err) {
 			handleError(err, globalOpts);
@@ -398,7 +403,8 @@ server
 				outputResult(globalOpts, () => printServerInfo(client, result), serverInfoJson(client, result));
 			} catch (err) {
 				spinner.stop();
-				throw err;
+				if (err instanceof AhpxError) throw err;
+				throw new AhpxError(`Connection failed: ${extractErrorMessage(err)}`, ExitCode.Error);
 			}
 		} catch (err) {
 			handleError(err, globalOpts);
@@ -744,7 +750,8 @@ session
 							);
 						} catch (err) {
 							spinner.stop();
-							throw err;
+							if (err instanceof AhpxError) throw err;
+							throw new AhpxError(`Session creation failed: ${extractErrorMessage(err)}`, ExitCode.Error);
 						}
 					},
 				);
@@ -1111,7 +1118,8 @@ async function runPrompt(
 					spinner.stop();
 				} catch (err) {
 					spinner.stop();
-					throw err;
+					if (err instanceof AhpxError) throw err;
+					throw new AhpxError(`Session creation failed: ${extractErrorMessage(err)}`, ExitCode.Error);
 				}
 			} else {
 				// Try to resolve existing session
@@ -1235,7 +1243,8 @@ async function resolveOrCreateSession(
 		spinner.stop();
 	} catch (err) {
 		spinner.stop();
-		throw err;
+		if (err instanceof AhpxError) throw err;
+		throw new AhpxError(`Session creation failed: ${extractErrorMessage(err)}`, ExitCode.Error);
 	}
 
 	const newRecord: SessionRecord = {
@@ -1815,7 +1824,7 @@ async function handleImplicitPrompt(): Promise<boolean> {
 		}
 	} catch (err) {
 		const exitCode = err instanceof AhpxError ? err.exitCode : ExitCode.Error;
-		console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
+		console.error(pc.red("✗"), extractErrorMessage(err));
 		process.exitCode = exitCode;
 	}
 })();

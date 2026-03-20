@@ -68,3 +68,27 @@ export class PermissionDeniedError extends AhpxError {
 		this.name = "PermissionDeniedError";
 	}
 }
+
+/**
+ * Extract a human-readable message from an error.
+ *
+ * Handles AggregateError (thrown by the ws library for ECONNREFUSED, etc.)
+ * where the top-level message is empty but sub-errors have details.
+ */
+export function extractErrorMessage(err: unknown): string {
+	if (!(err instanceof Error)) return String(err);
+
+	// AggregateError: ws throws these with empty message for connection failures
+	if (err instanceof AggregateError && !err.message && err.errors.length > 0) {
+		const first = err.errors[0];
+		return first instanceof Error ? first.message : String(first);
+	}
+
+	if (err.message) return err.message;
+
+	// Fallback to error code if message is empty (e.g. ECONNREFUSED, ETIMEDOUT)
+	const code = (err as NodeJS.ErrnoException).code;
+	if (code) return code;
+
+	return String(err);
+}

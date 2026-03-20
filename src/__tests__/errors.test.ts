@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { AhpxError, ExitCode, NoSessionError, PermissionDeniedError, TimeoutError, UsageError } from "../errors.js";
+import {
+	AhpxError,
+	ExitCode,
+	NoSessionError,
+	PermissionDeniedError,
+	TimeoutError,
+	UsageError,
+	extractErrorMessage,
+} from "../errors.js";
 
 describe("Error classes", () => {
 	describe("ExitCode constants", () => {
@@ -108,6 +116,50 @@ describe("Error classes", () => {
 			]);
 
 			expect(codes.size).toBe(4);
+		});
+	});
+
+	describe("extractErrorMessage", () => {
+		it("extracts message from standard Error", () => {
+			expect(extractErrorMessage(new Error("something broke"))).toBe("something broke");
+		});
+
+		it("extracts message from AhpxError", () => {
+			expect(extractErrorMessage(new AhpxError("session failed", ExitCode.Error))).toBe("session failed");
+		});
+
+		it("extracts sub-error message from AggregateError with empty message", () => {
+			const subError = new Error("connect ECONNREFUSED 127.0.0.1:9999");
+			const aggregate = new AggregateError([subError], "");
+			expect(extractErrorMessage(aggregate)).toBe("connect ECONNREFUSED 127.0.0.1:9999");
+		});
+
+		it("uses top-level message when AggregateError has one", () => {
+			const aggregate = new AggregateError([new Error("sub")], "top-level message");
+			expect(extractErrorMessage(aggregate)).toBe("top-level message");
+		});
+
+		it("falls back to error code when message is empty", () => {
+			const err = new Error("");
+			(err as NodeJS.ErrnoException).code = "ECONNREFUSED";
+			expect(extractErrorMessage(err)).toBe("ECONNREFUSED");
+		});
+
+		it("converts non-Error values to string", () => {
+			expect(extractErrorMessage("plain string")).toBe("plain string");
+			expect(extractErrorMessage(42)).toBe("42");
+			expect(extractErrorMessage(null)).toBe("null");
+		});
+
+		it("handles AggregateError with multiple sub-errors (uses first)", () => {
+			const errors = [new Error("connect ECONNREFUSED 127.0.0.1:9999"), new Error("connect ECONNREFUSED ::1:9999")];
+			const aggregate = new AggregateError(errors, "");
+			expect(extractErrorMessage(aggregate)).toBe("connect ECONNREFUSED 127.0.0.1:9999");
+		});
+
+		it("handles AggregateError with empty errors array", () => {
+			const aggregate = new AggregateError([], "");
+			expect(extractErrorMessage(aggregate)).toBe("AggregateError");
 		});
 	});
 });
