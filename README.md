@@ -69,6 +69,25 @@ npm test            # All tests pass
 npm run build       # Clean build
 ```
 
+## George Integration
+
+ahpx can be used as an agent dispatch backend for [George](https://github.com/TylerLeonhardt/copilot-chat-bridge) (CTO bot). George spawns `ahpx exec` with `--format json --approve-all` to dispatch agents through AHP servers, getting structured NDJSON output and semantic exit codes.
+
+```bash
+ahpx exec -s vscode --format json --json-strict --approve-all "fix the bug"
+```
+
+Key capabilities for George:
+- **One-shot dispatch** via `ahpx exec` (session lifecycle handled automatically)
+- **Session persistence** for multi-turn tasks via `ahpx session new` / `ahpx prompt`
+- **Multi-client observation** via `ahpx watch` (monitor from another process)
+- **Structured output** — NDJSON events with `{ type, timestamp, data }` envelopes
+- **Semantic exit codes** — 0 (success), 1 (error), 3 (timeout), 5 (permission denied)
+
+Resources:
+- **[George AHP Dispatch Skill](.github/skills/george-ahp-dispatch/SKILL.md)** — Complete reference for George on using ahpx
+- **[Integration Guide](docs/george-integration.md)** — Architecture, workflows, parsing examples, and troubleshooting
+
 ## Phase Roadmap
 
 - **Phase 0** — Project scaffold & core client ✅
@@ -77,6 +96,7 @@ npm run build       # Clean build
 - **Phase 3** — Session management (list, resume, dispose)
 - **Phase 4** — Configuration & profiles (saved server connections)
 - **Phase 5** — Rich TUI (full terminal UI with panels)
+- **Phase 6** — George skill integration ✅
 
 ## License
 
