@@ -33,7 +33,7 @@ export interface TurnResult {
 	responseText: string;
 	toolCalls: number;
 	usage?: { inputTokens: number; outputTokens: number; model?: string };
-	state: "complete" | "cancelled" | "error";
+	state: "complete" | "cancelled" | "error" | "idle_timeout";
 	error?: string;
 }
 
@@ -59,7 +59,11 @@ export class TurnController {
 	/**
 	 * Send a message and stream the full response.
 	 */
-	async prompt(text: string, attachments?: IMessageAttachment[]): Promise<TurnResult> {
+	async prompt(
+		text: string,
+		attachments?: IMessageAttachment[],
+		options?: { idleTimeout?: number },
+	): Promise<TurnResult> {
 		const turnId = randomUUID();
 		this.activeTurnId = turnId;
 		this.cancelled = false;
@@ -69,6 +73,31 @@ export class TurnController {
 		let usage: IUsageInfo | undefined;
 
 		return new Promise<TurnResult>((resolve) => {
+			let idleTimer: ReturnType<typeof setTimeout> | undefined;
+
+			const resetIdleTimer = () => {
+				if (idleTimer !== undefined) clearTimeout(idleTimer);
+				if (options?.idleTimeout) {
+					idleTimer = setTimeout(() => {
+						cleanup();
+						this.renderer.onTurnCancelled();
+						resolve({
+							turnId,
+							responseText,
+							toolCalls: toolCallCount,
+							usage: usage
+								? {
+										inputTokens: usage.inputTokens ?? 0,
+										outputTokens: usage.outputTokens ?? 0,
+										model: usage.model,
+									}
+								: undefined,
+							state: "idle_timeout",
+						});
+					}, options.idleTimeout);
+				}
+			};
+
 			const onAction = (envelope: IActionEnvelope) => {
 				const action = envelope.action;
 
@@ -81,6 +110,8 @@ export class TurnController {
 				if ("turnId" in action && (action as { turnId: string }).turnId !== turnId) {
 					return;
 				}
+
+				resetIdleTimer();
 
 				switch (action.type) {
 					case ActionType.SessionDelta: {
@@ -262,6 +293,7 @@ export class TurnController {
 			};
 
 			const cleanup = () => {
+				if (idleTimer !== undefined) clearTimeout(idleTimer);
 				this.client.removeListener("action", onAction);
 				this.activeTurnId = undefined;
 			};
@@ -279,6 +311,9 @@ export class TurnController {
 					...(attachments && attachments.length > 0 ? { attachments } : {}),
 				},
 			});
+
+			// Start idle timer after dispatching turn
+			resetIdleTimer();
 		});
 	}
 

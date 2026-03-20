@@ -1093,6 +1093,8 @@ async function runPrompt(
 		oneShot?: boolean;
 		/** Working directory for session creation. Defaults to process.cwd(). */
 		cwd?: string;
+		/** Idle timeout in seconds. */
+		idleTimeout?: number;
 	},
 	globalOpts: GlobalOpts,
 ): Promise<void> {
@@ -1148,7 +1150,9 @@ async function runPrompt(
 			process.on("SIGINT", sigintHandler);
 
 			try {
-				const result = await controller.prompt(opts.text);
+				const result = await controller.prompt(opts.text, undefined, {
+					idleTimeout: opts.idleTimeout ? opts.idleTimeout * 1000 : undefined,
+				});
 
 				// Update session record for persistent sessions
 				if (sessionRecord) {
@@ -1160,6 +1164,9 @@ async function runPrompt(
 
 				if (result.state === "error") {
 					process.exitCode = ExitCode.Error;
+				}
+				if (result.state === "idle_timeout") {
+					throw new TimeoutError(`Idle timeout: no events received for ${opts.idleTimeout} seconds`);
 				}
 			} finally {
 				process.removeListener("SIGINT", sigintHandler);
@@ -1310,6 +1317,7 @@ program
 	.option("--approve-all", "Auto-approve all permissions")
 	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
 	.option("--deny-all", "Auto-deny all permissions")
+	.option("--idle-timeout <seconds>", "Cancel if no events received within N seconds")
 	.action(
 		async (
 			textParts: string[],
@@ -1321,6 +1329,7 @@ program
 				approveAll?: boolean;
 				approveReads?: boolean;
 				denyAll?: boolean;
+				idleTimeout?: string;
 			},
 			cmd: Command,
 		) => {
@@ -1335,7 +1344,10 @@ program
 				if (!text) {
 					throw new UsageError("No prompt text provided.");
 				}
-				await runPrompt({ text, ...opts }, globalOpts);
+				await runPrompt(
+					{ text, ...opts, idleTimeout: opts.idleTimeout ? Number.parseInt(opts.idleTimeout, 10) : undefined },
+					globalOpts,
+				);
 			} catch (err) {
 				handleError(err, globalOpts);
 			}
@@ -1355,6 +1367,7 @@ program
 	.option("--approve-all", "Auto-approve all permissions")
 	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
 	.option("--deny-all", "Auto-deny all permissions")
+	.option("--idle-timeout <seconds>", "Cancel if no events received within N seconds")
 	.action(
 		async (
 			textParts: string[],
@@ -1366,6 +1379,7 @@ program
 				approveAll?: boolean;
 				approveReads?: boolean;
 				denyAll?: boolean;
+				idleTimeout?: string;
 			},
 			cmd: Command,
 		) => {
@@ -1377,7 +1391,15 @@ program
 				if (!text) {
 					throw new UsageError("No prompt text provided.");
 				}
-				await runPrompt({ text, oneShot: true, ...opts }, globalOpts);
+				await runPrompt(
+					{
+						text,
+						oneShot: true,
+						...opts,
+						idleTimeout: opts.idleTimeout ? Number.parseInt(opts.idleTimeout, 10) : undefined,
+					},
+					globalOpts,
+				);
 			} catch (err) {
 				handleError(err, globalOpts);
 			}
