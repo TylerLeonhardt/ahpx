@@ -19,6 +19,10 @@ import {
 	projectConfigPath,
 } from "./config/index.js";
 import type { AhpxConfig } from "./config/index.js";
+import { PromptRenderer } from "./output/index.js";
+import { PermissionHandler } from "./permissions/index.js";
+import type { PermissionMode } from "./permissions/index.js";
+import { TurnController } from "./prompt/index.js";
 import { ActionType } from "./protocol/actions.js";
 import { SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
 import type { SessionRecord } from "./session/index.js";
@@ -703,4 +707,453 @@ session
 		}
 	});
 
-program.parse();
+// ── Prompt Helpers ───────────────────────────────────────────────────────────
+
+/** Read prompt text from a file path, or from stdin if path is "-". */
+async function readPromptFile(filePath: string): Promise<string> {
+	if (filePath === "-") {
+		return readStdin();
+	}
+	const { readFile } = await import("node:fs/promises");
+	const resolved = path.resolve(filePath);
+	return (await readFile(resolved, "utf-8")).trim();
+}
+
+/** Read all data from stdin (for piped input). */
+function readStdin(): Promise<string> {
+	return new Promise((resolve, reject) => {
+		let data = "";
+		process.stdin.setEncoding("utf-8");
+		process.stdin.on("data", (chunk) => {
+			data += chunk;
+		});
+		process.stdin.on("end", () => resolve(data.trim()));
+		process.stdin.on("error", reject);
+	});
+}
+
+/** Detect if stdin is a pipe (not a TTY). */
+function stdinIsPipe(): boolean {
+	return !process.stdin.isTTY;
+}
+
+/** Resolve permission mode from flags and config. */
+function resolvePermissionMode(
+	opts: { approveAll?: boolean; approveReads?: boolean; denyAll?: boolean },
+	config: AhpxConfig,
+): PermissionMode {
+	if (opts.approveAll) return "approve-all";
+	if (opts.approveReads) return "approve-reads";
+	if (opts.denyAll) return "deny-all";
+	return config.permissions ?? "approve-reads";
+}
+
+/**
+ * Core prompt execution logic shared by `prompt`, implicit prompt, and `exec`.
+ */
+async function runPrompt(opts: {
+	text: string;
+	server?: string;
+	sessionName?: string;
+	approveAll?: boolean;
+	approveReads?: boolean;
+	denyAll?: boolean;
+	provider?: string;
+	model?: string;
+	/** If true, create a temporary session (exec mode). */
+	oneShot?: boolean;
+}): Promise<void> {
+	const config = await loadConfig();
+	const cwd = process.cwd();
+	const gitRoot = await findGitRoot(cwd);
+	const permMode = resolvePermissionMode(opts, config);
+
+	await withConnection(
+		{
+			server: opts.server,
+			config,
+		},
+		async (client, serverInfo) => {
+			let sessionUri: string;
+			let sessionRecord: SessionRecord | undefined;
+
+			if (opts.oneShot) {
+				// One-shot: create a temporary session
+				sessionUri = await createTempSession(client, opts, config, cwd);
+			} else {
+				// Try to resolve existing session
+				const resolved = await resolveOrCreateSession(client, serverInfo, opts, config, cwd, gitRoot);
+				sessionUri = resolved.sessionUri;
+				sessionRecord = resolved.record;
+			}
+
+			// Run the turn
+			const renderer = new PromptRenderer();
+			const permHandler = new PermissionHandler(permMode);
+			const controller = new TurnController(client, sessionUri, renderer, permHandler);
+
+			// Set up Ctrl+C handling
+			let sigintCount = 0;
+			const sigintHandler = () => {
+				sigintCount++;
+				if (sigintCount >= 2) {
+					process.exit(130);
+				}
+				console.error(pc.dim("\nCancelling..."));
+				controller.cancel();
+			};
+			process.on("SIGINT", sigintHandler);
+
+			try {
+				const result = await controller.prompt(opts.text);
+
+				// Update session record for persistent sessions
+				if (sessionRecord) {
+					await sessionStore.update(sessionRecord.id, {
+						lastPromptAt: new Date().toISOString(),
+						title: client.state.getSession(sessionUri)?.summary.title ?? sessionRecord.title,
+					});
+				}
+
+				if (result.state === "error") {
+					process.exitCode = 1;
+				}
+			} finally {
+				process.removeListener("SIGINT", sigintHandler);
+
+				// Dispose temporary session in one-shot mode
+				if (opts.oneShot) {
+					try {
+						await client.disposeSession(sessionUri);
+					} catch {
+						// Best effort
+					}
+				}
+			}
+		},
+	);
+}
+
+/** Create a temporary session for one-shot exec mode. */
+async function createTempSession(
+	client: AhpClient,
+	opts: { provider?: string; model?: string },
+	config: AhpxConfig,
+	cwd: string,
+): Promise<string> {
+	const rootState = client.state.root;
+	const provider =
+		opts.provider ?? config.defaultProvider ?? (rootState.agents.length > 0 ? rootState.agents[0].provider : undefined);
+	if (!provider) {
+		throw new Error("No agent provider available. Specify one with --provider.");
+	}
+	const sessionId = randomUUID();
+	const sessionUri = `${provider}:/${sessionId}`;
+	await client.createSession(sessionUri, provider, opts.model ?? config.defaultModel, cwd);
+	await client.subscribe(sessionUri);
+	await waitForReady(client, sessionUri);
+	return sessionUri;
+}
+
+/** Resolve an existing session or auto-create one. */
+async function resolveOrCreateSession(
+	client: AhpClient,
+	serverInfo: { name: string; url: string },
+	opts: { sessionName?: string; provider?: string; model?: string },
+	config: AhpxConfig,
+	cwd: string,
+	gitRoot: string | undefined,
+): Promise<{ sessionUri: string; record: SessionRecord }> {
+	const record = await resolveSession({
+		serverName: serverInfo.name,
+		cwd,
+		name: opts.sessionName,
+		store: sessionStore,
+	});
+
+	if (record) {
+		await client.subscribe(record.sessionUri);
+		return { sessionUri: record.sessionUri, record };
+	}
+
+	// Auto-create a session
+	const rootState = client.state.root;
+	const provider =
+		opts.provider ?? config.defaultProvider ?? (rootState.agents.length > 0 ? rootState.agents[0].provider : undefined);
+	if (!provider) {
+		throw new Error("No agent provider available. Specify one with --provider.");
+	}
+	const sessionId = randomUUID();
+	const sessionUri = `${provider}:/${sessionId}`;
+
+	console.error(pc.dim(`Creating session on ${serverInfo.name}...`));
+	await client.createSession(sessionUri, provider, opts.model ?? config.defaultModel, cwd);
+	await client.subscribe(sessionUri);
+	await waitForReady(client, sessionUri);
+
+	const newRecord: SessionRecord = {
+		id: sessionId,
+		sessionUri,
+		serverName: serverInfo.name,
+		serverUrl: serverInfo.url,
+		provider,
+		model: opts.model ?? config.defaultModel ?? client.state.getSession(sessionUri)?.summary.model,
+		name: opts.sessionName,
+		workingDirectory: cwd,
+		gitRoot,
+		title: client.state.getSession(sessionUri)?.summary.title,
+		status: "active",
+		createdAt: new Date().toISOString(),
+	};
+	await sessionStore.save(newRecord);
+	return { sessionUri, record: newRecord };
+}
+
+/** Wait for session/ready or session/creationFailed. */
+function waitForReady(client: AhpClient, sessionUri: string): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			reject(new Error("Timed out waiting for session to be ready"));
+		}, 30_000);
+
+		client.on("action", (envelope) => {
+			const action = envelope.action;
+			if (action.type === ActionType.SessionReady && action.session === sessionUri) {
+				clearTimeout(timeout);
+				resolve();
+			} else if (action.type === ActionType.SessionCreationFailed && action.session === sessionUri) {
+				clearTimeout(timeout);
+				const sessionState = client.state.getSession(sessionUri);
+				const errMsg = sessionState?.creationError?.message ?? "Unknown error";
+				reject(new Error(`Session creation failed: ${errMsg}`));
+			}
+		});
+
+		// Check if already ready from snapshot
+		const sessionState = client.state.getSession(sessionUri);
+		if (sessionState?.lifecycle === "ready") {
+			clearTimeout(timeout);
+			resolve();
+		} else if (sessionState?.lifecycle === "creationFailed") {
+			clearTimeout(timeout);
+			const errMsg = sessionState?.creationError?.message ?? "Unknown error";
+			reject(new Error(`Session creation failed: ${errMsg}`));
+		}
+	});
+}
+
+// ── prompt ───────────────────────────────────────────────────────────────────
+
+program
+	.command("prompt")
+	.description("Send a prompt to an agent session")
+	.argument("<text...>", "Prompt text")
+	.option("-s, --server <name>", "Server name or WebSocket URL")
+	.option("-n, --session-name <name>", "Session name for scoped lookup")
+	.option("-f, --file <path>", "Read prompt from file (- for stdin)")
+	.option("--approve-all", "Auto-approve all permissions")
+	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
+	.option("--deny-all", "Auto-deny all permissions")
+	.action(
+		async (
+			textParts: string[],
+			opts: {
+				server?: string;
+				sessionName?: string;
+				file?: string;
+				approveAll?: boolean;
+				approveReads?: boolean;
+				denyAll?: boolean;
+			},
+		) => {
+			try {
+				let text = textParts.join(" ");
+				if (opts.file) {
+					text = await readPromptFile(opts.file);
+				}
+				if (!text) {
+					console.error(pc.red("✗"), "No prompt text provided.");
+					process.exitCode = 1;
+					return;
+				}
+				await runPrompt({ text, ...opts });
+			} catch (err) {
+				console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
+				process.exitCode = 1;
+			}
+		},
+	);
+
+// ── exec ─────────────────────────────────────────────────────────────────────
+
+program
+	.command("exec")
+	.description("One-shot prompt: create temp session, prompt, dispose")
+	.argument("<text...>", "Prompt text")
+	.option("-s, --server <name>", "Server name or WebSocket URL")
+	.option("-p, --provider <provider>", "Agent provider (e.g. copilot)")
+	.option("-m, --model <model>", "Model to use")
+	.option("--approve-all", "Auto-approve all permissions")
+	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
+	.option("--deny-all", "Auto-deny all permissions")
+	.action(
+		async (
+			textParts: string[],
+			opts: {
+				server?: string;
+				provider?: string;
+				model?: string;
+				approveAll?: boolean;
+				approveReads?: boolean;
+				denyAll?: boolean;
+			},
+		) => {
+			try {
+				const text = textParts.join(" ");
+				if (!text) {
+					console.error(pc.red("✗"), "No prompt text provided.");
+					process.exitCode = 1;
+					return;
+				}
+				await runPrompt({ text, oneShot: true, ...opts });
+			} catch (err) {
+				console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
+				process.exitCode = 1;
+			}
+		},
+	);
+
+// ── cancel ───────────────────────────────────────────────────────────────────
+
+program
+	.command("cancel")
+	.description("Cancel the active turn in a session")
+	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-s, --server <name>", "Server name")
+	.action(async (opts: { sessionName?: string; server?: string }) => {
+		try {
+			const config = await loadConfig();
+			const serverName = await resolveServerName(opts.server, config);
+			const cwd = process.cwd();
+
+			const record = await resolveSession({
+				serverName,
+				cwd,
+				name: opts.sessionName,
+				store: sessionStore,
+			});
+
+			if (!record) {
+				console.log(pc.dim("No active session found. Nothing to cancel."));
+				return;
+			}
+
+			await withConnection({ server: opts.server, config }, async (client) => {
+				await client.subscribe(record.sessionUri);
+				const sessionState = client.state.getSession(record.sessionUri);
+
+				if (!sessionState?.activeTurn) {
+					console.log(pc.dim("No active turn. Nothing to cancel."));
+					return;
+				}
+
+				client.dispatchAction({
+					type: ActionType.SessionTurnCancelled,
+					session: record.sessionUri,
+					turnId: sessionState.activeTurn.id,
+				});
+				console.log(pc.green("✓"), "Cancellation dispatched.");
+			});
+		} catch (err) {
+			console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
+			process.exitCode = 1;
+		}
+	});
+
+// ── Implicit prompt (bare text as default verb) ─────────────────────────────
+
+// Check for piped stdin (non-TTY) without explicit command
+async function handleImplicitPrompt(): Promise<boolean> {
+	const args = process.argv.slice(2);
+
+	// If no args but stdin is piped, read from stdin
+	if (args.length === 0 && stdinIsPipe()) {
+		const text = await readStdin();
+		if (text) {
+			await runPrompt({ text });
+			return true;
+		}
+		return false;
+	}
+
+	// If the first arg doesn't match any known command, treat as implicit prompt
+	if (args.length > 0) {
+		const knownCommands = new Set([
+			"connect",
+			"server",
+			"config",
+			"session",
+			"prompt",
+			"exec",
+			"cancel",
+			"help",
+			"--help",
+			"-h",
+			"--version",
+			"-V",
+		]);
+		if (!knownCommands.has(args[0]) && !args[0].startsWith("-")) {
+			// Check for --file flag in the args
+			const fileIdx = args.indexOf("--file");
+			const fileFlagIdx = args.indexOf("-f");
+			const flagIdx = fileIdx !== -1 ? fileIdx : fileFlagIdx;
+			let text: string;
+
+			if (flagIdx !== -1 && flagIdx + 1 < args.length) {
+				text = await readPromptFile(args[flagIdx + 1]);
+			} else {
+				// Collect all positional args (stop at flags)
+				const textParts: string[] = [];
+				const opts: Record<string, string | boolean> = {};
+				let i = 0;
+				while (i < args.length) {
+					if (args[i] === "--server" || args[i] === "-s") {
+						opts.server = args[++i];
+					} else if (args[i] === "--session-name" || args[i] === "-n") {
+						opts.sessionName = args[++i];
+					} else if (args[i] === "--approve-all") {
+						opts.approveAll = true;
+					} else if (args[i] === "--approve-reads") {
+						opts.approveReads = true;
+					} else if (args[i] === "--deny-all") {
+						opts.denyAll = true;
+					} else if (!args[i].startsWith("-")) {
+						textParts.push(args[i]);
+					}
+					i++;
+				}
+				text = textParts.join(" ");
+			}
+
+			if (text) {
+				await runPrompt({ text });
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+// Main entry: try implicit prompt first, then fall back to commander
+(async () => {
+	try {
+		const handled = await handleImplicitPrompt();
+		if (!handled) {
+			program.parse();
+		}
+	} catch (err) {
+		console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
+		process.exitCode = 1;
+	}
+})();
