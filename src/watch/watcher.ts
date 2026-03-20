@@ -42,6 +42,7 @@ export interface SessionWatcherOptions {
  */
 export class SessionWatcher {
 	private onAction: ((envelope: IActionEnvelope) => void) | undefined;
+	private onDisconnect: (() => void) | undefined;
 	private stopped = false;
 	private resolveWatch: (() => void) | undefined;
 	private readonly statusOut: StatusOutput;
@@ -77,25 +78,29 @@ export class SessionWatcher {
 
 			this.client.on("action", this.onAction);
 
-			// Also listen for disconnect
-			const onDisconnect = () => {
+			this.onDisconnect = () => {
 				this.cleanup();
 				resolve();
 			};
-			this.client.once("disconnected", onDisconnect);
+			this.client.once("disconnected", this.onDisconnect);
 		});
 
-		// Subscribe to the session (gets current state snapshot)
-		await this.client.subscribe(this.sessionUri);
-		const sessionState = this.client.state.getSession(this.sessionUri);
+		try {
+			// Subscribe to the session (gets current state snapshot)
+			await this.client.subscribe(this.sessionUri);
+			const sessionState = this.client.state.getSession(this.sessionUri);
 
-		if (!sessionState) {
+			if (!sessionState) {
+				this.cleanup();
+				throw new Error(`Session ${this.sessionUri} not found after subscribe`);
+			}
+
+			// Show current state if there's an active turn
+			this.showCurrentState(sessionState);
+		} catch (err) {
 			this.cleanup();
-			throw new Error(`Session ${this.sessionUri} not found after subscribe`);
+			throw err;
 		}
-
-		// Show current state if there's an active turn
-		this.showCurrentState(sessionState);
 
 		return finished;
 	}
@@ -279,6 +284,11 @@ export class SessionWatcher {
 		if (this.onAction) {
 			this.client.removeListener("action", this.onAction);
 			this.onAction = undefined;
+		}
+
+		if (this.onDisconnect) {
+			this.client.removeListener("disconnected", this.onDisconnect);
+			this.onDisconnect = undefined;
 		}
 
 		if (this.resolveWatch) {
