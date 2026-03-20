@@ -1,5 +1,3 @@
-#!/usr/bin/env node
-
 /**
  * ahpx — Agent Host Protocol CLI
  *
