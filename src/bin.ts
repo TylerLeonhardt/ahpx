@@ -83,6 +83,16 @@ function parseTags(raw?: string[]): Record<string, string> | undefined {
 	return tags;
 }
 
+/** Parse --idle-timeout <seconds> into a validated positive integer. */
+function parseIdleTimeout(raw?: string): number | undefined {
+	if (raw === undefined) return undefined;
+	const seconds = Number.parseInt(raw, 10);
+	if (Number.isNaN(seconds) || seconds <= 0) {
+		throw new UsageError(`--idle-timeout must be a positive integer (got: "${raw}")`);
+	}
+	return seconds;
+}
+
 /** Whether to show spinners (text mode + TTY). */
 function spinnersEnabled(globalOpts: GlobalOpts): boolean {
 	return globalOpts.format === "text" && !!process.stdout.isTTY;
@@ -1363,7 +1373,12 @@ program
 					throw new UsageError("No prompt text provided.");
 				}
 				await runPrompt(
-					{ text, ...opts, tags: parseTags(opts.tag), idleTimeout: opts.idleTimeout ? Number.parseInt(opts.idleTimeout, 10) : undefined },
+					{
+						text,
+						...opts,
+						tags: parseTags(opts.tag),
+						idleTimeout: parseIdleTimeout(opts.idleTimeout),
+					},
 					globalOpts,
 				);
 			} catch (err) {
@@ -1417,7 +1432,7 @@ program
 						oneShot: true,
 						...opts,
 						tags: parseTags(opts.tag),
-						idleTimeout: opts.idleTimeout ? Number.parseInt(opts.idleTimeout, 10) : undefined,
+						idleTimeout: parseIdleTimeout(opts.idleTimeout),
 					},
 					globalOpts,
 				);
