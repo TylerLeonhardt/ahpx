@@ -69,6 +69,40 @@ describe("ProtocolLayer", () => {
 			expect(result.serverSeq).toBe(0);
 		});
 
+		it("sends workingDirectory in createSession request params", async () => {
+			const promise = protocol.request("createSession", {
+				session: "copilot:/test-session",
+				provider: "copilot",
+				model: "gpt-4o",
+				workingDirectory: "/tmp/my-project",
+			});
+
+			expect(mock.sent).toHaveLength(1);
+			const sent = mock.sent[0] as Record<string, unknown>;
+			expect(sent.method).toBe("createSession");
+			const params = sent.params as Record<string, unknown>;
+			expect(params.session).toBe("copilot:/test-session");
+			expect(params.workingDirectory).toBe("/tmp/my-project");
+
+			mock.receive({ jsonrpc: "2.0", id: 1, result: null });
+			const result = await promise;
+			expect(result).toBeNull();
+		});
+
+		it("omits workingDirectory from createSession when not provided", async () => {
+			const promise = protocol.request("createSession", {
+				session: "copilot:/test-session",
+				provider: "copilot",
+			});
+
+			const sent = mock.sent[0] as Record<string, unknown>;
+			const params = sent.params as Record<string, unknown>;
+			expect(params.workingDirectory).toBeUndefined();
+
+			mock.receive({ jsonrpc: "2.0", id: 1, result: null });
+			await promise;
+		});
+
 		it("rejects with RpcError on error response", async () => {
 			const promise = protocol.request("createSession", {
 				session: "copilot:/test",

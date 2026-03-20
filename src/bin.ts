@@ -1085,11 +1085,13 @@ async function runPrompt(
 		model?: string;
 		/** If true, create a temporary session (exec mode). */
 		oneShot?: boolean;
+		/** Working directory for session creation. Defaults to process.cwd(). */
+		cwd?: string;
 	},
 	globalOpts: GlobalOpts,
 ): Promise<void> {
 	const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
-	const cwd = process.cwd();
+	const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
 	const gitRoot = await findGitRoot(cwd);
 	const permMode = resolvePermissionMode(opts, cfg);
 	const formatter = formatterFromOpts(globalOpts);
@@ -1298,6 +1300,7 @@ program
 	.option("-s, --server <name>", "Server name or WebSocket URL")
 	.option("-n, --session-name <name>", "Session name for scoped lookup")
 	.option("-f, --file <path>", "Read prompt from file (- for stdin)")
+	.option("--cwd <dir>", "Working directory for auto-created sessions")
 	.option("--approve-all", "Auto-approve all permissions")
 	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
 	.option("--deny-all", "Auto-deny all permissions")
@@ -1308,6 +1311,7 @@ program
 				server?: string;
 				sessionName?: string;
 				file?: string;
+				cwd?: string;
 				approveAll?: boolean;
 				approveReads?: boolean;
 				denyAll?: boolean;
@@ -1341,6 +1345,7 @@ program
 	.option("-s, --server <name>", "Server name or WebSocket URL")
 	.option("-p, --provider <provider>", "Agent provider (e.g. copilot)")
 	.option("-m, --model <model>", "Model to use")
+	.option("--cwd <dir>", "Working directory for the session")
 	.option("--approve-all", "Auto-approve all permissions")
 	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
 	.option("--deny-all", "Auto-deny all permissions")
@@ -1351,6 +1356,7 @@ program
 				server?: string;
 				provider?: string;
 				model?: string;
+				cwd?: string;
 				approveAll?: boolean;
 				approveReads?: boolean;
 				denyAll?: boolean;
@@ -1723,6 +1729,8 @@ async function handleImplicitPrompt(): Promise<boolean> {
 			flags.server = args[++i];
 		} else if (args[i] === "--session-name" || args[i] === "-n") {
 			flags.sessionName = args[++i];
+		} else if (args[i] === "--cwd") {
+			flags.cwd = args[++i];
 		} else if (args[i] === "--approve-all") {
 			flags.approveAll = true;
 		} else if (args[i] === "--approve-reads") {
@@ -1774,6 +1782,7 @@ async function handleImplicitPrompt(): Promise<boolean> {
 						text,
 						server: typeof flags.server === "string" ? flags.server : undefined,
 						sessionName: typeof flags.sessionName === "string" ? flags.sessionName : undefined,
+						cwd: typeof flags.cwd === "string" ? flags.cwd : undefined,
 						approveAll: flags.approveAll === true ? true : undefined,
 						approveReads: flags.approveReads === true ? true : undefined,
 						denyAll: flags.denyAll === true ? true : undefined,
