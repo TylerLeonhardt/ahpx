@@ -509,4 +509,75 @@ describe("TurnController", () => {
 
 		await resultPromise;
 	});
+
+	it("resolves with idle_timeout when no actions arrive within idle timeout", async () => {
+		const { client } = createMockClient();
+		const cap = createCapture();
+		const renderer = new PromptRenderer(cap.out);
+		const handler = new PermissionHandler("approve-all", { output: cap.out });
+
+		const controller = new TurnController(client, SESSION_URI, renderer, handler);
+		const result = await controller.prompt("hello", undefined, { idleTimeout: 50 });
+
+		expect(result.state).toBe("idle_timeout");
+		expect(result.turnId).toBeDefined();
+	});
+
+	it("resets idle timer on each action", async () => {
+		const { client, dispatched, emitAction } = createMockClient();
+		const cap = createCapture();
+		const renderer = new PromptRenderer(cap.out);
+		const handler = new PermissionHandler("approve-all", { output: cap.out });
+
+		const controller = new TurnController(client, SESSION_URI, renderer, handler);
+		const resultPromise = controller.prompt("hello", undefined, { idleTimeout: 100 });
+
+		const turnId = (dispatched[0] as { turnId: string }).turnId;
+
+		// Send actions at 30ms intervals — each resets the 100ms timer
+		for (let i = 0; i < 5; i++) {
+			await new Promise((r) => setTimeout(r, 30));
+			emitAction({
+				type: ActionType.SessionDelta,
+				session: SESSION_URI,
+				turnId,
+				content: `chunk ${i}`,
+			});
+		}
+
+		// Complete before idle timeout fires
+		emitAction({
+			type: ActionType.SessionTurnComplete,
+			session: SESSION_URI,
+			turnId,
+		});
+
+		const result = await resultPromise;
+		expect(result.state).toBe("complete");
+		expect(result.responseText).toContain("chunk 0");
+	});
+
+	it("does not idle-timeout when no idleTimeout option is set", async () => {
+		const { client, dispatched, emitAction } = createMockClient();
+		const cap = createCapture();
+		const renderer = new PromptRenderer(cap.out);
+		const handler = new PermissionHandler("approve-all", { output: cap.out });
+
+		const controller = new TurnController(client, SESSION_URI, renderer, handler);
+		const resultPromise = controller.prompt("hello");
+
+		const turnId = (dispatched[0] as { turnId: string }).turnId;
+
+		// Wait a bit, then complete — should not timeout
+		await new Promise((r) => setTimeout(r, 50));
+
+		emitAction({
+			type: ActionType.SessionTurnComplete,
+			session: SESSION_URI,
+			turnId,
+		});
+
+		const result = await resultPromise;
+		expect(result.state).toBe("complete");
+	});
 });

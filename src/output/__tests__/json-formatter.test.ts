@@ -316,4 +316,51 @@ describe("JsonFormatter", () => {
 			}
 		});
 	});
+
+	describe("tags", () => {
+		it("includes tags in every envelope when provided", () => {
+			const cap = createCapture();
+			const fmt = new JsonFormatter(cap.out, false, { jobId: "abc", project: "myapp" });
+
+			fmt.onDelta("hello");
+			fmt.onToolCallStart("tc1", "shell");
+			fmt.onTurnComplete("done");
+
+			const envelopes = cap.envelopes();
+			expect(envelopes).toHaveLength(3);
+			for (const env of envelopes) {
+				expect(env.tags).toEqual({ jobId: "abc", project: "myapp" });
+			}
+		});
+
+		it("omits tags field when no tags provided", () => {
+			const cap = createCapture();
+			const fmt = new JsonFormatter(cap.out);
+
+			fmt.onDelta("hello");
+
+			const env = cap.envelopes()[0];
+			expect(env).not.toHaveProperty("tags");
+		});
+
+		it("omits tags field when tags is empty object", () => {
+			const cap = createCapture();
+			const fmt = new JsonFormatter(cap.out, false, {});
+
+			fmt.onDelta("hello");
+
+			const env = cap.envelopes()[0];
+			expect(env).not.toHaveProperty("tags");
+		});
+
+		it("preserves tag values with special characters", () => {
+			const cap = createCapture();
+			const fmt = new JsonFormatter(cap.out, false, { path: "/home/user/project=test", "key.with.dots": "value" });
+
+			fmt.onDelta("test");
+
+			const env = cap.envelopes()[0];
+			expect(env.tags).toEqual({ path: "/home/user/project=test", "key.with.dots": "value" });
+		});
+	});
 });

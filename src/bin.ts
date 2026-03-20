@@ -65,8 +65,32 @@ function parseGlobalOpts(cmd: Command): GlobalOpts {
 }
 
 /** Create an OutputFormatter from resolved global options. */
-function formatterFromOpts(globalOpts: GlobalOpts): OutputFormatter {
-	return createFormatter(globalOpts.format, { jsonStrict: globalOpts.jsonStrict });
+function formatterFromOpts(globalOpts: GlobalOpts, tags?: Record<string, string>): OutputFormatter {
+	return createFormatter(globalOpts.format, { jsonStrict: globalOpts.jsonStrict, tags });
+}
+
+/** Parse --tag key=value flags into a record. Throws UsageError on bad format. */
+function parseTags(raw?: string[]): Record<string, string> | undefined {
+	if (!raw || raw.length === 0) return undefined;
+	const tags: Record<string, string> = {};
+	for (const entry of raw) {
+		const eq = entry.indexOf("=");
+		if (eq <= 0) {
+			throw new UsageError(`Invalid --tag format: "${entry}". Expected key=value`);
+		}
+		tags[entry.slice(0, eq)] = entry.slice(eq + 1);
+	}
+	return tags;
+}
+
+/** Parse --idle-timeout <seconds> into a validated positive integer. */
+function parseIdleTimeout(raw?: string): number | undefined {
+	if (raw === undefined) return undefined;
+	const seconds = Number.parseInt(raw, 10);
+	if (Number.isNaN(seconds) || seconds <= 0) {
+		throw new UsageError(`--idle-timeout must be a positive integer (got: "${raw}")`);
+	}
+	return seconds;
 }
 
 /** Whether to show spinners (text mode + TTY). */
@@ -1093,6 +1117,10 @@ async function runPrompt(
 		oneShot?: boolean;
 		/** Working directory for session creation. Defaults to process.cwd(). */
 		cwd?: string;
+		/** Idle timeout in seconds. */
+		idleTimeout?: number;
+		/** Metadata tags to include in JSON output envelopes. */
+		tags?: Record<string, string>;
 	},
 	globalOpts: GlobalOpts,
 ): Promise<void> {
@@ -1100,7 +1128,7 @@ async function runPrompt(
 	const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
 	const gitRoot = await findGitRoot(cwd);
 	const permMode = resolvePermissionMode(opts, cfg);
-	const formatter = formatterFromOpts(globalOpts);
+	const formatter = formatterFromOpts(globalOpts, opts.tags);
 
 	await withConnection(
 		{
@@ -1148,7 +1176,9 @@ async function runPrompt(
 			process.on("SIGINT", sigintHandler);
 
 			try {
-				const result = await controller.prompt(opts.text);
+				const result = await controller.prompt(opts.text, undefined, {
+					idleTimeout: opts.idleTimeout ? opts.idleTimeout * 1000 : undefined,
+				});
 
 				// Update session record for persistent sessions
 				if (sessionRecord) {
@@ -1160,6 +1190,9 @@ async function runPrompt(
 
 				if (result.state === "error") {
 					process.exitCode = ExitCode.Error;
+				}
+				if (result.state === "idle_timeout") {
+					throw new TimeoutError(`Idle timeout: no events received for ${opts.idleTimeout} seconds`);
 				}
 			} finally {
 				process.removeListener("SIGINT", sigintHandler);
@@ -1310,6 +1343,8 @@ program
 	.option("--approve-all", "Auto-approve all permissions")
 	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
 	.option("--deny-all", "Auto-deny all permissions")
+	.option("--idle-timeout <seconds>", "Cancel if no events received within N seconds")
+	.option("--tag <key=value...>", "Add metadata tags to JSON events (repeatable)")
 	.action(
 		async (
 			textParts: string[],
@@ -1321,6 +1356,8 @@ program
 				approveAll?: boolean;
 				approveReads?: boolean;
 				denyAll?: boolean;
+				idleTimeout?: string;
+				tag?: string[];
 			},
 			cmd: Command,
 		) => {
@@ -1335,7 +1372,15 @@ program
 				if (!text) {
 					throw new UsageError("No prompt text provided.");
 				}
-				await runPrompt({ text, ...opts }, globalOpts);
+				await runPrompt(
+					{
+						text,
+						...opts,
+						tags: parseTags(opts.tag),
+						idleTimeout: parseIdleTimeout(opts.idleTimeout),
+					},
+					globalOpts,
+				);
 			} catch (err) {
 				handleError(err, globalOpts);
 			}
@@ -1355,6 +1400,8 @@ program
 	.option("--approve-all", "Auto-approve all permissions")
 	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
 	.option("--deny-all", "Auto-deny all permissions")
+	.option("--idle-timeout <seconds>", "Cancel if no events received within N seconds")
+	.option("--tag <key=value...>", "Add metadata tags to JSON events (repeatable)")
 	.action(
 		async (
 			textParts: string[],
@@ -1366,6 +1413,8 @@ program
 				approveAll?: boolean;
 				approveReads?: boolean;
 				denyAll?: boolean;
+				idleTimeout?: string;
+				tag?: string[];
 			},
 			cmd: Command,
 		) => {
@@ -1377,7 +1426,16 @@ program
 				if (!text) {
 					throw new UsageError("No prompt text provided.");
 				}
-				await runPrompt({ text, oneShot: true, ...opts }, globalOpts);
+				await runPrompt(
+					{
+						text,
+						oneShot: true,
+						...opts,
+						tags: parseTags(opts.tag),
+						idleTimeout: parseIdleTimeout(opts.idleTimeout),
+					},
+					globalOpts,
+				);
 			} catch (err) {
 				handleError(err, globalOpts);
 			}
