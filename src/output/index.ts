@@ -22,11 +22,11 @@ import { PromptRenderer } from "./renderer.js";
  */
 export function createFormatter(
 	format: OutputFormat,
-	options?: { out?: WritableOutput; err?: WritableOutput; jsonStrict?: boolean },
+	options?: { out?: WritableOutput; err?: WritableOutput; jsonStrict?: boolean; tags?: Record<string, string> },
 ): OutputFormatter {
 	switch (format) {
 		case "json":
-			return new JsonFormatter(options?.out, options?.jsonStrict);
+			return new JsonFormatter(options?.out, options?.jsonStrict, options?.tags);
 		case "quiet":
 			return new QuietFormatter(options?.out, options?.err);
 		default:

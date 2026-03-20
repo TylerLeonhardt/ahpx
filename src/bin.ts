@@ -65,8 +65,22 @@ function parseGlobalOpts(cmd: Command): GlobalOpts {
 }
 
 /** Create an OutputFormatter from resolved global options. */
-function formatterFromOpts(globalOpts: GlobalOpts): OutputFormatter {
-	return createFormatter(globalOpts.format, { jsonStrict: globalOpts.jsonStrict });
+function formatterFromOpts(globalOpts: GlobalOpts, tags?: Record<string, string>): OutputFormatter {
+	return createFormatter(globalOpts.format, { jsonStrict: globalOpts.jsonStrict, tags });
+}
+
+/** Parse --tag key=value flags into a record. Throws UsageError on bad format. */
+function parseTags(raw?: string[]): Record<string, string> | undefined {
+	if (!raw || raw.length === 0) return undefined;
+	const tags: Record<string, string> = {};
+	for (const entry of raw) {
+		const eq = entry.indexOf("=");
+		if (eq <= 0) {
+			throw new UsageError(`Invalid --tag format: "${entry}". Expected key=value`);
+		}
+		tags[entry.slice(0, eq)] = entry.slice(eq + 1);
+	}
+	return tags;
 }
 
 /** Whether to show spinners (text mode + TTY). */
@@ -1095,6 +1109,8 @@ async function runPrompt(
 		cwd?: string;
 		/** Idle timeout in seconds. */
 		idleTimeout?: number;
+		/** Metadata tags to include in JSON output envelopes. */
+		tags?: Record<string, string>;
 	},
 	globalOpts: GlobalOpts,
 ): Promise<void> {
@@ -1102,7 +1118,7 @@ async function runPrompt(
 	const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
 	const gitRoot = await findGitRoot(cwd);
 	const permMode = resolvePermissionMode(opts, cfg);
-	const formatter = formatterFromOpts(globalOpts);
+	const formatter = formatterFromOpts(globalOpts, opts.tags);
 
 	await withConnection(
 		{
@@ -1318,6 +1334,7 @@ program
 	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
 	.option("--deny-all", "Auto-deny all permissions")
 	.option("--idle-timeout <seconds>", "Cancel if no events received within N seconds")
+	.option("--tag <key=value...>", "Add metadata tags to JSON events (repeatable)")
 	.action(
 		async (
 			textParts: string[],
@@ -1330,6 +1347,7 @@ program
 				approveReads?: boolean;
 				denyAll?: boolean;
 				idleTimeout?: string;
+				tag?: string[];
 			},
 			cmd: Command,
 		) => {
@@ -1345,7 +1363,7 @@ program
 					throw new UsageError("No prompt text provided.");
 				}
 				await runPrompt(
-					{ text, ...opts, idleTimeout: opts.idleTimeout ? Number.parseInt(opts.idleTimeout, 10) : undefined },
+					{ text, ...opts, tags: parseTags(opts.tag), idleTimeout: opts.idleTimeout ? Number.parseInt(opts.idleTimeout, 10) : undefined },
 					globalOpts,
 				);
 			} catch (err) {
@@ -1368,6 +1386,7 @@ program
 	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
 	.option("--deny-all", "Auto-deny all permissions")
 	.option("--idle-timeout <seconds>", "Cancel if no events received within N seconds")
+	.option("--tag <key=value...>", "Add metadata tags to JSON events (repeatable)")
 	.action(
 		async (
 			textParts: string[],
@@ -1380,6 +1399,7 @@ program
 				approveReads?: boolean;
 				denyAll?: boolean;
 				idleTimeout?: string;
+				tag?: string[];
 			},
 			cmd: Command,
 		) => {
@@ -1396,6 +1416,7 @@ program
 						text,
 						oneShot: true,
 						...opts,
+						tags: parseTags(opts.tag),
 						idleTimeout: opts.idleTimeout ? Number.parseInt(opts.idleTimeout, 10) : undefined,
 					},
 					globalOpts,

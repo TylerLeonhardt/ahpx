@@ -33,6 +33,7 @@ export type JsonEventType =
 export interface JsonEnvelope {
 	type: JsonEventType;
 	timestamp: string;
+	tags?: Record<string, string>;
 	data: Record<string, unknown>;
 }
 
@@ -45,6 +46,7 @@ export class JsonFormatter implements OutputFormatter {
 	constructor(
 		private readonly out: WritableOutput = process.stdout,
 		private readonly strict: boolean = false,
+		private readonly tags?: Record<string, string>,
 	) {}
 
 	/** Whether strict mode is active (suppresses non-JSON stderr). */
@@ -116,6 +118,7 @@ export class JsonFormatter implements OutputFormatter {
 		const envelope: JsonEnvelope = {
 			type,
 			timestamp: new Date().toISOString(),
+			...(this.tags && Object.keys(this.tags).length > 0 ? { tags: this.tags } : {}),
 			data,
 		};
 		this.out.write(`${JSON.stringify(envelope)}\n`);
