@@ -65,7 +65,10 @@ export class Transport extends EventEmitter<TransportEvents> {
 				if (!settled) {
 					settled = true;
 					clearTimeout(timer);
-					reject(err);
+					// WebSocket errors (e.g. ECONNREFUSED) may have empty .message
+					const code = (err as NodeJS.ErrnoException).code;
+					const detail = err.message || code || "unknown error";
+					reject(new Error(`Connection to ${url} failed: ${detail}`));
 				}
 			});
 		});

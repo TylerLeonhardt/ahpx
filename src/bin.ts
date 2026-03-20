@@ -209,13 +209,19 @@ function outputResult(globalOpts: GlobalOpts, textFn: () => void, data: unknown)
  * All command actions should use this wrapper.
  */
 function handleError(err: unknown, globalOpts?: GlobalOpts): void {
-	const message = err instanceof Error ? err.message : String(err);
+	const raw = err instanceof Error ? err.message : String(err);
+	const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
+	const message = raw || code || "Unknown error";
 	const exitCode = err instanceof AhpxError ? err.exitCode : ExitCode.Error;
 
 	if (globalOpts?.format === "json") {
 		console.log(JSON.stringify({ error: message, exitCode }));
 	} else if (globalOpts?.format !== "quiet" || exitCode !== ExitCode.Success) {
 		console.error(pc.red("✗"), message);
+	}
+
+	if (globalOpts?.verbose && err instanceof Error && err.stack) {
+		console.error(pc.dim(err.stack));
 	}
 
 	process.exitCode = exitCode;
