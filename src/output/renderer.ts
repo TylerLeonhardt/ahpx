@@ -13,6 +13,7 @@ import type {
 	IUsageInfo,
 	StringOrMarkdown,
 } from "../protocol/state.js";
+import type { OutputFormatter } from "./format.js";
 
 /** Minimal info about a tool call ready for display. */
 export interface ToolCallInfo {
@@ -39,7 +40,7 @@ function textOf(v: StringOrMarkdown): string {
  * Call the `on*` methods as actions arrive from the server to
  * produce formatted output on the target stream.
  */
-export class PromptRenderer {
+export class PromptRenderer implements OutputFormatter {
 	private hasStreamedText = false;
 	private reasoningOpen = false;
 

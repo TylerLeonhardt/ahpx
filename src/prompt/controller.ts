@@ -8,7 +8,8 @@
 
 import { randomUUID } from "node:crypto";
 import type { AhpClient } from "../client/index.js";
-import type { PromptRenderer, ToolCallInfo } from "../output/renderer.js";
+import type { OutputFormatter } from "../output/format.js";
+import type { ToolCallInfo } from "../output/renderer.js";
 import type { PermissionHandler } from "../permissions/handler.js";
 import type { IActionEnvelope } from "../protocol/actions.js";
 import { ActionType } from "../protocol/actions.js";
@@ -46,7 +47,7 @@ export class TurnController {
 	constructor(
 		private readonly client: AhpClient,
 		private readonly sessionUri: URI,
-		private readonly renderer: PromptRenderer,
+		private readonly renderer: OutputFormatter,
 		private readonly permissionHandler: PermissionHandler,
 	) {}
 
