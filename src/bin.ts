@@ -2,6 +2,19 @@
 
 /**
  * ahpx — Agent Host Protocol CLI
+ *
+ * Usage:
+ *   ahpx <prompt>                  Send a prompt (implicit)
+ *   ahpx prompt <text>             Send a prompt (explicit)
+ *   ahpx exec <text>               One-shot prompt
+ *   ahpx session new               Create a new session
+ *   ahpx server add <name> --url   Save a server connection
+ *   ahpx connect [server]          Connect and show server info
+ *
+ * Examples:
+ *   ahpx "fix the failing tests"
+ *   ahpx --format json exec "summarize this repo"
+ *   echo "review changes" | ahpx
  */
 
 import { randomUUID } from "node:crypto";
@@ -9,6 +22,7 @@ import * as path from "node:path";
 import { Command } from "commander";
 import pc from "picocolors";
 import { AhpClient } from "./client/index.js";
+import { bashCompletion, fishCompletion, zshCompletion } from "./completions.js";
 import {
 	ConnectionStore,
 	ConnectionValidationError,
@@ -16,10 +30,13 @@ import {
 	initGlobalConfig,
 	isValidWsUrl,
 	loadConfig,
-	projectConfigPath,
+	loadConfigWithSources,
 } from "./config/index.js";
-import type { AhpxConfig } from "./config/index.js";
-import { PromptRenderer } from "./output/index.js";
+import type { AhpxConfig, ConfigSource } from "./config/index.js";
+import { AhpxError, ExitCode, NoSessionError, TimeoutError, UsageError } from "./errors.js";
+import { setVerbose } from "./logger.js";
+import { createFormatter, startSpinner } from "./output/index.js";
+import type { OutputFormat, OutputFormatter } from "./output/index.js";
 import { PermissionHandler } from "./permissions/index.js";
 import type { PermissionMode } from "./permissions/index.js";
 import { TurnController } from "./prompt/index.js";
@@ -30,10 +47,57 @@ import type { SessionRecord } from "./session/index.js";
 const store = new ConnectionStore();
 const sessionStore = new SessionStore();
 
+// ── Global options (parsed before Commander routes to a subcommand) ──────────
+
+interface GlobalOpts {
+	format: OutputFormat;
+	jsonStrict: boolean;
+	verbose: boolean;
+}
+
+function parseGlobalOpts(cmd: Command): GlobalOpts {
+	const opts = cmd.optsWithGlobals();
+	return {
+		format: opts.format ?? "text",
+		jsonStrict: opts.jsonStrict ?? false,
+		verbose: opts.verbose ?? false,
+	};
+}
+
+/** Create an OutputFormatter from resolved global options. */
+function formatterFromOpts(globalOpts: GlobalOpts): OutputFormatter {
+	return createFormatter(globalOpts.format, { jsonStrict: globalOpts.jsonStrict });
+}
+
+/** Whether to show spinners (text mode + TTY). */
+function spinnersEnabled(globalOpts: GlobalOpts): boolean {
+	return globalOpts.format === "text" && !!process.stdout.isTTY;
+}
+
+// ── Program ──────────────────────────────────────────────────────────────────
+
 const program = new Command()
 	.name("ahpx")
-	.description("Agent Host Protocol CLI — manage AHP server connections, sessions, and agent interactions")
-	.version("0.1.0");
+	.description(
+		`Agent Host Protocol CLI — manage AHP server connections, sessions, and agent interactions
+
+Usage:
+  ahpx <prompt>                  Send a prompt (implicit)
+  ahpx prompt <text>             Send a prompt (explicit)
+  ahpx exec <text>               One-shot prompt
+  ahpx session new               Create a new session
+  ahpx server add <name> --url   Save a server connection
+  ahpx connect [server]          Connect and show server info
+
+Examples:
+  ahpx "fix the failing tests"
+  ahpx --format json exec "summarize this repo"
+  echo "review changes" | ahpx`,
+	)
+	.version("0.1.0")
+	.option("--format <format>", "Output format: text, json, or quiet", "text")
+	.option("--json-strict", "Suppress non-JSON stderr output (only with --format json)")
+	.option("-v, --verbose", "Enable debug logging to stderr");
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -55,7 +119,10 @@ async function resolveTarget(target?: string): Promise<{ url: string; token?: st
 	if (target) {
 		const conn = await store.get(target);
 		if (!conn) {
-			throw new Error(`Unknown connection "${target}". Run ${pc.bold("ahpx server list")} to see saved connections.`);
+			throw new AhpxError(
+				`Unknown connection "${target}". Run ${pc.bold("ahpx server list")} to see saved connections.`,
+				ExitCode.Error,
+			);
 		}
 		return { url: conn.url, token: conn.token };
 	}
@@ -63,14 +130,15 @@ async function resolveTarget(target?: string): Promise<{ url: string; token?: st
 	// No argument — try default
 	const def = await store.getDefault();
 	if (!def) {
-		throw new Error(
+		throw new AhpxError(
 			`No server specified and no default is set.\nRun ${pc.bold("ahpx server add <name> --url <ws://...> --default")} to save one.`,
+			ExitCode.Error,
 		);
 	}
 	return { url: def.url, token: def.token };
 }
 
-/** Print server information after a successful connect. */
+/** Print server information after a successful connect (text mode). */
 function printServerInfo(
 	client: AhpClient,
 	result: { protocolVersion: number; serverSeq: number; defaultDirectory?: string },
@@ -103,6 +171,56 @@ function printServerInfo(
 	}
 }
 
+/** Format server info as a JSON-serializable object. */
+function serverInfoJson(
+	client: AhpClient,
+	result: { protocolVersion: number; serverSeq: number; defaultDirectory?: string },
+): Record<string, unknown> {
+	const rootState = client.state.root;
+	return {
+		protocolVersion: result.protocolVersion,
+		serverSeq: result.serverSeq,
+		defaultDirectory: result.defaultDirectory,
+		agents: rootState.agents.map((a) => ({
+			provider: a.provider,
+			displayName: a.displayName,
+			models: a.models.map((m) => ({ id: m.id, name: m.name })),
+		})),
+		activeSessions: rootState.activeSessions,
+	};
+}
+
+/** Output data respecting the chosen format. */
+function outputResult(globalOpts: GlobalOpts, textFn: () => void, data: unknown): void {
+	if (globalOpts.format === "json") {
+		console.log(JSON.stringify(data));
+	} else if (globalOpts.format === "quiet") {
+		// quiet mode for non-prompt commands: output JSON for machine parsing
+		console.log(JSON.stringify(data));
+	} else {
+		textFn();
+	}
+}
+
+// ── Error handling ───────────────────────────────────────────────────────────
+
+/**
+ * Catch and exit with the correct exit code.
+ * All command actions should use this wrapper.
+ */
+function handleError(err: unknown, globalOpts?: GlobalOpts): void {
+	const message = err instanceof Error ? err.message : String(err);
+	const exitCode = err instanceof AhpxError ? err.exitCode : ExitCode.Error;
+
+	if (globalOpts?.format === "json") {
+		console.log(JSON.stringify({ error: message, exitCode }));
+	} else if (globalOpts?.format !== "quiet" || exitCode !== ExitCode.Success) {
+		console.error(pc.red("✗"), message);
+	}
+
+	process.exitCode = exitCode;
+}
+
 // ── connect ──────────────────────────────────────────────────────────────────
 
 program
@@ -110,7 +228,10 @@ program
 	.description("Connect to an AHP server and print server info")
 	.argument("[target]", "WebSocket URL or saved connection name (uses default if omitted)")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
-	.action(async (target: string | undefined, opts: { timeout: string }) => {
+	.action(async (target: string | undefined, opts: { timeout: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
 		const client = new AhpClient({
 			connectTimeout: Number.parseInt(opts.timeout, 10),
 			initialSubscriptions: ["agenthost:/root"],
@@ -118,19 +239,24 @@ program
 
 		try {
 			const { url, token } = await resolveTarget(target);
+			const spinner = startSpinner(`Connecting to ${url}...`, spinnersEnabled(globalOpts));
 
-			console.log(pc.dim(`Connecting to ${url}...`));
-			const result = await client.connect(url);
+			try {
+				const result = await client.connect(url);
+				spinner.stop();
 
-			// If the connection profile had a token, authenticate automatically
-			if (token) {
-				await client.authenticate(url, token);
+				// If the connection profile had a token, authenticate automatically
+				if (token) {
+					await client.authenticate(url, token);
+				}
+
+				outputResult(globalOpts, () => printServerInfo(client, result), serverInfoJson(client, result));
+			} catch (err) {
+				spinner.stop();
+				throw err;
 			}
-
-			printServerInfo(client, result);
 		} catch (err) {
-			console.error(pc.red("✗ Failed to connect:"), err instanceof Error ? err.message : String(err));
-			process.exitCode = 1;
+			handleError(err, globalOpts);
 		} finally {
 			await client.disconnect();
 		}
@@ -147,7 +273,10 @@ server
 	.requiredOption("--url <url>", "WebSocket URL (ws:// or wss://)")
 	.option("--token <token>", "Authentication token")
 	.option("--default", "Set as the default server")
-	.action(async (name: string, opts: { url: string; token?: string; default?: boolean }) => {
+	.action(async (name: string, opts: { url: string; token?: string; default?: boolean }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
 		try {
 			await store.add({
 				name,
@@ -155,16 +284,21 @@ server
 				token: opts.token,
 				default: opts.default ?? false,
 			});
-			console.log(pc.green("✓"), `Saved connection ${pc.bold(name)} → ${pc.dim(opts.url)}`);
-			if (opts.default) {
-				console.log(pc.dim("  Set as default server"));
-			}
+			outputResult(
+				globalOpts,
+				() => {
+					console.log(pc.green("✓"), `Saved connection ${pc.bold(name)} → ${pc.dim(opts.url)}`);
+					if (opts.default) {
+						console.log(pc.dim("  Set as default server"));
+					}
+				},
+				{ name, url: opts.url, default: opts.default ?? false },
+			);
 		} catch (err) {
 			if (err instanceof ConnectionValidationError) {
-				console.error(pc.red("✗"), err.message);
-				process.exitCode = 1;
+				handleError(new UsageError(err.message), globalOpts);
 			} else {
-				throw err;
+				handleError(err, globalOpts);
 			}
 		}
 	});
@@ -172,24 +306,37 @@ server
 server
 	.command("list")
 	.description("List saved connections")
-	.action(async () => {
-		const connections = await store.list();
+	.action(async (_opts: Record<string, unknown>, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
 
-		if (connections.length === 0) {
-			console.log(pc.dim("No saved connections. Run"), pc.bold("ahpx server add"), pc.dim("to add one."));
-			return;
-		}
+		try {
+			const connections = await store.list();
 
-		// Table header
-		const nameW = Math.max(4, ...connections.map((c) => c.name.length));
-		const urlW = Math.max(3, ...connections.map((c) => c.url.length));
+			outputResult(
+				globalOpts,
+				() => {
+					if (connections.length === 0) {
+						console.log(pc.dim("No saved connections. Run"), pc.bold("ahpx server add"), pc.dim("to add one."));
+						return;
+					}
 
-		console.log(`  ${pc.bold("Name".padEnd(nameW))}  ${pc.bold("URL".padEnd(urlW))}  ${pc.bold("Default")}`);
-		console.log(`  ${"─".repeat(nameW)}  ${"─".repeat(urlW)}  ${"─".repeat(7)}`);
+					// Table header
+					const nameW = Math.max(4, ...connections.map((c) => c.name.length));
+					const urlW = Math.max(3, ...connections.map((c) => c.url.length));
 
-		for (const c of connections) {
-			const def = c.default ? pc.green("  ✓") : pc.dim("  ·");
-			console.log(`  ${pc.cyan(c.name.padEnd(nameW))}  ${c.url.padEnd(urlW)}  ${def}`);
+					console.log(`  ${pc.bold("Name".padEnd(nameW))}  ${pc.bold("URL".padEnd(urlW))}  ${pc.bold("Default")}`);
+					console.log(`  ${"─".repeat(nameW)}  ${"─".repeat(urlW)}  ${"─".repeat(7)}`);
+
+					for (const c of connections) {
+						const def = c.default ? pc.green("  ✓") : pc.dim("  ·");
+						console.log(`  ${pc.cyan(c.name.padEnd(nameW))}  ${c.url.padEnd(urlW)}  ${def}`);
+					}
+				},
+				connections.map((c) => ({ name: c.name, url: c.url, default: c.default ?? false })),
+			);
+		} catch (err) {
+			handleError(err, globalOpts);
 		}
 	});
 
@@ -197,21 +344,28 @@ server
 	.command("remove")
 	.description("Remove a saved connection")
 	.argument("<name>", "Connection name to remove")
-	.action(async (name: string) => {
-		const conn = await store.get(name);
-		if (!conn) {
-			console.error(pc.red("✗"), `Connection "${name}" not found`);
-			process.exitCode = 1;
-			return;
-		}
+	.action(async (name: string, _opts: Record<string, unknown>, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
 
-		if (conn.default) {
-			console.log(pc.yellow("⚠"), `"${name}" is the default server.`);
-		}
+		try {
+			const conn = await store.get(name);
+			if (!conn) {
+				throw new AhpxError(`Connection "${name}" not found`, ExitCode.Error);
+			}
 
-		const removed = await store.remove(name);
-		if (removed) {
-			console.log(pc.green("✓"), `Removed connection ${pc.bold(name)}`);
+			if (conn.default && globalOpts.format === "text") {
+				console.log(pc.yellow("⚠"), `"${name}" is the default server.`);
+			}
+
+			const removed = await store.remove(name);
+			if (removed) {
+				outputResult(globalOpts, () => console.log(pc.green("✓"), `Removed connection ${pc.bold(name)}`), {
+					removed: name,
+				});
+			}
+		} catch (err) {
+			handleError(err, globalOpts);
 		}
 	});
 
@@ -220,7 +374,10 @@ server
 	.description("Test connectivity to a server")
 	.argument("<target>", "Connection name or WebSocket URL")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
-	.action(async (target: string, opts: { timeout: string }) => {
+	.action(async (target: string, opts: { timeout: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
 		const client = new AhpClient({
 			connectTimeout: Number.parseInt(opts.timeout, 10),
 			initialSubscriptions: ["agenthost:/root"],
@@ -228,18 +385,23 @@ server
 
 		try {
 			const { url, token } = await resolveTarget(target);
-			console.log(pc.dim(`Testing connection to ${url}...`));
+			const spinner = startSpinner(`Testing connection to ${url}...`, spinnersEnabled(globalOpts));
 
-			const result = await client.connect(url);
+			try {
+				const result = await client.connect(url);
+				spinner.stop();
 
-			if (token) {
-				await client.authenticate(url, token);
+				if (token) {
+					await client.authenticate(url, token);
+				}
+
+				outputResult(globalOpts, () => printServerInfo(client, result), serverInfoJson(client, result));
+			} catch (err) {
+				spinner.stop();
+				throw err;
 			}
-
-			printServerInfo(client, result);
 		} catch (err) {
-			console.error(pc.red("✗ Connection failed:"), err instanceof Error ? err.message : String(err));
-			process.exitCode = 1;
+			handleError(err, globalOpts);
 		} finally {
 			await client.disconnect();
 		}
@@ -251,31 +413,78 @@ const config = program.command("config").description("Manage ahpx configuration"
 
 config
 	.command("show")
-	.description("Print resolved configuration (global + project merged)")
-	.action(async () => {
-		const resolved = await loadConfig();
+	.description("Print resolved configuration with source annotations")
+	.action(async (_opts: Record<string, unknown>, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
 
-		console.log(pc.bold("Resolved configuration:"));
-		console.log(pc.dim(`  Global: ${globalConfigPath()}`));
-		console.log(pc.dim(`  Project: ${projectConfigPath()}`));
-		console.log();
+		try {
+			const result = await loadConfigWithSources({
+				overrides: buildConfigOverrides(globalOpts),
+			});
 
-		for (const [key, value] of Object.entries(resolved)) {
-			if (value !== undefined) {
-				console.log(`  ${pc.cyan(key)}: ${value}`);
-			}
+			const sourceLabel = (src: ConfigSource): string => {
+				switch (src) {
+					case "default":
+						return pc.dim("(default)");
+					case "global":
+						return pc.blue(`(global: ${result.globalPath})`);
+					case "project":
+						return pc.green(`(project: ${result.projectPath})`);
+					case "cli":
+						return pc.yellow("(cli flag)");
+				}
+			};
+
+			outputResult(
+				globalOpts,
+				() => {
+					console.log(pc.bold("Resolved configuration:"));
+					console.log(pc.dim(`  Global: ${result.globalPath}`));
+					console.log(pc.dim(`  Project: ${result.projectPath}`));
+					console.log();
+
+					for (const [key, value] of Object.entries(result.config)) {
+						if (value !== undefined) {
+							const src = result.sources[key] ?? "default";
+							console.log(`  ${pc.cyan(key)}: ${value}  ${sourceLabel(src)}`);
+						}
+					}
+				},
+				{
+					config: result.config,
+					sources: result.sources,
+					globalPath: result.globalPath,
+					projectPath: result.projectPath,
+				},
+			);
+		} catch (err) {
+			handleError(err, globalOpts);
 		}
 	});
 
 config
 	.command("init")
 	.description("Create ~/.ahpx/config.json with defaults")
-	.action(async () => {
-		const created = await initGlobalConfig();
-		if (created) {
-			console.log(pc.green("✓"), `Created ${pc.dim(globalConfigPath())}`);
-		} else {
-			console.log(pc.dim("Config already exists at"), globalConfigPath());
+	.action(async (_opts: Record<string, unknown>, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const created = await initGlobalConfig();
+			outputResult(
+				globalOpts,
+				() => {
+					if (created) {
+						console.log(pc.green("✓"), `Created ${pc.dim(globalConfigPath())}`);
+					} else {
+						console.log(pc.dim("Config already exists at"), globalConfigPath());
+					}
+				},
+				{ created, path: globalConfigPath() },
+			);
+		} catch (err) {
+			handleError(err, globalOpts);
 		}
 	});
 
@@ -305,24 +514,26 @@ function truncate(str: string, maxLen: number): string {
 }
 
 /** Resolve the server name (from flag, config, or default). */
-async function resolveServerName(serverFlag: string | undefined, config: AhpxConfig): Promise<string> {
+async function resolveServerName(serverFlag: string | undefined, cfg: AhpxConfig): Promise<string> {
 	if (serverFlag) {
 		// If it's a URL, we don't have a name — but check connection store first
 		if (isValidWsUrl(serverFlag)) return serverFlag;
 		const conn = await store.get(serverFlag);
 		if (!conn) {
-			throw new Error(
+			throw new AhpxError(
 				`Unknown connection "${serverFlag}". Run ${pc.bold("ahpx server list")} to see saved connections.`,
+				ExitCode.Error,
 			);
 		}
 		return conn.name;
 	}
 
-	if (config.defaultServer) {
-		const conn = await store.get(config.defaultServer);
+	if (cfg.defaultServer) {
+		const conn = await store.get(cfg.defaultServer);
 		if (!conn) {
-			throw new Error(
-				`Default server "${config.defaultServer}" not found. Run ${pc.bold("ahpx server list")} to check.`,
+			throw new AhpxError(
+				`Default server "${cfg.defaultServer}" not found. Run ${pc.bold("ahpx server list")} to check.`,
+				ExitCode.Error,
 			);
 		}
 		return conn.name;
@@ -330,8 +541,9 @@ async function resolveServerName(serverFlag: string | undefined, config: AhpxCon
 
 	const def = await store.getDefault();
 	if (!def) {
-		throw new Error(
+		throw new AhpxError(
 			`No server specified and no default is set.\nRun ${pc.bold("ahpx server add <name> --url <ws://...> --default")} to save one.`,
+			ExitCode.Error,
 		);
 	}
 	return def.name;
@@ -345,13 +557,13 @@ async function resolveSessionRecord(
 	if (id) {
 		const record = await sessionStore.get(id);
 		if (!record) {
-			throw new Error(`Session "${id}" not found.`);
+			throw new NoSessionError(`Session "${id}" not found.`);
 		}
 		return record;
 	}
 
-	const config = await loadConfig();
-	const serverName = await resolveServerName(opts.server, config);
+	const cfg = await loadConfig();
+	const serverName = await resolveServerName(opts.server, cfg);
 	const cwd = process.cwd();
 
 	const record = await resolveSession({
@@ -363,11 +575,24 @@ async function resolveSessionRecord(
 
 	if (!record) {
 		const hint = opts.name ? ` named "${opts.name}"` : "";
-		throw new Error(
+		throw new NoSessionError(
 			`No active session${hint} found for ${pc.bold(serverName)} in ${pc.dim(cwd)}.\nRun ${pc.bold("ahpx session new")} to create one.`,
 		);
 	}
 	return record;
+}
+
+/** Build config overrides from global CLI opts. */
+function buildConfigOverrides(globalOpts: GlobalOpts): Partial<AhpxConfig> {
+	const overrides: Partial<AhpxConfig> = {};
+	if (globalOpts.format !== "text") overrides.format = globalOpts.format;
+	if (globalOpts.verbose) overrides.verbose = true;
+	return overrides;
+}
+
+/** Apply global options (verbose mode, etc.) */
+function applyGlobalOpts(globalOpts: GlobalOpts): void {
+	setVerbose(globalOpts.verbose);
 }
 
 // ── session new ──────────────────────────────────────────────────────────────
@@ -382,25 +607,31 @@ session
 	.option("--cwd <dir>", "Working directory", process.cwd())
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
 	.action(
-		async (opts: {
-			server?: string;
-			provider?: string;
-			model?: string;
-			name?: string;
-			cwd: string;
-			timeout: string;
-		}) => {
+		async (
+			opts: {
+				server?: string;
+				provider?: string;
+				model?: string;
+				name?: string;
+				cwd: string;
+				timeout: string;
+			},
+			cmd: Command,
+		) => {
+			const globalOpts = parseGlobalOpts(cmd);
+			applyGlobalOpts(globalOpts);
+
 			try {
-				const config = await loadConfig();
-				const provider = opts.provider ?? config.defaultProvider;
-				const model = opts.model ?? config.defaultModel;
+				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+				const provider = opts.provider ?? cfg.defaultProvider;
+				const model = opts.model ?? cfg.defaultModel;
 				const cwd = path.resolve(opts.cwd);
 				const gitRoot = await findGitRoot(cwd);
 
 				await withConnection(
 					{
 						server: opts.server,
-						config,
+						config: cfg,
 						timeout: Number.parseInt(opts.timeout, 10),
 					},
 					async (client, serverInfo) => {
@@ -410,91 +641,115 @@ session
 							provider ?? (rootState.agents.length > 0 ? rootState.agents[0].provider : undefined);
 
 						if (!resolvedProvider) {
-							throw new Error("No agent provider available. Specify one with --provider or configure defaultProvider.");
+							throw new UsageError(
+								"No agent provider available. Specify one with --provider or configure defaultProvider.",
+							);
 						}
 
 						// Generate a session URI
 						const sessionId = randomUUID();
 						const sessionUri = `${resolvedProvider}:/${sessionId}`;
 
-						console.log(pc.dim(`Creating session on ${serverInfo.name}...`));
+						const spinner = startSpinner(`Creating session on ${serverInfo.name}...`, spinnersEnabled(globalOpts));
 
-						// Create the session
-						await client.createSession(sessionUri, resolvedProvider, model, cwd);
+						try {
+							// Create the session
+							await client.createSession(sessionUri, resolvedProvider, model, cwd);
 
-						// Subscribe to the session URI
-						await client.subscribe(sessionUri);
+							// Subscribe to the session URI
+							await client.subscribe(sessionUri);
 
-						// Wait for session/ready or session/creationFailed
-						const ready = await new Promise<boolean>((resolve, reject) => {
-							const timeout = setTimeout(() => {
-								reject(new Error("Timed out waiting for session to be ready"));
-							}, 30_000);
+							spinner.update("Waiting for session ready...");
 
-							client.on("action", (envelope) => {
-								const action = envelope.action;
-								if (action.type === ActionType.SessionReady && action.session === sessionUri) {
+							// Wait for session/ready or session/creationFailed
+							const ready = await new Promise<boolean>((resolve, reject) => {
+								const timeout = setTimeout(() => {
+									reject(new TimeoutError("Timed out waiting for session to be ready"));
+								}, 30_000);
+
+								client.on("action", (envelope) => {
+									const action = envelope.action;
+									if (action.type === ActionType.SessionReady && action.session === sessionUri) {
+										clearTimeout(timeout);
+										resolve(true);
+									} else if (action.type === ActionType.SessionCreationFailed && action.session === sessionUri) {
+										clearTimeout(timeout);
+										resolve(false);
+									}
+								});
+
+								// Also check if already ready from the snapshot
+								const sessionState = client.state.getSession(sessionUri);
+								if (sessionState?.lifecycle === "ready") {
 									clearTimeout(timeout);
 									resolve(true);
-								} else if (action.type === ActionType.SessionCreationFailed && action.session === sessionUri) {
+								} else if (sessionState?.lifecycle === "creationFailed") {
 									clearTimeout(timeout);
 									resolve(false);
 								}
 							});
 
-							// Also check if already ready from the snapshot
-							const sessionState = client.state.getSession(sessionUri);
-							if (sessionState?.lifecycle === "ready") {
-								clearTimeout(timeout);
-								resolve(true);
-							} else if (sessionState?.lifecycle === "creationFailed") {
-								clearTimeout(timeout);
-								resolve(false);
+							spinner.stop();
+
+							if (!ready) {
+								const sessionState = client.state.getSession(sessionUri);
+								const errMsg = sessionState?.creationError?.message ?? "Unknown error";
+								throw new AhpxError(`Session creation failed: ${errMsg}`, ExitCode.Error);
 							}
-						});
 
-						if (!ready) {
+							// Get the session state for extra info
 							const sessionState = client.state.getSession(sessionUri);
-							const errMsg = sessionState?.creationError?.message ?? "Unknown error";
-							throw new Error(`Session creation failed: ${errMsg}`);
+
+							// Save session record locally
+							const record: SessionRecord = {
+								id: sessionId,
+								sessionUri,
+								serverName: serverInfo.name,
+								serverUrl: serverInfo.url,
+								provider: resolvedProvider,
+								model: model ?? sessionState?.summary.model,
+								name: opts.name,
+								workingDirectory: cwd,
+								gitRoot,
+								title: sessionState?.summary.title,
+								status: "active",
+								createdAt: new Date().toISOString(),
+							};
+							await sessionStore.save(record);
+
+							outputResult(
+								globalOpts,
+								() => {
+									console.log(pc.green("✓ Session created"));
+									console.log();
+									console.log(pc.bold("ID:"), sessionId);
+									console.log(pc.bold("URI:"), pc.cyan(sessionUri));
+									console.log(pc.bold("Provider:"), resolvedProvider);
+									if (record.model) console.log(pc.bold("Model:"), record.model);
+									if (opts.name) console.log(pc.bold("Name:"), opts.name);
+									console.log(pc.bold("Directory:"), cwd);
+									if (gitRoot) console.log(pc.bold("Git root:"), gitRoot);
+									console.log(pc.bold("Status:"), pc.green("active"));
+								},
+								{
+									id: sessionId,
+									sessionUri,
+									provider: resolvedProvider,
+									model: record.model,
+									name: opts.name,
+									workingDirectory: cwd,
+									gitRoot,
+									status: "active",
+								},
+							);
+						} catch (err) {
+							spinner.stop();
+							throw err;
 						}
-
-						// Get the session state for extra info
-						const sessionState = client.state.getSession(sessionUri);
-
-						// Save session record locally
-						const record: SessionRecord = {
-							id: sessionId,
-							sessionUri,
-							serverName: serverInfo.name,
-							serverUrl: serverInfo.url,
-							provider: resolvedProvider,
-							model: model ?? sessionState?.summary.model,
-							name: opts.name,
-							workingDirectory: cwd,
-							gitRoot,
-							title: sessionState?.summary.title,
-							status: "active",
-							createdAt: new Date().toISOString(),
-						};
-						await sessionStore.save(record);
-
-						// Print session info
-						console.log(pc.green("✓ Session created"));
-						console.log();
-						console.log(pc.bold("ID:"), sessionId);
-						console.log(pc.bold("URI:"), pc.cyan(sessionUri));
-						console.log(pc.bold("Provider:"), resolvedProvider);
-						if (record.model) console.log(pc.bold("Model:"), record.model);
-						if (opts.name) console.log(pc.bold("Name:"), opts.name);
-						console.log(pc.bold("Directory:"), cwd);
-						if (gitRoot) console.log(pc.bold("Git root:"), gitRoot);
-						console.log(pc.bold("Status:"), pc.green("active"));
 					},
 				);
 			} catch (err) {
-				console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
-				process.exitCode = 1;
+				handleError(err, globalOpts);
 			}
 		},
 	);
@@ -506,54 +761,73 @@ session
 	.description("List sessions (default: active only)")
 	.option("-s, --server <name>", "Filter by server name")
 	.option("-a, --all", "Include closed sessions")
-	.action(async (opts: { server?: string; all?: boolean }) => {
+	.action(async (opts: { server?: string; all?: boolean }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
 		try {
 			const records = await sessionStore.list({
 				...(opts.server ? { serverName: opts.server } : {}),
 				...(opts.all ? {} : { status: "active" as const }),
 			});
 
-			if (records.length === 0) {
-				const hint = opts.all ? "" : " active";
-				console.log(
-					pc.dim(`No${hint} sessions found.`),
-					pc.dim("Run"),
-					pc.bold("ahpx session new"),
-					pc.dim("to create one."),
-				);
-				return;
-			}
+			outputResult(
+				globalOpts,
+				() => {
+					if (records.length === 0) {
+						const hint = opts.all ? "" : " active";
+						console.log(
+							pc.dim(`No${hint} sessions found.`),
+							pc.dim("Run"),
+							pc.bold("ahpx session new"),
+							pc.dim("to create one."),
+						);
+						return;
+					}
 
-			// Table columns
-			const idW = 8;
-			const nameW = Math.max(4, ...records.map((r) => (r.name ?? "—").length));
-			const provW = Math.max(8, ...records.map((r) => r.provider.length));
-			const modelW = Math.max(5, ...records.map((r) => (r.model ?? "—").length));
-			const titleW = 30;
-			const statusW = 6;
-			const ageW = 10;
+					// Table columns
+					const idW = 8;
+					const nameW = Math.max(4, ...records.map((r) => (r.name ?? "—").length));
+					const provW = Math.max(8, ...records.map((r) => r.provider.length));
+					const modelW = Math.max(5, ...records.map((r) => (r.model ?? "—").length));
+					const titleW = 30;
+					const statusW = 6;
+					const ageW = 10;
 
-			console.log(
-				`  ${pc.bold("ID".padEnd(idW))}  ${pc.bold("Name".padEnd(nameW))}  ${pc.bold("Provider".padEnd(provW))}  ${pc.bold("Model".padEnd(modelW))}  ${pc.bold("Title".padEnd(titleW))}  ${pc.bold("Status".padEnd(statusW))}  ${pc.bold("Age".padEnd(ageW))}`,
+					console.log(
+						`  ${pc.bold("ID".padEnd(idW))}  ${pc.bold("Name".padEnd(nameW))}  ${pc.bold("Provider".padEnd(provW))}  ${pc.bold("Model".padEnd(modelW))}  ${pc.bold("Title".padEnd(titleW))}  ${pc.bold("Status".padEnd(statusW))}  ${pc.bold("Age".padEnd(ageW))}`,
+					);
+					console.log(
+						`  ${"─".repeat(idW)}  ${"─".repeat(nameW)}  ${"─".repeat(provW)}  ${"─".repeat(modelW)}  ${"─".repeat(titleW)}  ${"─".repeat(statusW)}  ${"─".repeat(ageW)}`,
+					);
+
+					for (const r of records) {
+						const status = r.status === "active" ? pc.green("active") : pc.dim("closed");
+						const shortId = r.id.slice(0, 8);
+						const name = r.name ?? pc.dim("—");
+						const model = r.model ?? pc.dim("—");
+						const title = truncate(r.title ?? "—", titleW);
+
+						console.log(
+							`  ${pc.cyan(shortId.padEnd(idW))}  ${String(name).padEnd(nameW)}  ${r.provider.padEnd(provW)}  ${String(model).padEnd(modelW)}  ${title.padEnd(titleW)}  ${String(status).padEnd(statusW + 10)}  ${formatAge(r.createdAt)}`,
+						);
+					}
+				},
+				records.map((r) => ({
+					id: r.id,
+					sessionUri: r.sessionUri,
+					serverName: r.serverName,
+					provider: r.provider,
+					model: r.model,
+					name: r.name,
+					title: r.title,
+					status: r.status,
+					workingDirectory: r.workingDirectory,
+					createdAt: r.createdAt,
+				})),
 			);
-			console.log(
-				`  ${"─".repeat(idW)}  ${"─".repeat(nameW)}  ${"─".repeat(provW)}  ${"─".repeat(modelW)}  ${"─".repeat(titleW)}  ${"─".repeat(statusW)}  ${"─".repeat(ageW)}`,
-			);
-
-			for (const r of records) {
-				const status = r.status === "active" ? pc.green("active") : pc.dim("closed");
-				const shortId = r.id.slice(0, 8);
-				const name = r.name ?? pc.dim("—");
-				const model = r.model ?? pc.dim("—");
-				const title = truncate(r.title ?? "—", titleW);
-
-				console.log(
-					`  ${pc.cyan(shortId.padEnd(idW))}  ${String(name).padEnd(nameW)}  ${r.provider.padEnd(provW)}  ${String(model).padEnd(modelW)}  ${title.padEnd(titleW)}  ${String(status).padEnd(statusW + 10)}  ${formatAge(r.createdAt)}`,
-				);
-			}
 		} catch (err) {
-			console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
-			process.exitCode = 1;
+			handleError(err, globalOpts);
 		}
 	});
 
@@ -565,32 +839,40 @@ session
 	.argument("[id]", "Session ID")
 	.option("-n, --name <name>", "Session name (for scoped lookup)")
 	.option("-s, --server <name>", "Server name")
-	.action(async (id: string | undefined, opts: { name?: string; server?: string }) => {
+	.action(async (id: string | undefined, opts: { name?: string; server?: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
 		try {
 			const record = await resolveSessionRecord(id, opts);
 
-			console.log(pc.bold("Session Details"));
-			console.log();
-			console.log(pc.bold("ID:"), record.id);
-			console.log(pc.bold("URI:"), pc.cyan(record.sessionUri));
-			console.log(pc.bold("Server:"), record.serverName);
-			console.log(pc.bold("Provider:"), record.provider);
-			if (record.model) console.log(pc.bold("Model:"), record.model);
-			if (record.name) console.log(pc.bold("Name:"), record.name);
-			if (record.title) console.log(pc.bold("Title:"), record.title);
-			console.log(pc.bold("Status:"), record.status === "active" ? pc.green("active") : pc.dim("closed"));
-			if (record.workingDirectory) console.log(pc.bold("Directory:"), record.workingDirectory);
-			if (record.gitRoot) console.log(pc.bold("Git root:"), record.gitRoot);
-			console.log(pc.bold("Created:"), record.createdAt, pc.dim(`(${formatAge(record.createdAt)})`));
-			if (record.lastPromptAt) {
-				console.log(pc.bold("Last prompt:"), record.lastPromptAt, pc.dim(`(${formatAge(record.lastPromptAt)})`));
-			}
-			if (record.closedAt) {
-				console.log(pc.bold("Closed:"), record.closedAt, pc.dim(`(${formatAge(record.closedAt)})`));
-			}
+			outputResult(
+				globalOpts,
+				() => {
+					console.log(pc.bold("Session Details"));
+					console.log();
+					console.log(pc.bold("ID:"), record.id);
+					console.log(pc.bold("URI:"), pc.cyan(record.sessionUri));
+					console.log(pc.bold("Server:"), record.serverName);
+					console.log(pc.bold("Provider:"), record.provider);
+					if (record.model) console.log(pc.bold("Model:"), record.model);
+					if (record.name) console.log(pc.bold("Name:"), record.name);
+					if (record.title) console.log(pc.bold("Title:"), record.title);
+					console.log(pc.bold("Status:"), record.status === "active" ? pc.green("active") : pc.dim("closed"));
+					if (record.workingDirectory) console.log(pc.bold("Directory:"), record.workingDirectory);
+					if (record.gitRoot) console.log(pc.bold("Git root:"), record.gitRoot);
+					console.log(pc.bold("Created:"), record.createdAt, pc.dim(`(${formatAge(record.createdAt)})`));
+					if (record.lastPromptAt) {
+						console.log(pc.bold("Last prompt:"), record.lastPromptAt, pc.dim(`(${formatAge(record.lastPromptAt)})`));
+					}
+					if (record.closedAt) {
+						console.log(pc.bold("Closed:"), record.closedAt, pc.dim(`(${formatAge(record.closedAt)})`));
+					}
+				},
+				record,
+			);
 		} catch (err) {
-			console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
-			process.exitCode = 1;
+			handleError(err, globalOpts);
 		}
 	});
 
@@ -603,46 +885,60 @@ session
 	.option("-n, --name <name>", "Session name (for scoped lookup)")
 	.option("-s, --server <name>", "Server name")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
-	.action(async (id: string | undefined, opts: { name?: string; server?: string; timeout: string }) => {
+	.action(async (id: string | undefined, opts: { name?: string; server?: string; timeout: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
 		try {
 			const record = await resolveSessionRecord(id, opts);
 
 			if (record.status === "closed") {
-				console.log(pc.dim("Session is already closed."));
+				if (globalOpts.format === "text") {
+					console.log(pc.dim("Session is already closed."));
+				}
 				return;
 			}
 
 			// Try to dispose on server
+			const spinner = startSpinner("Disposing session...", spinnersEnabled(globalOpts));
 			try {
-				const config = await loadConfig();
+				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 				await withConnection(
 					{
 						server: record.serverName,
-						config,
+						config: cfg,
 						timeout: Number.parseInt(opts.timeout, 10),
 					},
 					async (client) => {
 						await client.disposeSession(record.sessionUri);
 					},
 				);
+				spinner.stop();
 			} catch {
+				spinner.stop();
 				// Server dispose may fail (server unreachable, session already gone)
 				// We still soft-close locally
-				console.log(pc.yellow("⚠"), "Could not dispose session on server (closing locally only)");
+				if (globalOpts.format === "text") {
+					console.log(pc.yellow("⚠"), "Could not dispose session on server (closing locally only)");
+				}
 			}
 
 			// Soft-close locally
 			const closed = await sessionStore.close(record.id);
 			if (closed) {
-				console.log(
-					pc.green("✓"),
-					`Closed session ${pc.bold(record.id.slice(0, 8))}`,
-					record.name ? pc.dim(`(${record.name})`) : "",
+				outputResult(
+					globalOpts,
+					() =>
+						console.log(
+							pc.green("✓"),
+							`Closed session ${pc.bold(record.id.slice(0, 8))}`,
+							record.name ? pc.dim(`(${record.name})`) : "",
+						),
+					{ closed: record.id },
 				);
 			}
 		} catch (err) {
-			console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
-			process.exitCode = 1;
+			handleError(err, globalOpts);
 		}
 	});
 
@@ -656,56 +952,82 @@ session
 	.option("-s, --server <name>", "Server name")
 	.option("-l, --limit <n>", "Maximum number of turns to show", "10")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
-	.action(async (id: string | undefined, opts: { name?: string; server?: string; limit: string; timeout: string }) => {
-		try {
-			const record = await resolveSessionRecord(id, opts);
-			const config = await loadConfig();
-			const limit = Number.parseInt(opts.limit, 10);
+	.action(
+		async (
+			id: string | undefined,
+			opts: { name?: string; server?: string; limit: string; timeout: string },
+			cmd: Command,
+		) => {
+			const globalOpts = parseGlobalOpts(cmd);
+			applyGlobalOpts(globalOpts);
 
-			await withConnection(
-				{
-					server: record.serverName,
-					config,
-					timeout: Number.parseInt(opts.timeout, 10),
-				},
-				async (client) => {
-					const result = await client.fetchTurns(record.sessionUri, undefined, limit);
+			try {
+				const record = await resolveSessionRecord(id, opts);
+				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+				const limit = Number.parseInt(opts.limit, 10);
 
-					if (result.turns.length === 0) {
-						console.log(pc.dim("No turns in this session."));
-						return;
-					}
+				await withConnection(
+					{
+						server: record.serverName,
+						config: cfg,
+						timeout: Number.parseInt(opts.timeout, 10),
+					},
+					async (client) => {
+						const result = await client.fetchTurns(record.sessionUri, undefined, limit);
 
-					console.log(
-						pc.bold(`History for session ${record.id.slice(0, 8)}`),
-						result.hasMore ? pc.dim(`(showing last ${result.turns.length}, more available)`) : "",
-					);
-					console.log();
+						outputResult(
+							globalOpts,
+							() => {
+								if (result.turns.length === 0) {
+									console.log(pc.dim("No turns in this session."));
+									return;
+								}
 
-					for (const turn of result.turns) {
-						const userMsg = truncate(turn.userMessage.text, 80);
-						const responsePreview = truncate(turn.responseText || "(no response)", 80);
-						const toolCount = turn.toolCalls.length;
-						const usageStr = turn.usage ? `${turn.usage.inputTokens ?? "?"}→${turn.usage.outputTokens ?? "?"}t` : "";
+								console.log(
+									pc.bold(`History for session ${record.id.slice(0, 8)}`),
+									result.hasMore ? pc.dim(`(showing last ${result.turns.length}, more available)`) : "",
+								);
+								console.log();
 
-						console.log(pc.bold(pc.cyan(`  Turn ${turn.id}`)));
-						console.log(`    ${pc.bold("User:")} ${userMsg}`);
-						console.log(`    ${pc.bold("Response:")} ${responsePreview}`);
-						if (toolCount > 0) {
-							console.log(`    ${pc.bold("Tool calls:")} ${toolCount}`);
-						}
-						if (usageStr) {
-							console.log(`    ${pc.bold("Tokens:")} ${usageStr}`);
-						}
-						console.log();
-					}
-				},
-			);
-		} catch (err) {
-			console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
-			process.exitCode = 1;
-		}
-	});
+								for (const turn of result.turns) {
+									const userMsg = truncate(turn.userMessage.text, 80);
+									const responsePreview = truncate(turn.responseText || "(no response)", 80);
+									const toolCount = turn.toolCalls.length;
+									const usageStr = turn.usage
+										? `${turn.usage.inputTokens ?? "?"}→${turn.usage.outputTokens ?? "?"}t`
+										: "";
+
+									console.log(pc.bold(pc.cyan(`  Turn ${turn.id}`)));
+									console.log(`    ${pc.bold("User:")} ${userMsg}`);
+									console.log(`    ${pc.bold("Response:")} ${responsePreview}`);
+									if (toolCount > 0) {
+										console.log(`    ${pc.bold("Tool calls:")} ${toolCount}`);
+									}
+									if (usageStr) {
+										console.log(`    ${pc.bold("Tokens:")} ${usageStr}`);
+									}
+									console.log();
+								}
+							},
+							{
+								sessionId: record.id,
+								hasMore: result.hasMore,
+								turns: result.turns.map((t) => ({
+									id: t.id,
+									userMessage: t.userMessage.text,
+									responseText: t.responseText,
+									toolCalls: t.toolCalls.length,
+									usage: t.usage,
+								})),
+							},
+						);
+					},
+				);
+			} catch (err) {
+				handleError(err, globalOpts);
+			}
+		},
+	);
 
 // ── Prompt Helpers ───────────────────────────────────────────────────────────
 
@@ -740,38 +1062,42 @@ function stdinIsPipe(): boolean {
 /** Resolve permission mode from flags and config. */
 function resolvePermissionMode(
 	opts: { approveAll?: boolean; approveReads?: boolean; denyAll?: boolean },
-	config: AhpxConfig,
+	cfg: AhpxConfig,
 ): PermissionMode {
 	if (opts.approveAll) return "approve-all";
 	if (opts.approveReads) return "approve-reads";
 	if (opts.denyAll) return "deny-all";
-	return config.permissions ?? "approve-reads";
+	return cfg.permissions ?? "approve-reads";
 }
 
 /**
  * Core prompt execution logic shared by `prompt`, implicit prompt, and `exec`.
  */
-async function runPrompt(opts: {
-	text: string;
-	server?: string;
-	sessionName?: string;
-	approveAll?: boolean;
-	approveReads?: boolean;
-	denyAll?: boolean;
-	provider?: string;
-	model?: string;
-	/** If true, create a temporary session (exec mode). */
-	oneShot?: boolean;
-}): Promise<void> {
-	const config = await loadConfig();
+async function runPrompt(
+	opts: {
+		text: string;
+		server?: string;
+		sessionName?: string;
+		approveAll?: boolean;
+		approveReads?: boolean;
+		denyAll?: boolean;
+		provider?: string;
+		model?: string;
+		/** If true, create a temporary session (exec mode). */
+		oneShot?: boolean;
+	},
+	globalOpts: GlobalOpts,
+): Promise<void> {
+	const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 	const cwd = process.cwd();
 	const gitRoot = await findGitRoot(cwd);
-	const permMode = resolvePermissionMode(opts, config);
+	const permMode = resolvePermissionMode(opts, cfg);
+	const formatter = formatterFromOpts(globalOpts);
 
 	await withConnection(
 		{
 			server: opts.server,
-			config,
+			config: cfg,
 		},
 		async (client, serverInfo) => {
 			let sessionUri: string;
@@ -779,27 +1105,36 @@ async function runPrompt(opts: {
 
 			if (opts.oneShot) {
 				// One-shot: create a temporary session
-				sessionUri = await createTempSession(client, opts, config, cwd);
+				const spinner = startSpinner("Creating session...", spinnersEnabled(globalOpts));
+				try {
+					sessionUri = await createTempSession(client, opts, cfg, cwd);
+					spinner.stop();
+				} catch (err) {
+					spinner.stop();
+					throw err;
+				}
 			} else {
 				// Try to resolve existing session
-				const resolved = await resolveOrCreateSession(client, serverInfo, opts, config, cwd, gitRoot);
+				const resolved = await resolveOrCreateSession(client, serverInfo, opts, cfg, cwd, gitRoot, globalOpts);
 				sessionUri = resolved.sessionUri;
 				sessionRecord = resolved.record;
 			}
 
 			// Run the turn
-			const renderer = new PromptRenderer();
 			const permHandler = new PermissionHandler(permMode);
-			const controller = new TurnController(client, sessionUri, renderer, permHandler);
+			const controller = new TurnController(client, sessionUri, formatter, permHandler);
 
 			// Set up Ctrl+C handling
 			let sigintCount = 0;
 			const sigintHandler = () => {
 				sigintCount++;
 				if (sigintCount >= 2) {
-					process.exit(130);
+					process.exitCode = ExitCode.Interrupted;
+					process.exit(ExitCode.Interrupted);
 				}
-				console.error(pc.dim("\nCancelling..."));
+				if (globalOpts.format === "text") {
+					console.error(pc.dim("\nCancelling..."));
+				}
 				controller.cancel();
 			};
 			process.on("SIGINT", sigintHandler);
@@ -816,16 +1151,19 @@ async function runPrompt(opts: {
 				}
 
 				if (result.state === "error") {
-					process.exitCode = 1;
+					process.exitCode = ExitCode.Error;
 				}
 			} finally {
 				process.removeListener("SIGINT", sigintHandler);
 
 				// Dispose temporary session in one-shot mode
 				if (opts.oneShot) {
+					const spinner = startSpinner("Disposing session...", spinnersEnabled(globalOpts));
 					try {
 						await client.disposeSession(sessionUri);
+						spinner.stop();
 					} catch {
+						spinner.stop();
 						// Best effort
 					}
 				}
@@ -838,18 +1176,18 @@ async function runPrompt(opts: {
 async function createTempSession(
 	client: AhpClient,
 	opts: { provider?: string; model?: string },
-	config: AhpxConfig,
+	cfg: AhpxConfig,
 	cwd: string,
 ): Promise<string> {
 	const rootState = client.state.root;
 	const provider =
-		opts.provider ?? config.defaultProvider ?? (rootState.agents.length > 0 ? rootState.agents[0].provider : undefined);
+		opts.provider ?? cfg.defaultProvider ?? (rootState.agents.length > 0 ? rootState.agents[0].provider : undefined);
 	if (!provider) {
-		throw new Error("No agent provider available. Specify one with --provider.");
+		throw new UsageError("No agent provider available. Specify one with --provider.");
 	}
 	const sessionId = randomUUID();
 	const sessionUri = `${provider}:/${sessionId}`;
-	await client.createSession(sessionUri, provider, opts.model ?? config.defaultModel, cwd);
+	await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, cwd);
 	await client.subscribe(sessionUri);
 	await waitForReady(client, sessionUri);
 	return sessionUri;
@@ -860,9 +1198,10 @@ async function resolveOrCreateSession(
 	client: AhpClient,
 	serverInfo: { name: string; url: string },
 	opts: { sessionName?: string; provider?: string; model?: string },
-	config: AhpxConfig,
+	cfg: AhpxConfig,
 	cwd: string,
 	gitRoot: string | undefined,
+	globalOpts: GlobalOpts,
 ): Promise<{ sessionUri: string; record: SessionRecord }> {
 	const record = await resolveSession({
 		serverName: serverInfo.name,
@@ -879,17 +1218,25 @@ async function resolveOrCreateSession(
 	// Auto-create a session
 	const rootState = client.state.root;
 	const provider =
-		opts.provider ?? config.defaultProvider ?? (rootState.agents.length > 0 ? rootState.agents[0].provider : undefined);
+		opts.provider ?? cfg.defaultProvider ?? (rootState.agents.length > 0 ? rootState.agents[0].provider : undefined);
 	if (!provider) {
-		throw new Error("No agent provider available. Specify one with --provider.");
+		throw new UsageError("No agent provider available. Specify one with --provider.");
 	}
 	const sessionId = randomUUID();
 	const sessionUri = `${provider}:/${sessionId}`;
 
-	console.error(pc.dim(`Creating session on ${serverInfo.name}...`));
-	await client.createSession(sessionUri, provider, opts.model ?? config.defaultModel, cwd);
-	await client.subscribe(sessionUri);
-	await waitForReady(client, sessionUri);
+	const spinner = startSpinner(`Creating session on ${serverInfo.name}...`, spinnersEnabled(globalOpts));
+	try {
+		await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, cwd);
+		await client.subscribe(sessionUri);
+
+		spinner.update("Waiting for session ready...");
+		await waitForReady(client, sessionUri);
+		spinner.stop();
+	} catch (err) {
+		spinner.stop();
+		throw err;
+	}
 
 	const newRecord: SessionRecord = {
 		id: sessionId,
@@ -897,7 +1244,7 @@ async function resolveOrCreateSession(
 		serverName: serverInfo.name,
 		serverUrl: serverInfo.url,
 		provider,
-		model: opts.model ?? config.defaultModel ?? client.state.getSession(sessionUri)?.summary.model,
+		model: opts.model ?? cfg.defaultModel ?? client.state.getSession(sessionUri)?.summary.model,
 		name: opts.sessionName,
 		workingDirectory: cwd,
 		gitRoot,
@@ -913,7 +1260,7 @@ async function resolveOrCreateSession(
 function waitForReady(client: AhpClient, sessionUri: string): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		const timeout = setTimeout(() => {
-			reject(new Error("Timed out waiting for session to be ready"));
+			reject(new TimeoutError("Timed out waiting for session to be ready"));
 		}, 30_000);
 
 		client.on("action", (envelope) => {
@@ -925,7 +1272,7 @@ function waitForReady(client: AhpClient, sessionUri: string): Promise<void> {
 				clearTimeout(timeout);
 				const sessionState = client.state.getSession(sessionUri);
 				const errMsg = sessionState?.creationError?.message ?? "Unknown error";
-				reject(new Error(`Session creation failed: ${errMsg}`));
+				reject(new AhpxError(`Session creation failed: ${errMsg}`, ExitCode.Error));
 			}
 		});
 
@@ -937,7 +1284,7 @@ function waitForReady(client: AhpClient, sessionUri: string): Promise<void> {
 		} else if (sessionState?.lifecycle === "creationFailed") {
 			clearTimeout(timeout);
 			const errMsg = sessionState?.creationError?.message ?? "Unknown error";
-			reject(new Error(`Session creation failed: ${errMsg}`));
+			reject(new AhpxError(`Session creation failed: ${errMsg}`, ExitCode.Error));
 		}
 	});
 }
@@ -965,21 +1312,22 @@ program
 				approveReads?: boolean;
 				denyAll?: boolean;
 			},
+			cmd: Command,
 		) => {
+			const globalOpts = parseGlobalOpts(cmd);
+			applyGlobalOpts(globalOpts);
+
 			try {
 				let text = textParts.join(" ");
 				if (opts.file) {
 					text = await readPromptFile(opts.file);
 				}
 				if (!text) {
-					console.error(pc.red("✗"), "No prompt text provided.");
-					process.exitCode = 1;
-					return;
+					throw new UsageError("No prompt text provided.");
 				}
-				await runPrompt({ text, ...opts });
+				await runPrompt({ text, ...opts }, globalOpts);
 			} catch (err) {
-				console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
-				process.exitCode = 1;
+				handleError(err, globalOpts);
 			}
 		},
 	);
@@ -1007,18 +1355,19 @@ program
 				approveReads?: boolean;
 				denyAll?: boolean;
 			},
+			cmd: Command,
 		) => {
+			const globalOpts = parseGlobalOpts(cmd);
+			applyGlobalOpts(globalOpts);
+
 			try {
 				const text = textParts.join(" ");
 				if (!text) {
-					console.error(pc.red("✗"), "No prompt text provided.");
-					process.exitCode = 1;
-					return;
+					throw new UsageError("No prompt text provided.");
 				}
-				await runPrompt({ text, oneShot: true, ...opts });
+				await runPrompt({ text, oneShot: true, ...opts }, globalOpts);
 			} catch (err) {
-				console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
-				process.exitCode = 1;
+				handleError(err, globalOpts);
 			}
 		},
 	);
@@ -1030,10 +1379,13 @@ program
 	.description("Cancel the active turn in a session")
 	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
 	.option("-s, --server <name>", "Server name")
-	.action(async (opts: { sessionName?: string; server?: string }) => {
+	.action(async (opts: { sessionName?: string; server?: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
 		try {
-			const config = await loadConfig();
-			const serverName = await resolveServerName(opts.server, config);
+			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+			const serverName = await resolveServerName(opts.server, cfg);
 			const cwd = process.cwd();
 
 			const record = await resolveSession({
@@ -1044,16 +1396,20 @@ program
 			});
 
 			if (!record) {
-				console.log(pc.dim("No active session found. Nothing to cancel."));
+				if (globalOpts.format === "text") {
+					console.log(pc.dim("No active session found. Nothing to cancel."));
+				}
 				return;
 			}
 
-			await withConnection({ server: opts.server, config }, async (client) => {
+			await withConnection({ server: opts.server, config: cfg }, async (client) => {
 				await client.subscribe(record.sessionUri);
 				const sessionState = client.state.getSession(record.sessionUri);
 
 				if (!sessionState?.activeTurn) {
-					console.log(pc.dim("No active turn. Nothing to cancel."));
+					if (globalOpts.format === "text") {
+						console.log(pc.dim("No active turn. Nothing to cancel."));
+					}
 					return;
 				}
 
@@ -1062,12 +1418,39 @@ program
 					session: record.sessionUri,
 					turnId: sessionState.activeTurn.id,
 				});
-				console.log(pc.green("✓"), "Cancellation dispatched.");
+				outputResult(globalOpts, () => console.log(pc.green("✓"), "Cancellation dispatched."), {
+					cancelled: true,
+					sessionUri: record.sessionUri,
+				});
 			});
 		} catch (err) {
-			console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
-			process.exitCode = 1;
+			handleError(err, globalOpts);
 		}
+	});
+
+// ── completions ──────────────────────────────────────────────────────────────
+
+const completions = program.command("completions").description("Generate shell completion scripts");
+
+completions
+	.command("bash")
+	.description("Print bash completion script")
+	.action(() => {
+		process.stdout.write(bashCompletion());
+	});
+
+completions
+	.command("zsh")
+	.description("Print zsh completion script")
+	.action(() => {
+		process.stdout.write(zshCompletion());
+	});
+
+completions
+	.command("fish")
+	.description("Print fish completion script")
+	.action(() => {
+		process.stdout.write(fishCompletion());
 	});
 
 // ── Implicit prompt (bare text as default verb) ─────────────────────────────
@@ -1076,18 +1459,63 @@ program
 async function handleImplicitPrompt(): Promise<boolean> {
 	const args = process.argv.slice(2);
 
+	// Parse global flags from args before deciding on implicit prompt
+	const globalOpts: GlobalOpts = { format: "text", jsonStrict: false, verbose: false };
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === "--format" && i + 1 < args.length) {
+			globalOpts.format = args[i + 1] as OutputFormat;
+			i++;
+		} else if (args[i] === "--json-strict") {
+			globalOpts.jsonStrict = true;
+		} else if (args[i] === "--verbose" || args[i] === "-v") {
+			globalOpts.verbose = true;
+		}
+	}
+	applyGlobalOpts(globalOpts);
+
 	// If no args but stdin is piped, read from stdin
 	if (args.length === 0 && stdinIsPipe()) {
 		const text = await readStdin();
 		if (text) {
-			await runPrompt({ text });
+			await runPrompt({ text }, globalOpts);
 			return true;
 		}
 		return false;
 	}
 
-	// If the first arg doesn't match any known command, treat as implicit prompt
-	if (args.length > 0) {
+	// Filter out global flags to find positional args
+	const positional: string[] = [];
+	const flags: Record<string, string | boolean> = {};
+	let i = 0;
+	while (i < args.length) {
+		if (args[i] === "--format") {
+			i += 2;
+			continue;
+		}
+		if (args[i] === "--json-strict" || args[i] === "--verbose" || args[i] === "-v") {
+			i++;
+			continue;
+		}
+		if (args[i] === "--server" || args[i] === "-s") {
+			flags.server = args[++i];
+		} else if (args[i] === "--session-name" || args[i] === "-n") {
+			flags.sessionName = args[++i];
+		} else if (args[i] === "--approve-all") {
+			flags.approveAll = true;
+		} else if (args[i] === "--approve-reads") {
+			flags.approveReads = true;
+		} else if (args[i] === "--deny-all") {
+			flags.denyAll = true;
+		} else if (args[i] === "--file" || args[i] === "-f") {
+			flags.file = args[++i];
+		} else if (!args[i].startsWith("-")) {
+			positional.push(args[i]);
+		}
+		i++;
+	}
+
+	// If the first positional arg doesn't match any known command, treat as implicit prompt
+	if (positional.length > 0) {
 		const knownCommands = new Set([
 			"connect",
 			"server",
@@ -1096,49 +1524,45 @@ async function handleImplicitPrompt(): Promise<boolean> {
 			"prompt",
 			"exec",
 			"cancel",
+			"completions",
 			"help",
 			"--help",
 			"-h",
 			"--version",
 			"-V",
 		]);
-		if (!knownCommands.has(args[0]) && !args[0].startsWith("-")) {
-			// Check for --file flag in the args
-			const fileIdx = args.indexOf("--file");
-			const fileFlagIdx = args.indexOf("-f");
-			const flagIdx = fileIdx !== -1 ? fileIdx : fileFlagIdx;
+		if (!knownCommands.has(positional[0])) {
 			let text: string;
 
-			if (flagIdx !== -1 && flagIdx + 1 < args.length) {
-				text = await readPromptFile(args[flagIdx + 1]);
+			if (flags.file && typeof flags.file === "string") {
+				text = await readPromptFile(flags.file);
 			} else {
-				// Collect all positional args (stop at flags)
-				const textParts: string[] = [];
-				const opts: Record<string, string | boolean> = {};
-				let i = 0;
-				while (i < args.length) {
-					if (args[i] === "--server" || args[i] === "-s") {
-						opts.server = args[++i];
-					} else if (args[i] === "--session-name" || args[i] === "-n") {
-						opts.sessionName = args[++i];
-					} else if (args[i] === "--approve-all") {
-						opts.approveAll = true;
-					} else if (args[i] === "--approve-reads") {
-						opts.approveReads = true;
-					} else if (args[i] === "--deny-all") {
-						opts.denyAll = true;
-					} else if (!args[i].startsWith("-")) {
-						textParts.push(args[i]);
-					}
-					i++;
-				}
-				text = textParts.join(" ");
+				text = positional.join(" ");
 			}
 
 			if (text) {
-				await runPrompt({ text });
+				await runPrompt(
+					{
+						text,
+						server: typeof flags.server === "string" ? flags.server : undefined,
+						sessionName: typeof flags.sessionName === "string" ? flags.sessionName : undefined,
+						approveAll: flags.approveAll === true ? true : undefined,
+						approveReads: flags.approveReads === true ? true : undefined,
+						denyAll: flags.denyAll === true ? true : undefined,
+					},
+					globalOpts,
+				);
 				return true;
 			}
+		}
+	}
+
+	// If no positional args but stdin is piped (with global flags present)
+	if (positional.length === 0 && stdinIsPipe()) {
+		const text = await readStdin();
+		if (text) {
+			await runPrompt({ text }, globalOpts);
+			return true;
 		}
 	}
 
@@ -1150,10 +1574,20 @@ async function handleImplicitPrompt(): Promise<boolean> {
 	try {
 		const handled = await handleImplicitPrompt();
 		if (!handled) {
+			// Apply global opts for commander-handled commands via hook
+			program.hook("preAction", (thisCommand) => {
+				const globalOpts = parseGlobalOpts(thisCommand);
+				applyGlobalOpts(globalOpts);
+
+				// Resolve config-level defaults for format/verbose
+				// (CLI flags already parsed by Commander at this point)
+			});
+
 			program.parse();
 		}
 	} catch (err) {
+		const exitCode = err instanceof AhpxError ? err.exitCode : ExitCode.Error;
 		console.error(pc.red("✗"), err instanceof Error ? err.message : String(err));
-		process.exitCode = 1;
+		process.exitCode = exitCode;
 	}
 })();

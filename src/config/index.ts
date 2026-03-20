@@ -25,6 +25,8 @@ export interface AhpxConfig {
 	timeout?: number;
 	/** Output format */
 	format?: "text" | "json" | "quiet";
+	/** Enable debug logging */
+	verbose?: boolean;
 }
 
 /** Keys that are valid in AhpxConfig, for filtering unknown properties. */
@@ -35,6 +37,7 @@ const CONFIG_KEYS: ReadonlySet<string> = new Set<string>([
 	"permissions",
 	"timeout",
 	"format",
+	"verbose",
 ]);
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
@@ -43,6 +46,7 @@ export const DEFAULT_CONFIG: Readonly<AhpxConfig> = Object.freeze({
 	permissions: "approve-reads",
 	timeout: 30,
 	format: "text",
+	verbose: false,
 });
 
 // ── Paths ────────────────────────────────────────────────────────────────────
@@ -134,6 +138,71 @@ export async function initGlobalConfig(configPath?: string): Promise<boolean> {
 		await fs.writeFile(p, `${JSON.stringify(DEFAULT_CONFIG, null, "\t")}\n`, "utf-8");
 		return true;
 	}
+}
+
+// ── Source-annotated config ──────────────────────────────────────────────────
+
+export type ConfigSource = "default" | "global" | "project" | "cli";
+
+export interface ConfigWithSources {
+	config: AhpxConfig;
+	sources: Record<string, ConfigSource>;
+	globalPath: string;
+	projectPath: string;
+}
+
+/**
+ * Load merged configuration with source annotations showing where each value came from.
+ */
+export async function loadConfigWithSources(options?: {
+	globalPath?: string;
+	projectPath?: string;
+	overrides?: Partial<AhpxConfig>;
+}): Promise<ConfigWithSources> {
+	const gPath = options?.globalPath ?? globalConfigPath();
+	const pPath = options?.projectPath ?? projectConfigPath();
+
+	const globalRaw = await readJsonFile(gPath);
+	const projectRaw = await readJsonFile(pPath);
+
+	const globalConfig = globalRaw ? pickConfigKeys(globalRaw) : {};
+	const projectConfig = projectRaw ? pickConfigKeys(projectRaw) : {};
+
+	// Strip undefined values from overrides
+	const overrides: Partial<AhpxConfig> = {};
+	if (options?.overrides) {
+		for (const [k, v] of Object.entries(options.overrides)) {
+			if (v !== undefined) {
+				(overrides as Record<string, unknown>)[k] = v;
+			}
+		}
+	}
+
+	const merged: AhpxConfig = {
+		...DEFAULT_CONFIG,
+		...globalConfig,
+		...projectConfig,
+		...overrides,
+	};
+
+	// Track sources (in order of priority — later overwrites earlier)
+	const sources: Record<string, ConfigSource> = {};
+	for (const key of CONFIG_KEYS) {
+		if ((DEFAULT_CONFIG as Record<string, unknown>)[key] !== undefined) {
+			sources[key] = "default";
+		}
+	}
+	for (const key of Object.keys(globalConfig)) {
+		sources[key] = "global";
+	}
+	for (const key of Object.keys(projectConfig)) {
+		sources[key] = "project";
+	}
+	for (const key of Object.keys(overrides)) {
+		sources[key] = "cli";
+	}
+
+	return { config: merged, sources, globalPath: gPath, projectPath: pPath };
 }
 
 export { ConnectionStore, ConnectionValidationError, isValidWsUrl } from "./connections.js";
