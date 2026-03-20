@@ -48,6 +48,27 @@ npm run lint
 npm run dev
 ```
 
+## Contributing
+
+Project knowledge lives in `.github/` so both humans and agents can find it:
+
+- **[`.github/skills/ahp-protocol/`](.github/skills/ahp-protocol/SKILL.md)** — AHP protocol fundamentals: state model, actions, JSON-RPC commands, connection lifecycle
+- **[`.github/skills/ahpx-architecture/`](.github/skills/ahpx-architecture/SKILL.md)** — Codebase architecture: 3-layer client, sessions, prompting, config
+- **[`.github/agents/team-lead.md`](.github/agents/team-lead.md)** — Team lead agent definition with quality gates and workflow
+
+Before making changes, read the relevant skill docs. They'll save you time and help you make better decisions.
+
+### Quality gates
+
+All must pass before committing:
+
+```bash
+npm run typecheck   # Zero type errors
+npm run lint        # Zero lint violations
+npm test            # All tests pass
+npm run build       # Clean build
+```
+
 ## Phase Roadmap
 
 - **Phase 0** — Project scaffold & core client ✅
