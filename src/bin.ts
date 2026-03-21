@@ -1059,6 +1059,75 @@ session
 		},
 	);
 
+// ── session active ───────────────────────────────────────────────────────────
+
+session
+	.command("active")
+	.description("Show all active sessions on the server (live query)")
+	.option("-s, --server <name>", "Server name or WebSocket URL")
+	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
+	.action(async (opts: { server?: string; timeout: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+
+			await withConnection(
+				{
+					server: opts.server,
+					config: cfg,
+					timeout: Number.parseInt(opts.timeout, 10),
+				},
+				async (client, serverInfo) => {
+					const result = await client.listSessions();
+
+					outputResult(
+						globalOpts,
+						() => {
+							if (result.items.length === 0) {
+								console.log(pc.dim(`No active sessions on ${serverInfo.name}.`));
+								return;
+							}
+
+							console.log(pc.bold(`Active sessions on ${serverInfo.name}`), pc.dim(`(${result.items.length})`));
+							console.log();
+
+							for (const s of result.items) {
+								const status =
+									s.status === "in-progress"
+										? pc.yellow("● in-progress")
+										: s.status === "error"
+											? pc.red("● error")
+											: pc.green("● idle");
+
+								console.log(`  ${pc.bold(pc.cyan(s.resource))}`);
+								console.log(`    ${pc.bold("Provider:")} ${s.provider}`);
+								if (s.model) console.log(`    ${pc.bold("Model:")} ${s.model}`);
+								if (s.title) console.log(`    ${pc.bold("Title:")} ${s.title}`);
+								console.log(`    ${pc.bold("Status:")} ${status}`);
+								console.log();
+							}
+						},
+						{
+							server: serverInfo.name,
+							sessions: result.items.map((s) => ({
+								resource: s.resource,
+								provider: s.provider,
+								model: s.model,
+								title: s.title,
+								status: s.status,
+								createdAt: s.createdAt,
+							})),
+						},
+					);
+				},
+			);
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
+
 // ── Prompt Helpers ───────────────────────────────────────────────────────────
 
 /** Read prompt text from a file path, or from stdin if path is "-". */

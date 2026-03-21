@@ -97,6 +97,26 @@ describe("library exports", () => {
 		});
 	});
 
+	describe("session handle", () => {
+		it("exports SessionHandle class", () => {
+			expect(ahpx.SessionHandle).toBeDefined();
+			expect(typeof ahpx.SessionHandle).toBe("function");
+		});
+	});
+
+	describe("connection pool", () => {
+		it("exports ConnectionPool class", () => {
+			expect(ahpx.ConnectionPool).toBeDefined();
+			expect(typeof ahpx.ConnectionPool).toBe("function");
+		});
+
+		it("ConnectionPool is instantiable", () => {
+			const pool = new ahpx.ConnectionPool();
+			expect(pool.activeConnections).toBe(0);
+			expect(pool.activeSessions).toBe(0);
+		});
+	});
+
 	describe("reconnection", () => {
 		it("exports ReconnectManager class", () => {
 			expect(ahpx.ReconnectManager).toBeDefined();
@@ -145,6 +165,8 @@ describe("library exports", () => {
 				"RpcError",
 				"RpcTimeoutError",
 				"StateMirror",
+				"SessionHandle",
+				"ConnectionPool",
 				"ActiveClientManager",
 				"ReconnectManager",
 				"AuthHandler",
