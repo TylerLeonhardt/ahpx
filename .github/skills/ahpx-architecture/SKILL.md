@@ -48,6 +48,7 @@ src/
 │
 ├── session/                Session persistence & scoping
 │   ├── store.ts            SessionStore — JSON files in ~/.ahpx/sessions/
+│   ├── persistence.ts      SessionPersistence — resume, save turns, sync
 │   ├── scope.ts            Directory-walk session resolution
 │   ├── connect-helper.ts   Shared connection logic
 │   └── __tests__/
@@ -256,6 +257,16 @@ reconnect and replays missed actions or receives fresh snapshots.
 Persists session records as JSON files in `~/.ahpx/sessions/`.
 
 ```typescript
+interface TurnSummary {
+  turnId: string               // UUID from AHP action
+  userMessage: string          // First 200 chars
+  responsePreview: string      // First 200 chars
+  toolCallCount: number
+  tokenUsage?: { input: number; output: number; model?: string }
+  state: "complete" | "cancelled" | "error"
+  timestamp: string            // ISO 8601
+}
+
 interface SessionRecord {
   id: string                  // UUID
   sessionUri: string          // "copilot:/<uuid>"
@@ -271,6 +282,7 @@ interface SessionRecord {
   createdAt: string           // ISO 8601
   closedAt?: string
   lastPromptAt?: string
+  turns?: TurnSummary[]       // Local turn history (capped at 100)
 }
 ```
 
@@ -278,6 +290,45 @@ Key operations:
 - `save(record)` — atomic write (tmp file + rename)
 - `get(id)` / `list(filter?)` / `update(id, updates)` / `close(id)`
 - `getByScope({serverName, workingDirectory, name?})` — find session by scope
+- `appendTurn(id, turn)` — append turn summary, cap at 100 entries
+
+Utility functions:
+- `truncatePreview(str, maxLen?)` — truncate to preview length (200 chars)
+- `buildTurnSummary(result)` — build TurnSummary from a TurnResult + user message
+
+### SessionPersistence (`session/persistence.ts`)
+
+Bridge between local `SessionStore` and live AHP server connections. Handles
+session resume, turn persistence, and local/server sync.
+
+```typescript
+type ResumeOutcome =
+  | { status: "resumed" }         // Session found on server
+  | { status: "not_found" }       // Session disposed on server
+  | { status: "error"; message: string }  // Connection/protocol error
+
+interface SyncResult {
+  added: string[]     // Session URIs on server but not locally tracked
+  removed: string[]   // Local record IDs whose sessions were disposed
+  updated: string[]   // Local record IDs with title/status changes
+}
+
+class SessionPersistence {
+  constructor(store: SessionStore)
+  async resume(record: SessionRecord, client: AhpClient): Promise<ResumeOutcome>
+  async saveTurn(recordId: string, result: TurnResult & { userMessage: string }): Promise<SessionRecord | undefined>
+  async sync(client: AhpClient, serverName: string): Promise<SyncResult>
+}
+```
+
+- **`resume()`** subscribes to the session URI on the server. If the server
+  returns `SessionNotFound` (-32001), returns `not_found` so the CLI can
+  warn the user and create a new session.
+- **`saveTurn()`** builds a `TurnSummary` from a turn result and appends it
+  to the local session record via `SessionStore.appendTurn()`.
+- **`sync()`** compares locally-active records for a server against the
+  server's `listSessions` result. Closes stale local records, detects new
+  server sessions, and updates divergent titles.
 
 ### Directory-walk scoping (`session/scope.ts`)
 
@@ -449,6 +500,9 @@ ahpx session list [--server <name>]
 ahpx session info [<id>]
 ahpx session close [<id>]
 ahpx session watch [--server <name>]
+ahpx session history [<id>] [--local]
+ahpx session export <id> [--output <file>]
+ahpx session import <file>
 ```
 
 ### Prompting
@@ -769,6 +823,7 @@ The library exports:
 |----------|---------|
 | Core client | `AhpClient`, `AhpClientOptions`, `AhpClientEvents`, `OpenSessionOptions` |
 | Session handle | `SessionHandle`, `SessionHandleEvents`, `PromptOptions`, `SessionTurnResult` |
+| Session persistence | `SessionStore`, `SessionPersistence`, `SessionRecord`, `SessionFilter`, `TurnSummary`, `ResumeOutcome`, `SyncResult`, `buildTurnSummary`, `truncatePreview` |
 | Connection pool | `ConnectionPool`, `ConnectionPoolOptions` |
 | Transport | `Transport`, `TransportOptions` |
 | Protocol layer | `ProtocolLayer`, `ProtocolLayerOptions`, `RpcError`, `RpcTimeoutError` |
@@ -803,8 +858,9 @@ ahpx v0.1 (Phases 0–6) shipped the foundation: core AHP client, connection
 management, sessions, prompting, output formatting, observation, and George
 integration. Phase 7 added library mode (`import { AhpClient } from 'ahpx'`),
 Phase 8 added multi-session support with `SessionHandle` and `ConnectionPool`,
-and Phase 9 added event forwarding (webhook + WebSocket), and Phase 10 added
-fleet management (HealthChecker, FleetManager, server tags). 398 tests pass.
+Phase 9 added event forwarding (webhook + WebSocket), Phase 10 added fleet
+management (HealthChecker, FleetManager, server tags), and Phase 11 added robust
+multi-turn sessions (SessionPersistence, turn history, export/import). 434 tests pass.
 
 v0.2 evolves ahpx from CLI tool to **production-grade agent dispatch platform**:
 
@@ -814,7 +870,7 @@ v0.2 evolves ahpx from CLI tool to **production-grade agent dispatch platform**:
 | **8** | Multi-Session | ✅ Complete — SessionHandle, ConnectionPool |
 | **9** | Event Forwarding | ✅ Complete — Webhook + WebSocket streaming |
 | **10** | Fleet Management | ✅ Complete — HealthChecker, FleetManager, server tags, CLI status/health |
-| **11** | Robust Multi-Turn | Planned — session resume, metadata, system prompts |
+| **11** | Robust Multi-Turn | ✅ Complete — SessionPersistence, turn history, session resume, export/import |
 | **12** | Production Hardening | Planned — bug fixes, CI/CD, comprehensive testing |
 
 ### Key architectural implications for v0.2
@@ -827,8 +883,10 @@ v0.2 evolves ahpx from CLI tool to **production-grade agent dispatch platform**:
   `WebSocketForwarder` stream events to external consumers (Phase 9, complete)
 - **FleetManager:** Health-aware routing across multiple servers with 4
   strategies and tag-based filtering (Phase 10, complete)
-- **Session metadata:** Extended `SessionStore` with client-side metadata
-  tracking (Phase 11, planned)
+- **SessionPersistence:** Session resume verification, local turn history with
+  server fallback, and local/server session sync (Phase 11, complete)
+- **Session export/import:** Debug-friendly session sharing via JSON files
+  (Phase 11, complete)
 
 ### Protocol dependencies
 

@@ -156,6 +156,52 @@ describe("library exports", () => {
 		});
 	});
 
+	describe("session persistence", () => {
+		it("exports SessionStore class", () => {
+			expect(ahpx.SessionStore).toBeDefined();
+			expect(typeof ahpx.SessionStore).toBe("function");
+		});
+
+		it("exports SessionPersistence class", () => {
+			expect(ahpx.SessionPersistence).toBeDefined();
+			expect(typeof ahpx.SessionPersistence).toBe("function");
+		});
+
+		it("exports buildTurnSummary function", () => {
+			expect(ahpx.buildTurnSummary).toBeDefined();
+			expect(typeof ahpx.buildTurnSummary).toBe("function");
+		});
+
+		it("exports truncatePreview function", () => {
+			expect(ahpx.truncatePreview).toBeDefined();
+			expect(typeof ahpx.truncatePreview).toBe("function");
+		});
+
+		it("exports session persistence types (compile-time check)", () => {
+			const turn: ahpx.TurnSummary = {
+				turnId: "t1",
+				userMessage: "hello",
+				responsePreview: "hi",
+				toolCallCount: 0,
+				state: "complete",
+				timestamp: new Date().toISOString(),
+			};
+			expect(turn.turnId).toBe("t1");
+
+			const record: ahpx.SessionRecord = {
+				id: "s1",
+				sessionUri: "copilot:/s1",
+				serverName: "local",
+				serverUrl: "ws://localhost:3000",
+				provider: "copilot",
+				status: "active",
+				createdAt: new Date().toISOString(),
+				turns: [turn],
+			};
+			expect(record.turns).toHaveLength(1);
+		});
+	});
+
 	describe("public API completeness", () => {
 		it("exports all expected classes", () => {
 			const expectedClasses = [
@@ -170,6 +216,8 @@ describe("library exports", () => {
 				"ActiveClientManager",
 				"ReconnectManager",
 				"AuthHandler",
+				"SessionStore",
+				"SessionPersistence",
 			];
 
 			for (const name of expectedClasses) {
@@ -194,8 +242,6 @@ describe("library exports", () => {
 				"JsonFormatter",
 				"QuietFormatter",
 				"createFormatter",
-				// Session persistence
-				"SessionStore",
 				// Prompt controller
 				"TurnController",
 				// Permissions

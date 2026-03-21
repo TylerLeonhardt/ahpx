@@ -80,6 +80,13 @@ export type { FleetManagerOptions, RoutingStrategy, ServerRequirements } from ".
 
 export type { ConnectionProfile } from "./config/connections.js";
 
+// ── Session persistence ─────────────────────────────────────────────────
+
+export { SessionStore, buildTurnSummary, truncatePreview } from "./session/store.js";
+export type { SessionRecord, SessionFilter, TurnSummary } from "./session/store.js";
+export { SessionPersistence } from "./session/persistence.js";
+export type { ResumeOutcome, SyncResult } from "./session/persistence.js";
+
 // ── Protocol types ──────────────────────────────────────────────────────
 //
 // Re-export the subset of protocol types that library consumers encounter

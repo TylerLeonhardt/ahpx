@@ -11,6 +11,30 @@ import * as path from "node:path";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+/** Maximum number of turns kept per local session record. */
+const MAX_LOCAL_TURNS = 100;
+
+/** Maximum character length for user message and response previews. */
+const PREVIEW_MAX_LEN = 200;
+
+/** Lightweight summary of a single turn, stored locally for offline history. */
+export interface TurnSummary {
+	/** Turn identifier (UUID from the AHP action). */
+	turnId: string;
+	/** First 200 characters of the user's message. */
+	userMessage: string;
+	/** First 200 characters of the agent's response. */
+	responsePreview: string;
+	/** Number of tool calls made during this turn. */
+	toolCallCount: number;
+	/** Token usage, if reported by the server. */
+	tokenUsage?: { input: number; output: number; model?: string };
+	/** Final state of the turn. */
+	state: "complete" | "cancelled" | "error";
+	/** ISO 8601 timestamp when the turn completed. */
+	timestamp: string;
+}
+
 export interface SessionRecord {
 	/** Unique identifier (UUID) */
 	id: string;
@@ -40,6 +64,8 @@ export interface SessionRecord {
 	closedAt?: string;
 	/** ISO 8601 timestamp of the last prompt sent */
 	lastPromptAt?: string;
+	/** Local turn history (lightweight summaries, capped at MAX_LOCAL_TURNS). */
+	turns?: TurnSummary[];
 }
 
 export interface SessionFilter {
@@ -54,6 +80,34 @@ export interface SessionFilter {
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────
+
+/** Truncate a string to the preview limit, appending ellipsis if needed. */
+export function truncatePreview(str: string, maxLen = PREVIEW_MAX_LEN): string {
+	if (str.length <= maxLen) return str;
+	return `${str.slice(0, maxLen - 1)}…`;
+}
+
+/** Build a TurnSummary from a completed turn result. */
+export function buildTurnSummary(result: {
+	turnId: string;
+	responseText: string;
+	toolCalls: number;
+	usage?: { inputTokens: number; outputTokens: number; model?: string };
+	state: "complete" | "cancelled" | "error";
+	userMessage: string;
+}): TurnSummary {
+	return {
+		turnId: result.turnId,
+		userMessage: truncatePreview(result.userMessage),
+		responsePreview: truncatePreview(result.responseText || "(no response)"),
+		toolCallCount: result.toolCalls,
+		tokenUsage: result.usage
+			? { input: result.usage.inputTokens, output: result.usage.outputTokens, model: result.usage.model }
+			: undefined,
+		state: result.state,
+		timestamp: new Date().toISOString(),
+	};
+}
 
 export class SessionStore {
 	private readonly sessionsDir: string;
@@ -163,6 +217,24 @@ export class SessionStore {
 			status: "closed",
 			closedAt: new Date().toISOString(),
 		});
+	}
+
+	/**
+	 * Append a turn summary to a session record's local history.
+	 * Caps the history at MAX_LOCAL_TURNS entries (oldest removed first).
+	 * Returns the updated record, or undefined if not found.
+	 */
+	async appendTurn(id: string, turn: TurnSummary): Promise<SessionRecord | undefined> {
+		const record = await this.get(id);
+		if (!record) return undefined;
+
+		const turns = record.turns ? [...record.turns] : [];
+		turns.push(turn);
+		// Trim oldest entries when over the cap
+		while (turns.length > MAX_LOCAL_TURNS) {
+			turns.shift();
+		}
+		return this.update(id, { turns });
 	}
 
 	/**

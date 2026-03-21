@@ -2,8 +2,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { SessionRecord } from "../store.js";
-import { SessionStore } from "../store.js";
+import type { SessionRecord, TurnSummary } from "../store.js";
+import { SessionStore, buildTurnSummary, truncatePreview } from "../store.js";
 
 /** Helper to create a minimal valid session record. */
 function makeSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
@@ -399,5 +399,210 @@ describe("SessionStore", () => {
 			const tmpFiles = files.filter((f) => f.endsWith(".tmp"));
 			expect(tmpFiles).toHaveLength(0);
 		});
+	});
+
+	describe("appendTurn", () => {
+		function makeTurn(overrides: Partial<TurnSummary> = {}): TurnSummary {
+			return {
+				turnId: "turn-1",
+				userMessage: "Hello, agent!",
+				responsePreview: "Hi there! How can I help?",
+				toolCallCount: 0,
+				state: "complete",
+				timestamp: "2024-01-15T10:05:00.000Z",
+				...overrides,
+			};
+		}
+
+		it("appends a turn to a session with no existing turns", async () => {
+			await store.save(makeSession());
+			const turn = makeTurn();
+
+			const updated = await store.appendTurn("test-id-1", turn);
+
+			expect(updated).toBeDefined();
+			expect(updated!.turns).toHaveLength(1);
+			expect(updated!.turns![0].turnId).toBe("turn-1");
+			expect(updated!.turns![0].userMessage).toBe("Hello, agent!");
+		});
+
+		it("appends turns in order", async () => {
+			await store.save(makeSession());
+
+			await store.appendTurn("test-id-1", makeTurn({ turnId: "t-1", timestamp: "2024-01-15T10:01:00.000Z" }));
+			await store.appendTurn("test-id-1", makeTurn({ turnId: "t-2", timestamp: "2024-01-15T10:02:00.000Z" }));
+			await store.appendTurn("test-id-1", makeTurn({ turnId: "t-3", timestamp: "2024-01-15T10:03:00.000Z" }));
+
+			const record = await store.get("test-id-1");
+			expect(record!.turns).toHaveLength(3);
+			expect(record!.turns![0].turnId).toBe("t-1");
+			expect(record!.turns![1].turnId).toBe("t-2");
+			expect(record!.turns![2].turnId).toBe("t-3");
+		});
+
+		it("caps at 100 turns (removes oldest)", async () => {
+			await store.save(makeSession());
+
+			// Add 105 turns
+			for (let i = 0; i < 105; i++) {
+				await store.appendTurn("test-id-1", makeTurn({ turnId: `t-${i}` }));
+			}
+
+			const record = await store.get("test-id-1");
+			expect(record!.turns).toHaveLength(100);
+			// Oldest 5 removed, first remaining is t-5
+			expect(record!.turns![0].turnId).toBe("t-5");
+			expect(record!.turns![99].turnId).toBe("t-104");
+		});
+
+		it("preserves token usage data", async () => {
+			await store.save(makeSession());
+			const turn = makeTurn({
+				tokenUsage: { input: 1500, output: 500, model: "gpt-4o" },
+			});
+
+			await store.appendTurn("test-id-1", turn);
+
+			const record = await store.get("test-id-1");
+			expect(record!.turns![0].tokenUsage).toEqual({ input: 1500, output: 500, model: "gpt-4o" });
+		});
+
+		it("returns undefined for non-existent session", async () => {
+			const result = await store.appendTurn("ghost", makeTurn());
+			expect(result).toBeUndefined();
+		});
+
+		it("persists turns to disk", async () => {
+			await store.save(makeSession());
+			await store.appendTurn("test-id-1", makeTurn());
+
+			// Fresh store instance
+			const store2 = new SessionStore(tmpDir);
+			const record = await store2.get("test-id-1");
+			expect(record!.turns).toHaveLength(1);
+		});
+
+		it("appends to session that already has turns", async () => {
+			await store.save(
+				makeSession({
+					turns: [makeTurn({ turnId: "existing-1" })],
+				}),
+			);
+
+			await store.appendTurn("test-id-1", makeTurn({ turnId: "new-1" }));
+
+			const record = await store.get("test-id-1");
+			expect(record!.turns).toHaveLength(2);
+			expect(record!.turns![0].turnId).toBe("existing-1");
+			expect(record!.turns![1].turnId).toBe("new-1");
+		});
+	});
+});
+
+describe("truncatePreview", () => {
+	it("returns short strings unchanged", () => {
+		expect(truncatePreview("hello")).toBe("hello");
+	});
+
+	it("truncates strings over the limit", () => {
+		const long = "a".repeat(250);
+		const result = truncatePreview(long);
+		expect(result.length).toBe(200);
+		expect(result.endsWith("…")).toBe(true);
+	});
+
+	it("respects custom maxLen", () => {
+		const result = truncatePreview("hello world", 5);
+		expect(result).toBe("hell…");
+	});
+
+	it("handles exactly-at-limit strings", () => {
+		const exact = "a".repeat(200);
+		expect(truncatePreview(exact)).toBe(exact);
+	});
+
+	it("handles empty strings", () => {
+		expect(truncatePreview("")).toBe("");
+	});
+});
+
+describe("buildTurnSummary", () => {
+	it("builds a TurnSummary from a turn result", () => {
+		const result = buildTurnSummary({
+			turnId: "turn-abc",
+			responseText: "Here is the fix for the bug.",
+			toolCalls: 3,
+			usage: { inputTokens: 1200, outputTokens: 400, model: "gpt-4o" },
+			state: "complete",
+			userMessage: "Fix the failing tests",
+		});
+
+		expect(result.turnId).toBe("turn-abc");
+		expect(result.userMessage).toBe("Fix the failing tests");
+		expect(result.responsePreview).toBe("Here is the fix for the bug.");
+		expect(result.toolCallCount).toBe(3);
+		expect(result.tokenUsage).toEqual({ input: 1200, output: 400, model: "gpt-4o" });
+		expect(result.state).toBe("complete");
+		expect(result.timestamp).toBeDefined();
+	});
+
+	it("truncates long messages", () => {
+		const longMsg = "x".repeat(300);
+		const result = buildTurnSummary({
+			turnId: "t",
+			responseText: longMsg,
+			toolCalls: 0,
+			state: "complete",
+			userMessage: longMsg,
+		});
+
+		expect(result.userMessage.length).toBe(200);
+		expect(result.responsePreview.length).toBe(200);
+	});
+
+	it("handles missing usage", () => {
+		const result = buildTurnSummary({
+			turnId: "t",
+			responseText: "done",
+			toolCalls: 0,
+			state: "complete",
+			userMessage: "do it",
+		});
+
+		expect(result.tokenUsage).toBeUndefined();
+	});
+
+	it("handles empty response", () => {
+		const result = buildTurnSummary({
+			turnId: "t",
+			responseText: "",
+			toolCalls: 0,
+			state: "error",
+			userMessage: "do it",
+		});
+
+		expect(result.responsePreview).toBe("(no response)");
+	});
+
+	it("preserves error and cancelled states", () => {
+		expect(
+			buildTurnSummary({
+				turnId: "t",
+				responseText: "",
+				toolCalls: 0,
+				state: "error",
+				userMessage: "",
+			}).state,
+		).toBe("error");
+
+		expect(
+			buildTurnSummary({
+				turnId: "t",
+				responseText: "",
+				toolCalls: 0,
+				state: "cancelled",
+				userMessage: "",
+			}).state,
+		).toBe("cancelled");
 	});
 });
