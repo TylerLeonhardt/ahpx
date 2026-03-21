@@ -2,6 +2,22 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 /**
+ * Flakiness note (Debt Cycle Round 1, March 2026):
+ * Four tests in this file were observed to fail intermittently during full
+ * suite runs while passing in isolation. This suggests a test-isolation issue
+ * — possibly shared state, temp files, or port conflicts with other test files.
+ *
+ * Debt Cycle Round 2 ran the full suite 3 consecutive times with zero failures
+ * in bin.test.ts (33/33 pass each run). The flakiness was not reproduced.
+ *
+ * If flakiness resurfaces, investigate:
+ *   1. Shared temp directories or files across test suites
+ *   2. Process spawn conflicts (port collisions, env leaks)
+ *   3. Global mock state bleeding from other test files (vitest runs in parallel)
+ *   4. Timing-sensitive assertions on spawned process output
+ */
+
+/**
  * Run the CLI via `node dist/bin.js` and capture stdout, stderr, and exit code.
  * Uses spawn with stdin set to "ignore" to prevent the implicit stdin-pipe
  * detection from blocking the process.
