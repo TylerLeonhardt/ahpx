@@ -21,6 +21,7 @@ import type { IProtocolNotification } from "../protocol/notifications.js";
 import type { URI } from "../protocol/state.js";
 import { PROTOCOL_VERSION } from "../protocol/version/registry.js";
 import { ProtocolLayer, type ProtocolLayerOptions } from "./protocol.js";
+import { SessionHandle } from "./session-handle.js";
 import { StateMirror } from "./state.js";
 import { Transport, type TransportOptions } from "./transport.js";
 
@@ -39,6 +40,20 @@ export interface AhpClientEvents {
 	error: [error: Error];
 }
 
+/** Options for opening a session via `AhpClient.openSession()`. */
+export interface OpenSessionOptions {
+	/** Agent provider (e.g. "copilot"). If omitted, uses the first available. */
+	provider?: string;
+	/** Model to use for the session. */
+	model?: string;
+	/** Working directory for the session. */
+	workingDirectory?: string;
+	/** Whether to wait for the session to be ready (default: true). */
+	waitForReady?: boolean;
+	/** Timeout in ms for waiting for ready state (default: 30000). */
+	readyTimeout?: number;
+}
+
 /**
  * High-level AHP client.
  *
@@ -54,6 +69,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	private transport: Transport | undefined;
 	private protocol: ProtocolLayer | undefined;
 	private readonly _state = new StateMirror();
+	private readonly _sessions = new Map<string, SessionHandle>();
 	private _clientId: string;
 	private _clientSeq = 0;
 	private _connected = false;
@@ -76,6 +92,11 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/** The client identifier. */
 	get clientId(): string {
 		return this._clientId;
+	}
+
+	/** All active session handles. */
+	get sessions(): ReadonlyMap<string, SessionHandle> {
+		return this._sessions;
 	}
 
 	/**
@@ -133,6 +154,17 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 * Gracefully disconnect from the server.
 	 */
 	async disconnect(): Promise<void> {
+		// Dispose all session handles
+		const handles = [...this._sessions.values()];
+		for (const handle of handles) {
+			try {
+				await handle.dispose();
+			} catch {
+				// Best-effort cleanup
+			}
+		}
+		this._sessions.clear();
+
 		if (this.protocol) {
 			this.protocol.cancelAll("Client disconnecting");
 		}
@@ -142,6 +174,63 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 			this.protocol = undefined;
 		}
 		this._connected = false;
+	}
+
+	// ── Session management ────────────────────────────────────────────────
+
+	/**
+	 * Create a session and return a handle for interacting with it.
+	 *
+	 * Creates the session on the server, subscribes to its state, and
+	 * (by default) waits for it to reach the "ready" lifecycle state.
+	 */
+	async openSession(options: OpenSessionOptions = {}): Promise<SessionHandle> {
+		this.ensureConnected();
+
+		const {
+			provider: requestedProvider,
+			model,
+			workingDirectory,
+			waitForReady = true,
+			readyTimeout = 30_000,
+		} = options;
+
+		// Resolve provider
+		const provider =
+			requestedProvider ?? (this._state.root.agents.length > 0 ? this._state.root.agents[0].provider : undefined);
+
+		if (!provider) {
+			throw new Error("No agent provider available. Specify one in options or ensure the server has agents.");
+		}
+
+		// Generate session URI
+		const sessionId = randomUUID();
+		const sessionUri = `${provider}:/${sessionId}`;
+
+		// Create + subscribe
+		await this.createSession(sessionUri, provider, model, workingDirectory);
+		await this.subscribe(sessionUri);
+
+		// Build handle
+		const handle = new SessionHandle(this, sessionUri, provider, model);
+		this._sessions.set(sessionUri, handle);
+
+		// Clean up tracking when handle is disposed
+		handle.on("disposed", () => {
+			this._sessions.delete(sessionUri);
+		});
+
+		// Wait for ready (clean up on failure)
+		if (waitForReady) {
+			try {
+				await handle.waitForReady(readyTimeout);
+			} catch (err) {
+				await handle.dispose().catch(() => {});
+				throw err;
+			}
+		}
+
+		return handle;
 	}
 
 	// ── Commands ──────────────────────────────────────────────────────────
@@ -168,6 +257,8 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 			session: sessionUri,
 		});
 		this._state.removeSession(sessionUri);
+		// Remove tracked handle if one exists (may not if using low-level API)
+		this._sessions.delete(sessionUri);
 		return result;
 	}
 
@@ -257,6 +348,8 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 export { Transport, type TransportOptions } from "./transport.js";
 export { ProtocolLayer, RpcError, RpcTimeoutError, type ProtocolLayerOptions } from "./protocol.js";
 export { StateMirror } from "./state.js";
+export { SessionHandle } from "./session-handle.js";
+export type { SessionHandleEvents, PromptOptions, TurnResult as SessionTurnResult } from "./session-handle.js";
 export { ActiveClientManager } from "./active-client.js";
 export { ReconnectManager } from "./reconnect.js";
 export type { ReconnectOptions, ReconnectOutcome } from "./reconnect.js";

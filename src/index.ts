@@ -19,7 +19,17 @@
 // ── Core client ──────────────────────────────────────────────────────────
 
 export { AhpClient } from "./client/index.js";
-export type { AhpClientOptions, AhpClientEvents } from "./client/index.js";
+export type { AhpClientOptions, AhpClientEvents, OpenSessionOptions } from "./client/index.js";
+
+// ── Session handle ──────────────────────────────────────────────────────
+
+export { SessionHandle } from "./client/session-handle.js";
+export type { SessionHandleEvents, PromptOptions, TurnResult as SessionTurnResult } from "./client/session-handle.js";
+
+// ── Connection pool ─────────────────────────────────────────────────────
+
+export { ConnectionPool } from "./client/connection-pool.js";
+export type { ConnectionPoolOptions } from "./client/connection-pool.js";
 
 // ── Transport layer (advanced use) ──────────────────────────────────────
 
