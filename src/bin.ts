@@ -33,6 +33,10 @@ import {
 } from "./config/index.js";
 import type { AhpxConfig, ConfigSource } from "./config/index.js";
 import { AhpxError, ExitCode, NoSessionError, TimeoutError, UsageError } from "./errors.js";
+import type { EventForwarder } from "./events/forwarder.js";
+import { ForwardingFormatter } from "./events/forwarding-formatter.js";
+import { WebhookForwarder } from "./events/webhook-forwarder.js";
+import { WebSocketForwarder } from "./events/ws-forwarder.js";
 import { setVerbose } from "./logger.js";
 import { createFormatter, startSpinner } from "./output/index.js";
 import type { OutputFormat, OutputFormatter } from "./output/index.js";
@@ -91,6 +95,50 @@ function parseIdleTimeout(raw?: string): number | undefined {
 		throw new UsageError(`--idle-timeout must be a positive integer (got: "${raw}")`);
 	}
 	return seconds;
+}
+
+/** Parse --forward-headers JSON string into a record. */
+function parseForwardHeaders(raw?: string): Record<string, string> | undefined {
+	if (!raw) return undefined;
+	try {
+		const parsed = JSON.parse(raw);
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+			throw new UsageError('--forward-headers must be a JSON object (e.g. \'{"Authorization": "Bearer ..."}\')');
+		}
+		return parsed as Record<string, string>;
+	} catch (err) {
+		if (err instanceof UsageError) throw err;
+		throw new UsageError(`--forward-headers must be valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+	}
+}
+
+/** Build EventForwarder instances from CLI forwarding flags. */
+function buildForwarders(opts: {
+	forwardWebhook?: string[];
+	forwardWs?: string[];
+	forwardFilter?: string;
+	forwardHeaders?: string;
+}): EventForwarder[] {
+	const forwarders: EventForwarder[] = [];
+	const headers = parseForwardHeaders(opts.forwardHeaders);
+	const filter = opts.forwardFilter
+		?.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+
+	if (opts.forwardWebhook) {
+		for (const url of opts.forwardWebhook) {
+			forwarders.push(new WebhookForwarder({ url, headers, filter }));
+		}
+	}
+
+	if (opts.forwardWs) {
+		for (const url of opts.forwardWs) {
+			forwarders.push(new WebSocketForwarder({ url, headers, filter }));
+		}
+	}
+
+	return forwarders;
 }
 
 /** Whether to show spinners (text mode + TTY). */
@@ -1190,6 +1238,8 @@ async function runPrompt(
 		idleTimeout?: number;
 		/** Metadata tags to include in JSON output envelopes. */
 		tags?: Record<string, string>;
+		/** Event forwarders for dashboard integration. */
+		forwarders?: EventForwarder[];
 	},
 	globalOpts: GlobalOpts,
 ): Promise<void> {
@@ -1197,7 +1247,18 @@ async function runPrompt(
 	const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
 	const gitRoot = await findGitRoot(cwd);
 	const permMode = resolvePermissionMode(opts, cfg);
-	const formatter = formatterFromOpts(globalOpts, opts.tags);
+	let formatter: OutputFormatter = formatterFromOpts(globalOpts, opts.tags);
+
+	// Wrap formatter with event forwarding if forwarders are configured
+	let forwardingFormatter: ForwardingFormatter | undefined;
+	if (opts.forwarders && opts.forwarders.length > 0) {
+		forwardingFormatter = new ForwardingFormatter({
+			inner: formatter,
+			forwarders: opts.forwarders,
+			tags: opts.tags,
+		});
+		formatter = forwardingFormatter;
+	}
 
 	await withConnection(
 		{
@@ -1226,6 +1287,9 @@ async function runPrompt(
 			}
 
 			// Run the turn
+			if (forwardingFormatter) {
+				forwardingFormatter.sessionUri = sessionUri;
+			}
 			const permHandler = new PermissionHandler(permMode);
 			const controller = new TurnController(client, sessionUri, formatter, permHandler);
 
@@ -1265,6 +1329,11 @@ async function runPrompt(
 				}
 			} finally {
 				process.removeListener("SIGINT", sigintHandler);
+
+				// Flush and close event forwarders
+				if (forwardingFormatter) {
+					await forwardingFormatter.close();
+				}
 
 				// Dispose temporary session in one-shot mode
 				if (opts.oneShot) {
@@ -1414,6 +1483,10 @@ program
 	.option("--deny-all", "Auto-deny all permissions")
 	.option("--idle-timeout <seconds>", "Cancel if no events received within N seconds")
 	.option("--tag <key=value...>", "Add metadata tags to JSON events (repeatable)")
+	.option("--forward-webhook <url...>", "POST events to webhook URL (repeatable)")
+	.option("--forward-ws <url...>", "Stream events over WebSocket (repeatable)")
+	.option("--forward-filter <types>", "Comma-separated event types to forward (default: all)")
+	.option("--forward-headers <json>", "Custom headers for forwarders (JSON object)")
 	.action(
 		async (
 			textParts: string[],
@@ -1427,6 +1500,10 @@ program
 				denyAll?: boolean;
 				idleTimeout?: string;
 				tag?: string[];
+				forwardWebhook?: string[];
+				forwardWs?: string[];
+				forwardFilter?: string;
+				forwardHeaders?: string;
 			},
 			cmd: Command,
 		) => {
@@ -1447,6 +1524,7 @@ program
 						...opts,
 						tags: parseTags(opts.tag),
 						idleTimeout: parseIdleTimeout(opts.idleTimeout),
+						forwarders: buildForwarders(opts),
 					},
 					globalOpts,
 				);
@@ -1471,6 +1549,10 @@ program
 	.option("--deny-all", "Auto-deny all permissions")
 	.option("--idle-timeout <seconds>", "Cancel if no events received within N seconds")
 	.option("--tag <key=value...>", "Add metadata tags to JSON events (repeatable)")
+	.option("--forward-webhook <url...>", "POST events to webhook URL (repeatable)")
+	.option("--forward-ws <url...>", "Stream events over WebSocket (repeatable)")
+	.option("--forward-filter <types>", "Comma-separated event types to forward (default: all)")
+	.option("--forward-headers <json>", "Custom headers for forwarders (JSON object)")
 	.action(
 		async (
 			textParts: string[],
@@ -1484,6 +1566,10 @@ program
 				denyAll?: boolean;
 				idleTimeout?: string;
 				tag?: string[];
+				forwardWebhook?: string[];
+				forwardWs?: string[];
+				forwardFilter?: string;
+				forwardHeaders?: string;
 			},
 			cmd: Command,
 		) => {
@@ -1502,6 +1588,7 @@ program
 						...opts,
 						tags: parseTags(opts.tag),
 						idleTimeout: parseIdleTimeout(opts.idleTimeout),
+						forwarders: buildForwarders(opts),
 					},
 					globalOpts,
 				);

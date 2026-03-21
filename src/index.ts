@@ -54,6 +54,16 @@ export { ActiveClientManager } from "./client/active-client.js";
 export { ReconnectManager } from "./client/reconnect.js";
 export type { ReconnectOptions, ReconnectOutcome } from "./client/reconnect.js";
 
+// ── Event forwarding ────────────────────────────────────────────────────
+
+export type { AhpxEvent, EventForwarder } from "./events/forwarder.js";
+export { WebhookForwarder } from "./events/webhook-forwarder.js";
+export type { WebhookForwarderOptions } from "./events/webhook-forwarder.js";
+export { WebSocketForwarder } from "./events/ws-forwarder.js";
+export type { WebSocketForwarderOptions } from "./events/ws-forwarder.js";
+export { ForwardingFormatter } from "./events/forwarding-formatter.js";
+export type { ForwardingFormatterOptions } from "./events/forwarding-formatter.js";
+
 // ── Authentication ──────────────────────────────────────────────────────
 
 export { AuthHandler } from "./auth/handler.js";

@@ -11,7 +11,7 @@ ahpx is a CLI client for the Agent Host Protocol. It connects to AHP servers via
 WebSocket, speaks JSON-RPC 2.0, and manages AI agent sessions with streaming
 responses, tool calls, and permissions.
 
-**~8,600 lines of TypeScript** — ~5,200 lines of application code plus ~3,100
+**~9,800 lines of TypeScript** — ~6,700 lines of application code plus ~3,100
 lines of vendored AHP protocol type definitions.
 
 ## Directory structure
@@ -30,7 +30,16 @@ src/
 │   ├── state.ts            Client-side state mirror
 │   ├── active-client.ts    Session active client management
 │   ├── reconnect.ts        Auto-reconnect with backoff
+│   ├── session-handle.ts   SessionHandle — per-session convenience wrapper
+│   ├── connection-pool.ts  ConnectionPool — URL-keyed connection reuse
 │   └── __tests__/          Tests for all client layers
+│
+├── events/                 Event forwarding (Phase 9)
+│   ├── forwarder.ts        AhpxEvent + EventForwarder interface
+│   ├── webhook-forwarder.ts WebhookForwarder — batched HTTP POST
+│   ├── ws-forwarder.ts     WebSocketForwarder — streaming WebSocket
+│   ├── forwarding-formatter.ts ForwardingFormatter — OutputFormatter decorator
+│   └── __tests__/
 │
 ├── session/                Session persistence & scoping
 │   ├── store.ts            SessionStore — JSON files in ~/.ahpx/sessions/
@@ -180,6 +189,55 @@ class StateMirror {
 
 Routes actions: root actions (`root/agentsChanged`, `root/activeSessionsChanged`)
 go through `rootReducer`; all others through `sessionReducer`.
+
+### Session handle (`client/session-handle.ts`)
+
+`SessionHandle` wraps a single session on an `AhpClient`, filtering events by
+session URI and providing a cleaner API than raw `dispatchAction()` calls.
+
+```typescript
+class SessionHandle extends EventEmitter {
+  get sessionUri(): URI
+  get sessionState(): ISessionState | undefined
+
+  async sendPrompt(text: string, options?: PromptOptions): Promise<TurnResult>
+  async cancelTurn(): Promise<void>
+  async waitForReady(timeoutMs?: number): Promise<void>
+  dispose(): void
+}
+
+interface TurnResult {
+  turnId: string
+  responseText: string
+  toolCalls: number
+  usage?: IUsageInfo
+  state: "complete" | "cancelled" | "error"
+  error?: string
+}
+```
+
+Library consumers work with `SessionHandle` instead of raw `AhpClient`:
+- Events are pre-filtered — only actions for this session are emitted
+- `sendPrompt()` drives a full turn and returns a `TurnResult`
+- `waitForReady()` blocks until the session reaches `idle` lifecycle
+- `dispose()` cleans up listeners and marks the handle as disposed
+
+### Connection pool (`client/connection-pool.ts`)
+
+URL-keyed connection reuse for library consumers managing multiple servers.
+
+```typescript
+class ConnectionPool {
+  async getClient(url: string, options?: AhpClientOptions): Promise<AhpClient>
+  async closeAll(): Promise<void>
+  get size(): number
+}
+```
+
+- `getClient(url)` — returns an existing `AhpClient` for the URL or creates a
+  new one, normalizing URLs before comparison
+- Removes clients automatically on disconnect
+- `closeAll()` disconnects all pooled connections
 
 ### Auto-reconnect (`client/reconnect.ts`)
 
@@ -479,6 +537,130 @@ Verbosity controlled by `--verbose` flag or `setVerbose(true)`.
 7. **Atomic file writes** — temp file + rename prevents corruption
 8. **Exhaustive type maps** — protocol version/action maps catch missing cases at compile time
 9. **Exit codes** — well-defined codes (0–5, 130) for scripting and CI
+10. **Decorator forwarding** — `ForwardingFormatter` wraps any formatter, forwarding events fire-and-forget
+11. **Connection pooling** — URL-keyed reuse prevents redundant WebSocket connections
+
+## Event forwarding (Phase 9)
+
+Pluggable event forwarding system for streaming ahpx events to external
+consumers: dashboards, log aggregators, monitoring systems.
+
+### AhpxEvent and EventForwarder
+
+```typescript
+interface AhpxEvent {
+  type: string            // "delta", "tool_call_complete", "turn_complete", etc.
+  timestamp: string       // ISO 8601
+  tags?: Record<string, string>
+  data: Record<string, unknown>
+  sessionUri?: string     // Multi-session disambiguation
+}
+
+interface EventForwarder {
+  forward(event: AhpxEvent): void | Promise<void>
+  close(): Promise<void>
+}
+```
+
+`AhpxEvent` is compatible with the `JsonEnvelope` shape from the NDJSON
+formatter, extended with `sessionUri` for multi-session support.
+
+### WebhookForwarder (`events/webhook-forwarder.ts`)
+
+POSTs events as NDJSON to an HTTP endpoint with batching and retry.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `url` | — | HTTP endpoint to POST to |
+| `headers` | `{}` | Custom HTTP headers |
+| `batchSize` | `10` | Events per batch before flush |
+| `batchIntervalMs` | `1000` | Max ms before flushing a partial batch |
+| `retries` | `3` | Retry attempts with exponential backoff |
+| `filter` | all | Event types to forward |
+
+Flushes remaining events on `close()`.
+
+### WebSocketForwarder (`events/ws-forwarder.ts`)
+
+Streams events over a WebSocket connection in real-time.
+
+- **Auto-reconnect** with exponential backoff on disconnect
+- **Backpressure handling** — pauses sending when buffered amount exceeds 1 MB
+- **Disconnect buffering** — buffers up to 10,000 events while reconnecting
+- **Event type filtering** via `filter` option
+
+### ForwardingFormatter (`events/forwarding-formatter.ts`)
+
+Decorator pattern: wraps any `OutputFormatter` and forwards events to one or
+more `EventForwarder` instances.
+
+```typescript
+class ForwardingFormatter implements OutputFormatter {
+  constructor(options: {
+    inner: OutputFormatter
+    forwarders: EventForwarder[]
+    sessionUri?: string
+    tags?: Record<string, string>
+  })
+
+  // Each method delegates to inner + forwards as AhpxEvent
+  onDelta(text: string): void    // → inner.onDelta() + forward "delta"
+  // ... all OutputFormatter methods ...
+
+  set sessionUri(uri: string)    // Set after construction (for dynamic sessions)
+  close(): Promise<void>         // Flush all forwarders
+}
+```
+
+Fire-and-forget: forwarder errors are logged but never propagate to the inner
+formatter or `TurnController`.
+
+### CLI integration
+
+Event forwarding flags are available on both `exec` and `prompt` commands:
+
+```
+--forward-webhook <url>     POST events to HTTP endpoint (repeatable)
+--forward-ws <url>          Stream events over WebSocket (repeatable)
+--forward-filter <types>    Comma-separated event types to forward
+--forward-headers <json>    JSON object of custom headers
+```
+
+### Library API
+
+Forwarders are standalone utilities exported from `ahpx`:
+
+```typescript
+import { WebhookForwarder, WebSocketForwarder, ForwardingFormatter } from 'ahpx';
+
+// Option 1: Use ForwardingFormatter as a decorator
+const formatter = new ForwardingFormatter({
+  inner: myFormatter,
+  forwarders: [new WebhookForwarder({ url: 'https://...' })],
+});
+
+// Option 2: Forward manually from session events
+session.on('action', (envelope) => {
+  forwarder.forward({ type: envelope.action.type, ... });
+});
+```
+
+## Library exports (`src/index.ts`)
+
+ahpx is both a CLI tool (`src/bin.ts`) and an npm library (`src/index.ts`).
+The library exports:
+
+| Category | Exports |
+|----------|---------|
+| Core client | `AhpClient`, `AhpClientOptions`, `AhpClientEvents`, `OpenSessionOptions` |
+| Session handle | `SessionHandle`, `SessionHandleEvents`, `PromptOptions`, `SessionTurnResult` |
+| Connection pool | `ConnectionPool`, `ConnectionPoolOptions` |
+| Transport | `Transport`, `TransportOptions` |
+| Protocol layer | `ProtocolLayer`, `ProtocolLayerOptions`, `RpcError`, `RpcTimeoutError` |
+| State mirror | `StateMirror` |
+| Event forwarding | `EventForwarder`, `AhpxEvent`, `WebhookForwarder`, `WebSocketForwarder`, `ForwardingFormatter` |
+| Auth | `AuthHandler`, `AuthHandlerOptions` |
+| Protocol types | State types (`IRootState`, `ISessionState`, …), action types, command result types |
 
 ## Build and test
 
@@ -502,29 +684,33 @@ npm run lint:fix    # biome check --write .
 
 ahpx v0.1 (Phases 0–6) shipped the foundation: core AHP client, connection
 management, sessions, prompting, output formatting, observation, and George
-integration. 229 tests pass. It's integrated into George as AgentDispatcherV3.
+integration. Phase 7 added library mode (`import { AhpClient } from 'ahpx'`),
+Phase 8 added multi-session support with `SessionHandle` and `ConnectionPool`,
+and Phase 9 added event forwarding (webhook + WebSocket). 365 tests pass.
 
 v0.2 evolves ahpx from CLI tool to **production-grade agent dispatch platform**:
 
-| Phase | Name | Goal |
-|-------|------|------|
-| **7** | Library Mode | Export as npm package with typed API (`import { AhpClient } from 'ahpx'`) |
-| **8** | Multi-Session | Concurrent sessions on a single WebSocket connection |
-| **9** | Event Forwarding | Webhook and WebSocket event streaming for dashboards |
-| **10** | Fleet Management | Multi-server health monitoring, routing, and dispatch |
-| **11** | Robust Multi-Turn | Session resume, metadata, system prompts, persistence |
-| **12** | Production Hardening | Bug fixes, CI/CD, comprehensive testing, error handling |
+| Phase | Name | Status |
+|-------|------|--------|
+| **7** | Library Mode | ✅ Complete — npm package with typed API |
+| **8** | Multi-Session | ✅ Complete — SessionHandle, ConnectionPool |
+| **9** | Event Forwarding | ✅ Complete — Webhook + WebSocket streaming |
+| **10** | Fleet Management | Planned — multi-server health monitoring, routing, dispatch |
+| **11** | Robust Multi-Turn | Planned — session resume, metadata, system prompts |
+| **12** | Production Hardening | Planned — bug fixes, CI/CD, comprehensive testing |
 
 ### Key architectural implications for v0.2
 
 - **Dual entry points:** `src/index.ts` (library) and `src/bin.ts` (CLI) —
-  the client layer becomes a public API
+  the client layer is a public API (Phase 7, complete)
+- **SessionHandle + ConnectionPool:** Per-session wrappers and URL-keyed
+  connection reuse simplify multi-session library usage (Phase 8, complete)
+- **Event forwarding:** `ForwardingFormatter` decorator + `WebhookForwarder` /
+  `WebSocketForwarder` stream events to external consumers (Phase 9, complete)
 - **FleetManager:** New top-level class that manages multiple `AhpClient`
-  instances across servers
-- **Event forwarding:** New forwarding layer between `OutputFormatter` and
-  external consumers (webhooks, WebSocket streams)
+  instances across servers (Phase 10, planned)
 - **Session metadata:** Extended `SessionStore` with client-side metadata
-  tracking (workaround for protocol gap #26)
+  tracking (Phase 11, planned)
 
 ### Protocol dependencies
 
@@ -532,11 +718,8 @@ v0.2 evolves ahpx from CLI tool to **production-grade agent dispatch platform**:
 workarounds where feasible. See [docs/roadmap.md](../../../docs/roadmap.md) for
 the full protocol dependency analysis.
 
-### 24 open issues mapped to phases
+### Open issues mapped to remaining phases
 
-- Phase 7: #7, #9
-- Phase 8: #31
-- Phase 9: #8
 - Phase 10: #28, #30
 - Phase 11: #5, #6, #10, #25, #26, #29
 - Phase 12: #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #27
