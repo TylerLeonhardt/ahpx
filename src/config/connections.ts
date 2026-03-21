@@ -9,6 +9,9 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("connections");
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,7 +74,8 @@ export class ConnectionStore {
 			if ((err as NodeJS.ErrnoException).code === "ENOENT") {
 				return { connections: [] };
 			}
-			throw err;
+			log.warn("corrupt connections file, using empty list", { error: String(err) });
+			return { connections: [] };
 		}
 	}
 

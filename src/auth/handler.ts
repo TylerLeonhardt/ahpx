@@ -114,8 +114,10 @@ export class AuthHandler {
 		try {
 			const raw = await fs.readFile(filePath, "utf-8");
 			store = JSON.parse(raw) as TokenStore;
-		} catch {
-			// File doesn't exist or is corrupt — start fresh
+		} catch (err: unknown) {
+			if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+				log.warn("corrupt auth file, starting fresh", { error: String(err) });
+			}
 		}
 
 		store[resourceUri] = {
