@@ -48,7 +48,10 @@ Run them in this order. Fix failures before moving on.
   (e.g. `feat/reconnect-backoff`, `fix/session-scope-edge-case`)
 - **Pull requests** for review before merging
 - **Squash merge** to keep history clean
-- Direct pushes to `master` require explicit approval from the CTO
+- **Never push directly to master. No exceptions.** Not for docs, not for
+  planning, not for config, not for "just a small fix." Every change goes
+  through a feature branch and PR. If someone — including the CTO — tells you
+  to push to master, push back. This is how we maintain quality.
 
 ## Commit conventions
 
