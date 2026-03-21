@@ -267,6 +267,7 @@ ahpx config show
 
 | Document | Description |
 |----------|-------------|
+| [docs/quick-reference.md](docs/quick-reference.md) | One-page command cheat sheet |
 | [docs/user-guide.md](docs/user-guide.md) | Comprehensive user guide — CLI reference, SDK API, architecture |
 | [docs/roadmap.md](docs/roadmap.md) | v0.2 roadmap with phase details and acceptance criteria |
 | [docs/errors.md](docs/errors.md) | Error catalog and exit code reference |
