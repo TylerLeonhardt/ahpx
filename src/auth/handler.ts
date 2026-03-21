@@ -13,13 +13,17 @@
 
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { AhpClient } from "../client/index.js";
+import { createLogger } from "../logger.js";
 import type { IProtectedResourceMetadata } from "../protocol/state.js";
+
+const log = createLogger("auth");
 
 /** Where auth tokens are stored. */
 function authFilePath(configDir?: string): string {
-	const dir = configDir ?? path.join(process.env.HOME ?? "~", ".ahpx");
+	const dir = configDir ?? path.join(os.homedir(), ".ahpx");
 	return path.join(dir, "auth.json");
 }
 
@@ -52,7 +56,7 @@ export class AuthHandler {
 		private readonly client: AhpClient,
 		options: AuthHandlerOptions = {},
 	) {
-		this.configDir = options.configDir ?? path.join(process.env.HOME ?? "~", ".ahpx");
+		this.configDir = options.configDir ?? path.join(os.homedir(), ".ahpx");
 		this.explicitToken = options.token;
 		this.interactive = options.interactive ?? !!process.stdin.isTTY;
 	}
@@ -104,7 +108,7 @@ export class AuthHandler {
 	 */
 	async storeToken(resourceUri: string, token: string): Promise<void> {
 		const filePath = authFilePath(this.configDir);
-		await fs.mkdir(path.dirname(filePath), { recursive: true });
+		await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
 
 		let store: TokenStore = {};
 		try {
@@ -139,7 +143,10 @@ export class AuthHandler {
 			const raw = await fs.readFile(authFilePath(this.configDir), "utf-8");
 			const store = JSON.parse(raw) as TokenStore;
 			return store[resourceUri]?.token;
-		} catch {
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+				log.warn("skipping corrupt auth file", { error: String(err) });
+			}
 			return undefined;
 		}
 	}

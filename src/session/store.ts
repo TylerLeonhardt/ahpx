@@ -7,7 +7,11 @@
 
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("session-store");
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -113,13 +117,13 @@ export class SessionStore {
 	private readonly sessionsDir: string;
 
 	constructor(configDir?: string) {
-		const dir = configDir ?? path.join(process.env.HOME ?? "~", ".ahpx");
+		const dir = configDir ?? path.join(os.homedir(), ".ahpx");
 		this.sessionsDir = path.join(dir, "sessions");
 	}
 
 	/** Ensure the sessions directory exists. */
 	private async ensureDir(): Promise<void> {
-		await fs.mkdir(this.sessionsDir, { recursive: true });
+		await fs.mkdir(this.sessionsDir, { recursive: true, mode: 0o700 });
 	}
 
 	/** Path to a session record file. */
@@ -134,7 +138,7 @@ export class SessionStore {
 	async save(record: SessionRecord): Promise<void> {
 		await this.ensureDir();
 		const tmp = path.join(this.sessionsDir, `.${record.id}.${randomUUID()}.tmp`);
-		await fs.writeFile(tmp, `${JSON.stringify(record, null, "\t")}\n`, "utf-8");
+		await fs.writeFile(tmp, `${JSON.stringify(record, null, "\t")}\n`, { mode: 0o600, encoding: "utf-8" });
 		await fs.rename(tmp, this.filePath(record.id));
 	}
 
@@ -184,8 +188,8 @@ export class SessionStore {
 				if (filter?.name && record.name !== filter.name) continue;
 
 				records.push(record);
-			} catch {
-				// Skip corrupt files
+			} catch (err) {
+				log.warn("skipping corrupt session file", { file: entry, error: String(err) });
 			}
 		}
 

@@ -8,6 +8,7 @@
  */
 
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -52,7 +53,7 @@ export const DEFAULT_CONFIG: Readonly<AhpxConfig> = Object.freeze({
 // ── Paths ────────────────────────────────────────────────────────────────────
 
 export function globalConfigDir(): string {
-	return process.env.HOME ? path.join(process.env.HOME, ".ahpx") : path.join("~", ".ahpx");
+	return path.join(os.homedir(), ".ahpx");
 }
 
 export function globalConfigPath(): string {

@@ -7,6 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -52,13 +53,13 @@ export class ConnectionStore {
 	private readonly filePath: string;
 
 	constructor(configDir?: string) {
-		const dir = configDir ?? path.join(process.env.HOME ?? "~", ".ahpx");
+		const dir = configDir ?? path.join(os.homedir(), ".ahpx");
 		this.filePath = path.join(dir, "connections.json");
 	}
 
 	/** Ensure the config directory exists. */
 	private async ensureDir(): Promise<void> {
-		await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+		await fs.mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
 	}
 
 	/** Read the connections file, returning an empty list if it doesn't exist. */
@@ -78,7 +79,7 @@ export class ConnectionStore {
 	private async write(data: ConnectionsFile): Promise<void> {
 		await this.ensureDir();
 		const tmp = `${this.filePath}.${randomUUID()}.tmp`;
-		await fs.writeFile(tmp, `${JSON.stringify(data, null, "\t")}\n`, "utf-8");
+		await fs.writeFile(tmp, `${JSON.stringify(data, null, "\t")}\n`, { mode: 0o600, encoding: "utf-8" });
 		await fs.rename(tmp, this.filePath);
 	}
 
