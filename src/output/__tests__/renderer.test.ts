@@ -4,6 +4,14 @@ import type { IPermissionRequest, IToolCallResult, IUsageInfo } from "../../prot
 import { PromptRenderer } from "../renderer.js";
 import type { ToolCallInfo, WritableOutput } from "../renderer.js";
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes require control characters
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+/** Strip ANSI escape codes so assertions work regardless of color support. */
+function stripAnsi(str: string): string {
+	return str.replace(ANSI_RE, "");
+}
+
 /** Captures all output written to the renderer. */
 function createCapture(): { out: WritableOutput; text: () => string } {
 	let buf = "";
@@ -13,7 +21,7 @@ function createCapture(): { out: WritableOutput; text: () => string } {
 				buf += s;
 			},
 		},
-		text: () => buf,
+		text: () => stripAnsi(buf),
 	};
 }
 

@@ -11,7 +11,7 @@ ahpx is a CLI client for the Agent Host Protocol. It connects to AHP servers via
 WebSocket, speaks JSON-RPC 2.0, and manages AI agent sessions with streaming
 responses, tool calls, and permissions.
 
-**~9,800 lines of TypeScript** — ~6,700 lines of application code plus ~3,100
+**485 tests across 28 test files.** ~9,800 lines of TypeScript — ~6,700 lines of application code plus ~3,100
 lines of vendored AHP protocol type definitions.
 
 ## Directory structure
@@ -88,6 +88,10 @@ src/
     ├── action-origin.generated.ts   Client/server action dispatch matrix
     └── version/
         └── registry.ts     Protocol version compatibility maps
+
+docs/
+├── errors.md               Error catalog and troubleshooting
+├── roadmap.md              Phase-by-phase roadmap and protocol dependencies
 ```
 
 ## Three-layer client architecture
@@ -852,6 +856,25 @@ npm run lint:fix    # biome check --write .
 
 **Build output:** Single file `dist/bin.js` with `#!/usr/bin/env node` shebang.
 
+## CI/CD
+
+GitHub Actions automates quality enforcement and publishing.
+
+**CI workflow** (`.github/workflows/ci.yml`) — runs on every push and pull request:
+- Node.js matrix: 20, 22
+- Pipeline: typecheck → lint → test → build (sequential, fail-fast)
+
+**Publish workflow** (`.github/workflows/publish.yml`) — manual `workflow_dispatch`:
+- Publishes to npm with provenance (`--provenance --access public`)
+- Triggered manually for controlled releases
+
+**Quality gates** — all five checks must pass before merge:
+1. `npm run typecheck` — `tsc --noEmit`
+2. `npm run lint` — Biome check
+3. `npm test` — Vitest (485 tests)
+4. `npm run build` — tsup production build
+5. Node.js version matrix (20 + 22)
+
 ## Roadmap (v0.2)
 
 ahpx v0.1 (Phases 0–6) shipped the foundation: core AHP client, connection
@@ -860,7 +883,7 @@ integration. Phase 7 added library mode (`import { AhpClient } from 'ahpx'`),
 Phase 8 added multi-session support with `SessionHandle` and `ConnectionPool`,
 Phase 9 added event forwarding (webhook + WebSocket), Phase 10 added fleet
 management (HealthChecker, FleetManager, server tags), and Phase 11 added robust
-multi-turn sessions (SessionPersistence, turn history, export/import). 434 tests pass.
+multi-turn sessions (SessionPersistence, turn history, export/import). 485 tests pass.
 
 v0.2 evolves ahpx from CLI tool to **production-grade agent dispatch platform**:
 
@@ -871,7 +894,7 @@ v0.2 evolves ahpx from CLI tool to **production-grade agent dispatch platform**:
 | **9** | Event Forwarding | ✅ Complete — Webhook + WebSocket streaming |
 | **10** | Fleet Management | ✅ Complete — HealthChecker, FleetManager, server tags, CLI status/health |
 | **11** | Robust Multi-Turn | ✅ Complete — SessionPersistence, turn history, session resume, export/import |
-| **12** | Production Hardening | Planned — bug fixes, CI/CD, comprehensive testing |
+| **12** | Production Hardening | ✅ Complete — CI/CD, 485 tests, npm publish prep, error docs |
 
 ### Key architectural implications for v0.2
 

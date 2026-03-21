@@ -1,96 +1,118 @@
 # ahpx
 
-> ⚠️ **Under development** — This project is in early development and not yet ready for production use.
+**Agent Host Protocol client** — CLI and Node.js library for managing AHP server connections, sessions, and agent interactions.
 
-**Agent Host Protocol CLI** — manage AHP server connections, sessions, and agent interactions from the command line.
+[![CI](https://github.com/TylerLeonhardt/ahpx/actions/workflows/ci.yml/badge.svg)](https://github.com/TylerLeonhardt/ahpx/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/ahpx)](https://www.npmjs.com/package/ahpx)
 
-## What is AHP?
+## What is ahpx?
 
-The [Agent Host Protocol](https://github.com/anthropics/agent-host-protocol) (AHP) is a WebSocket-based JSON-RPC protocol for managing AI agent sessions. It provides a standardized way to:
+ahpx is a client for the [Agent Host Protocol](https://github.com/anthropics/agent-host-protocol) (AHP) — a WebSocket-based JSON-RPC protocol for managing AI agent sessions. Use ahpx to connect to AHP servers, create sessions, send prompts, stream responses, and handle tool confirmations, either from the command line or programmatically as a Node.js library.
 
-- Connect to agent backends (e.g. GitHub Copilot)
-- Create and manage chat sessions
-- Stream responses and tool calls in real-time
-- Handle permissions and tool confirmations
+## Features
 
-`ahpx` is a CLI client that speaks this protocol.
+- 🔌 **Connect to AHP servers** via WebSocket with saved connection profiles
+- 💬 **Interactive and one-shot prompting** with streaming output
+- 📡 **Multi-session management** — concurrent sessions on a single connection
+- 🔄 **Event forwarding** — webhook and WebSocket targets for dashboards and pipelines
+- 🏗️ **Fleet management** — health checks, status monitoring, and server tagging
+- 💾 **Session persistence** — resume sessions, export/import history
+- 📦 **Use as CLI or Node.js library** with full TypeScript types
+- 🔒 **Configurable permission modes** — approve-all, approve-reads, deny-all
 
 ## Quick Start
 
 ```bash
-# Install dependencies
-npm install
+npm install -g ahpx
 
-# Build
-npm run build
+# Add a server
+ahpx server add local --url ws://localhost:8082 --default
 
-# Run
-./dist/bin.js connect ws://localhost:3000
-
-# Or link globally
-npm link
-ahpx connect ws://localhost:3000
+# Start prompting
+ahpx "what files are in this directory?"
 ```
 
-## Development
+Or use `exec` for one-shot tasks that create and dispose of a session automatically:
 
 ```bash
-# Type check
-npm run typecheck
-
-# Run tests
-npm test
-
-# Lint
-npm run lint
-
-# Watch mode
-npm run dev
+ahpx exec "summarize this repo"
 ```
 
-## Contributing
+## CLI Commands
 
-Project knowledge lives in `.github/` so both humans and agents can find it:
+### Prompting
 
-- **[`.github/skills/ahp-protocol/`](.github/skills/ahp-protocol/SKILL.md)** — AHP protocol fundamentals: state model, actions, JSON-RPC commands, connection lifecycle
-- **[`.github/skills/ahpx-architecture/`](.github/skills/ahpx-architecture/SKILL.md)** — Codebase architecture: 3-layer client, sessions, prompting, config
-- **[`.github/agents/team-lead.md`](.github/agents/team-lead.md)** — Team lead agent definition with quality gates and workflow
+| Command | Description |
+|---------|-------------|
+| `ahpx <text>` | Send a prompt (implicit — any text that isn't a command) |
+| `ahpx prompt <text>` | Send a prompt to an existing session |
+| `ahpx exec <text>` | One-shot: create a temp session, prompt, dispose |
+| `ahpx cancel` | Cancel the active turn in a session |
 
-Before making changes, read the relevant skill docs. They'll save you time and help you make better decisions.
+Prompt options: `-s <server>`, `-n <session-name>`, `-f <file>`, `--cwd <dir>`, `--approve-all`, `--approve-reads`, `--deny-all`, `--idle-timeout <seconds>`, `--tag <key=value>`, `--forward-webhook <url>`, `--forward-ws <url>`, `--forward-filter <types>`, `--forward-headers <json>`
 
-### Quality gates
+`exec` also accepts: `-p <provider>`, `-m <model>`
 
-All must pass before committing:
+### Server Management
 
-```bash
-npm run typecheck   # Zero type errors
-npm run lint        # Zero lint violations
-npm test            # All tests pass
-npm run build       # Clean build
-```
+| Command | Description |
+|---------|-------------|
+| `ahpx server add <name> --url <url>` | Save a named connection profile |
+| `ahpx server list` | List saved connections |
+| `ahpx server remove <name>` | Remove a saved connection |
+| `ahpx server test <target>` | Test connectivity to a server |
+| `ahpx server status` | Health check all saved servers |
+| `ahpx server health <name>` | Detailed health check for a single server |
 
-## George Integration
+`server add` options: `--token <token>`, `--default`, `--tag <tag>` (repeatable)
 
-ahpx can be used as an agent dispatch backend for [George](https://github.com/TylerLeonhardt/copilot-chat-bridge) (CTO bot). George spawns `ahpx exec` with `--format json --approve-all` to dispatch agents through AHP servers, getting structured NDJSON output and semantic exit codes.
+### Session Management
 
-```bash
-ahpx exec -s vscode --format json --json-strict --approve-all "fix the bug"
-```
+| Command | Description |
+|---------|-------------|
+| `ahpx session new` | Create a new agent session |
+| `ahpx session list` | List sessions (default: active only) |
+| `ahpx session show [id]` | Show session details |
+| `ahpx session close [id]` | Close a session (keeps record for history) |
+| `ahpx session history [id]` | Show turn history for a session |
+| `ahpx session active` | Show all active sessions on the server (live query) |
+| `ahpx session export <id>` | Export a session record to JSON |
+| `ahpx session import <file>` | Import a session record from JSON |
 
-Key capabilities for George:
-- **One-shot dispatch** via `ahpx exec` (session lifecycle handled automatically)
-- **Session persistence** for multi-turn tasks via `ahpx session new` / `ahpx prompt`
-- **Multi-client observation** via `ahpx watch` (monitor from another process)
-- **Structured output** — NDJSON events with `{ type, timestamp, data }` envelopes
-- **Semantic exit codes** — 0 (success), 1 (error), 3 (timeout), 5 (permission denied)
+`session new` options: `-s <server>`, `-p <provider>`, `-m <model>`, `-n <name>`, `--cwd <dir>`, `-t <timeout>`
 
-Resources:
-- **[George AHP Dispatch Skill](.github/skills/george-ahp-dispatch/SKILL.md)** — Complete reference for George on using ahpx
-- **[Integration Guide](docs/george-integration.md)** — Architecture, workflows, parsing examples, and troubleshooting
+### Configuration
+
+| Command | Description |
+|---------|-------------|
+| `ahpx config show` | Print resolved config with source annotations |
+| `ahpx config init` | Create `~/.ahpx/config.json` with defaults |
+
+### Utilities
+
+| Command | Description |
+|---------|-------------|
+| `ahpx connect [target]` | Connect to a server and print server info |
+| `ahpx agents` | List available agents and models on the server |
+| `ahpx content <uri>` | Fetch content by URI from the server |
+| `ahpx model <model-id>` | Switch the model for a session |
+| `ahpx watch [id]` | Attach to a session as an observer and stream activity |
+| `ahpx browse [directory]` | Browse server filesystem |
+| `ahpx completions bash\|zsh\|fish` | Generate shell completion scripts |
+
+### Global Options
+
+| Flag | Description |
+|------|-------------|
+| `--format <format>` | Output format: `text`, `json`, or `quiet` (default: `text`) |
+| `--json-strict` | Suppress non-JSON stderr output (use with `--format json`) |
+| `-v, --verbose` | Enable debug logging to stderr |
+| `--version` | Print version |
+| `--help` | Show help |
 
 ## Library Usage
 
-ahpx can be used as a Node.js library with full TypeScript support:
+ahpx exports a full TypeScript API. Install it as a dependency:
 
 ```bash
 npm install ahpx
@@ -199,27 +221,85 @@ try {
 }
 ```
 
-For the full API reference, see the exported TypeScript type declarations.
+### Additional APIs
 
-## Roadmap
+- **`SessionHandle`** — per-session wrapper with scoped event listeners and lifecycle management
+- **`ConnectionPool`** — connection reuse across multiple sessions to the same server
+- **`WebhookForwarder` / `WebSocketForwarder`** — forward NDJSON events to external targets
+- **`HealthChecker`** — fleet-level health monitoring across saved servers
 
-### v0.1 — Foundation (complete ✅)
+See the exported TypeScript declarations for the full API reference.
 
-Phases 0–6 shipped the core AHP client, connection management, session
-lifecycle, prompting with streaming, output formatting, multi-client observation,
-and George integration. 229 tests pass.
+## Exit Codes
 
-### v0.2 — Agent Dispatch Platform (in progress)
+ahpx uses semantic exit codes so scripts and automation can react to failures:
 
-- **Phase 7** — Library Mode: export ahpx as an npm package with typed API
-- **Phase 8** — Multi-Session: concurrent sessions on a single connection
-- **Phase 9** — Event Forwarding: webhook and WebSocket event streaming
-- **Phase 10** — Fleet Management: multi-server health, routing, and dispatch
-- **Phase 11** — Robust Multi-Turn: session resume, metadata, system prompts
-- **Phase 12** — Production Hardening: bugs, tests, CI/CD, error handling
+| Code | Meaning | Description |
+|------|---------|-------------|
+| `0` | Success | Command completed successfully |
+| `1` | Runtime error | Unexpected error during execution |
+| `2` | Usage error | Bad CLI arguments or missing required flags |
+| `3` | Timeout | Connection or request timed out |
+| `4` | No session | Session not found — run `session new` first |
+| `5` | Permission denied | All permission requests were denied |
+| `130` | Interrupted | Process was interrupted (Ctrl+C) |
 
-See **[docs/roadmap.md](docs/roadmap.md)** for the detailed v0.2 roadmap with
-acceptance criteria, issue mapping, and protocol dependency analysis.
+See [docs/errors.md](docs/errors.md) for the full error reference.
+
+## Configuration
+
+ahpx uses a layered configuration system. Settings are resolved in order of precedence:
+
+1. **CLI flags** — highest priority (e.g. `--format json`)
+2. **Project config** — `.ahpxrc.json` in the current directory or git root
+3. **Global config** — `~/.ahpx/config.json`
+4. **Defaults** — built-in fallback values
+
+```bash
+# Initialize global config
+ahpx config init
+
+# View resolved config with source annotations
+ahpx config show
+```
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [docs/roadmap.md](docs/roadmap.md) | v0.2 roadmap with phase details and acceptance criteria |
+| [docs/errors.md](docs/errors.md) | Error catalog and exit code reference |
+| [docs/george-integration.md](docs/george-integration.md) | Integration guide for George agent dispatch |
+| [docs/protocol-feedback.md](docs/protocol-feedback.md) | AHP protocol gap analysis and workarounds |
+
+## Development
+
+Requires Node.js ≥ 20.
+
+```bash
+npm install          # Install dependencies
+npm run build        # Build with tsup
+npm run dev          # Watch mode
+npm run typecheck    # Type check with tsc
+npm run lint         # Lint with Biome
+npm test             # Run tests with Vitest
+```
+
+All four quality gates must pass before committing:
+
+```bash
+npm run typecheck && npm run lint && npm test && npm run build
+```
+
+## Contributing
+
+Project knowledge lives in `.github/` so both humans and agents can find it:
+
+- **[`.github/skills/ahp-protocol/`](.github/skills/ahp-protocol/SKILL.md)** — AHP protocol fundamentals
+- **[`.github/skills/ahpx-architecture/`](.github/skills/ahpx-architecture/SKILL.md)** — Codebase architecture and design
+- **[`.github/agents/team-lead.md`](.github/agents/team-lead.md)** — Team lead agent with quality gates and workflow
+
+Read the relevant skill docs before making changes — they'll save you time.
 
 ## License
 

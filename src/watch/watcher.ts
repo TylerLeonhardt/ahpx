@@ -10,7 +10,7 @@ import pc from "picocolors";
 import type { AhpClient } from "../client/index.js";
 import type { OutputFormatter } from "../output/format.js";
 import type { ToolCallInfo } from "../output/renderer.js";
-import type { IActionEnvelope, IStateAction } from "../protocol/actions.js";
+import type { IActionEnvelope } from "../protocol/actions.js";
 import { ActionType } from "../protocol/actions.js";
 import type {
 	ISessionDeltaAction,
@@ -73,7 +73,7 @@ export class SessionWatcher {
 
 			this.onAction = (envelope: IActionEnvelope) => {
 				if (this.stopped) return;
-				this.handleAction(envelope.action);
+				this.handleAction(envelope);
 			};
 
 			this.client.on("action", this.onAction);
@@ -157,7 +157,8 @@ export class SessionWatcher {
 	/**
 	 * Route an incoming action to the formatter.
 	 */
-	private handleAction(action: IStateAction): void {
+	private handleAction(envelope: IActionEnvelope): void {
+		const action = envelope.action;
 		// Only handle actions for our session
 		if (!("session" in action) || (action as { session: URI }).session !== this.sessionUri) {
 			return;
@@ -178,7 +179,7 @@ export class SessionWatcher {
 
 			case ActionType.SessionTurnStarted: {
 				// Show who started the turn
-				const origin = this.getOriginLabel(action);
+				const origin = this.getOriginLabel(envelope);
 				this.statusOut.write(pc.dim(`[watch] Turn started${origin}\n`));
 				break;
 			}
@@ -268,9 +269,10 @@ export class SessionWatcher {
 	/**
 	 * Get a label describing who started the turn (if from another client).
 	 */
-	private getOriginLabel(_action: IStateAction): string {
-		// The action envelope carries origin info, but we only get the action here.
-		// For now, show nothing — the action itself doesn't carry origin.
+	private getOriginLabel(envelope: IActionEnvelope): string {
+		if (envelope.origin) {
+			return ` (from ${envelope.origin.clientId})`;
+		}
 		return "";
 	}
 
