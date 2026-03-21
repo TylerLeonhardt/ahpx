@@ -156,6 +156,31 @@ describe("ConnectionStore", () => {
 		});
 	});
 
+	describe("tags", () => {
+		it("stores tags on a connection", async () => {
+			await store.add({ name: "cloud", url: "ws://cloud.example.com", tags: ["gpu", "cloud"] });
+
+			const conn = await store.get("cloud");
+			expect(conn).toBeDefined();
+			expect(conn!.tags).toEqual(["gpu", "cloud"]);
+		});
+
+		it("persists tags across store instances", async () => {
+			await store.add({ name: "tagged", url: "ws://tagged.example.com", tags: ["local"] });
+
+			const store2 = new ConnectionStore(tmpDir);
+			const conn = await store2.get("tagged");
+			expect(conn!.tags).toEqual(["local"]);
+		});
+
+		it("omits tags when not provided", async () => {
+			await store.add({ name: "notags", url: "ws://notags.example.com" });
+
+			const conn = await store.get("notags");
+			expect(conn!.tags).toBeUndefined();
+		});
+	});
+
 	describe("file persistence", () => {
 		it("persists across store instances", async () => {
 			await store.add({ name: "persisted", url: "ws://localhost:3000" });
