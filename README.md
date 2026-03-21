@@ -267,6 +267,7 @@ ahpx config show
 
 | Document | Description |
 |----------|-------------|
+| [docs/user-guide.md](docs/user-guide.md) | Comprehensive user guide — CLI reference, SDK API, architecture |
 | [docs/roadmap.md](docs/roadmap.md) | v0.2 roadmap with phase details and acceptance criteria |
 | [docs/errors.md](docs/errors.md) | Error catalog and exit code reference |
 | [docs/george-integration.md](docs/george-integration.md) | Integration guide for George agent dispatch |
