@@ -88,15 +88,25 @@ Resources:
 - **[George AHP Dispatch Skill](.github/skills/george-ahp-dispatch/SKILL.md)** — Complete reference for George on using ahpx
 - **[Integration Guide](docs/george-integration.md)** — Architecture, workflows, parsing examples, and troubleshooting
 
-## Phase Roadmap
+## Roadmap
 
-- **Phase 0** — Project scaffold & core AHP client ✅
-- **Phase 1** — Connection management & server discovery ✅
-- **Phase 2** — Session lifecycle (create, list, inspect, close, history) ✅
-- **Phase 3** — Prompting & streaming (turns, tool calls, permissions, cancel) ✅
-- **Phase 4** — Output formatting & polish (JSON/quiet modes, spinners, exit codes, completions) ✅
-- **Phase 5** — Multi-client & advanced (watch, reconnect, auth, active client, browse) ✅
-- **Phase 6** — George skill integration (dispatch skill, integration docs) ✅
+### v0.1 — Foundation (complete ✅)
+
+Phases 0–6 shipped the core AHP client, connection management, session
+lifecycle, prompting with streaming, output formatting, multi-client observation,
+and George integration. 229 tests pass.
+
+### v0.2 — Agent Dispatch Platform (in progress)
+
+- **Phase 7** — Library Mode: export ahpx as an npm package with typed API
+- **Phase 8** — Multi-Session: concurrent sessions on a single connection
+- **Phase 9** — Event Forwarding: webhook and WebSocket event streaming
+- **Phase 10** — Fleet Management: multi-server health, routing, and dispatch
+- **Phase 11** — Robust Multi-Turn: session resume, metadata, system prompts
+- **Phase 12** — Production Hardening: bugs, tests, CI/CD, error handling
+
+See **[docs/roadmap.md](docs/roadmap.md)** for the detailed v0.2 roadmap with
+acceptance criteria, issue mapping, and protocol dependency analysis.
 
 ## License
 
