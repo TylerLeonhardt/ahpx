@@ -88,6 +88,119 @@ Resources:
 - **[George AHP Dispatch Skill](.github/skills/george-ahp-dispatch/SKILL.md)** — Complete reference for George on using ahpx
 - **[Integration Guide](docs/george-integration.md)** — Architecture, workflows, parsing examples, and troubleshooting
 
+## Library Usage
+
+ahpx can be used as a Node.js library with full TypeScript support:
+
+```bash
+npm install ahpx
+```
+
+### Connect and list agents
+
+```typescript
+import { AhpClient } from 'ahpx';
+
+const client = new AhpClient({ initialSubscriptions: ['agenthost:/root'] });
+const result = await client.connect('ws://localhost:8082');
+
+console.log('Agents:', result.agents);
+console.log('Connected:', client.connected);
+
+await client.disconnect();
+```
+
+### Create a session and send a prompt
+
+```typescript
+import { AhpClient, ActionType } from 'ahpx';
+import { randomUUID } from 'node:crypto';
+
+const client = new AhpClient({ initialSubscriptions: ['agenthost:/root'] });
+await client.connect('ws://localhost:8082');
+
+// Create a session
+const sessionUri = `copilot:/${randomUUID()}`;
+await client.createSession(sessionUri, { provider: 'copilot' });
+await client.subscribe(sessionUri);
+
+// Listen for streaming events
+client.on('action', (envelope) => {
+  const { action } = envelope;
+  switch (action.type) {
+    case ActionType.SessionDelta:
+      process.stdout.write(action.content);
+      break;
+    case ActionType.SessionTurnComplete:
+      console.log('\n--- Turn complete ---');
+      break;
+    case ActionType.SessionError:
+      console.error('Error:', action.error);
+      break;
+  }
+});
+
+// Send a prompt
+client.dispatchAction({
+  type: ActionType.SessionTurnStarted,
+  session: sessionUri,
+  turnId: randomUUID(),
+  userMessage: { text: 'Fix the failing test' },
+});
+```
+
+### Handle authentication
+
+```typescript
+import { AhpClient, AuthHandler } from 'ahpx';
+
+const client = new AhpClient();
+const auth = new AuthHandler(client, { token: process.env.MY_TOKEN });
+
+client.on('notification', async (notification) => {
+  if (notification.type === 'authRequired') {
+    await auth.handleAuthRequired(notification.resource);
+  }
+});
+
+await client.connect('ws://localhost:8082');
+```
+
+### Read state from the state mirror
+
+```typescript
+const client = new AhpClient();
+await client.connect('ws://localhost:8082');
+
+// Root state (agents, active sessions)
+console.log('Agents:', client.state.root.agents);
+
+// Session state (after subscribing)
+const session = client.state.getSession('copilot:/my-session');
+console.log('Title:', session?.summary?.title);
+console.log('Active turn:', session?.activeTurn);
+```
+
+### Error handling
+
+```typescript
+import { AhpClient, RpcError, RpcTimeoutError } from 'ahpx';
+
+const client = new AhpClient();
+
+try {
+  await client.connect('ws://localhost:8082');
+} catch (err) {
+  if (err instanceof RpcTimeoutError) {
+    console.error(`Request ${err.method} timed out after ${err.timeoutMs}ms`);
+  } else if (err instanceof RpcError) {
+    console.error(`RPC error ${err.code}: ${err.message}`);
+  }
+}
+```
+
+For the full API reference, see the exported TypeScript type declarations.
+
 ## Roadmap
 
 ### v0.1 — Foundation (complete ✅)
