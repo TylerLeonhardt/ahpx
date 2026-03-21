@@ -37,6 +37,7 @@ import type { EventForwarder } from "./events/forwarder.js";
 import { ForwardingFormatter } from "./events/forwarding-formatter.js";
 import { WebhookForwarder } from "./events/webhook-forwarder.js";
 import { WebSocketForwarder } from "./events/ws-forwarder.js";
+import { HealthChecker } from "./fleet/health.js";
 import { setVerbose } from "./logger.js";
 import { createFormatter, startSpinner } from "./output/index.js";
 import type { OutputFormat, OutputFormatter } from "./output/index.js";
@@ -351,35 +352,48 @@ server
 	.requiredOption("--url <url>", "WebSocket URL (ws:// or wss://)")
 	.option("--token <token>", "Authentication token")
 	.option("--default", "Set as the default server")
-	.action(async (name: string, opts: { url: string; token?: string; default?: boolean }, cmd: Command) => {
-		const globalOpts = parseGlobalOpts(cmd);
-		applyGlobalOpts(globalOpts);
+	.option(
+		"--tag <tag>",
+		"Add a tag to this server (repeatable)",
+		(val: string, prev: string[]) => [...prev, val],
+		[] as string[],
+	)
+	.action(
+		async (name: string, opts: { url: string; token?: string; default?: boolean; tag: string[] }, cmd: Command) => {
+			const globalOpts = parseGlobalOpts(cmd);
+			applyGlobalOpts(globalOpts);
 
-		try {
-			await store.add({
-				name,
-				url: opts.url,
-				token: opts.token,
-				default: opts.default ?? false,
-			});
-			outputResult(
-				globalOpts,
-				() => {
-					console.log(pc.green("✓"), `Saved connection ${pc.bold(name)} → ${pc.dim(opts.url)}`);
-					if (opts.default) {
-						console.log(pc.dim("  Set as default server"));
-					}
-				},
-				{ name, url: opts.url, default: opts.default ?? false },
-			);
-		} catch (err) {
-			if (err instanceof ConnectionValidationError) {
-				handleError(new UsageError(err.message), globalOpts);
-			} else {
-				handleError(err, globalOpts);
+			try {
+				const tags = opts.tag.length > 0 ? opts.tag : undefined;
+				await store.add({
+					name,
+					url: opts.url,
+					token: opts.token,
+					default: opts.default ?? false,
+					tags,
+				});
+				outputResult(
+					globalOpts,
+					() => {
+						console.log(pc.green("✓"), `Saved connection ${pc.bold(name)} → ${pc.dim(opts.url)}`);
+						if (opts.default) {
+							console.log(pc.dim("  Set as default server"));
+						}
+						if (tags) {
+							console.log(pc.dim(`  Tags: ${tags.join(", ")}`));
+						}
+					},
+					{ name, url: opts.url, default: opts.default ?? false, tags: tags ?? [] },
+				);
+			} catch (err) {
+				if (err instanceof ConnectionValidationError) {
+					handleError(new UsageError(err.message), globalOpts);
+				} else {
+					handleError(err, globalOpts);
+				}
 			}
-		}
-	});
+		},
+	);
 
 server
 	.command("list")
@@ -482,6 +496,149 @@ server
 			handleError(err, globalOpts);
 		} finally {
 			await client.disconnect();
+		}
+	});
+
+server
+	.command("status")
+	.description("Health check all saved servers")
+	.option("--all", "Show all servers including unreachable")
+	.option("-t, --timeout <ms>", "Health check timeout in milliseconds", "10000")
+	.action(async (opts: { all?: boolean; timeout: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const connections = await store.list();
+
+			if (connections.length === 0) {
+				outputResult(
+					globalOpts,
+					() => console.log(pc.dim("No saved connections. Run"), pc.bold("ahpx server add"), pc.dim("to add one.")),
+					[],
+				);
+				return;
+			}
+
+			const spinner = startSpinner(`Checking ${connections.length} server(s)...`, spinnersEnabled(globalOpts));
+			const checker = new HealthChecker({ timeout: Number.parseInt(opts.timeout, 10) });
+			const results = await checker.checkAll(connections);
+			spinner.stop();
+
+			const displayed = opts.all ? results : results.filter((r) => r.status !== "unreachable");
+
+			outputResult(
+				globalOpts,
+				() => {
+					if (displayed.length === 0) {
+						console.log(pc.dim("No servers to check."));
+						return;
+					}
+
+					const nameW = Math.max(4, ...displayed.map((r) => r.name.length));
+					const urlW = Math.max(3, ...displayed.map((r) => r.url.length));
+
+					console.log(
+						`  ${pc.bold("Name".padEnd(nameW))}  ${pc.bold("URL".padEnd(urlW))}  ${pc.bold("Status".padEnd(11))}  ${pc.bold("Latency".padEnd(9))}  ${pc.bold("Sessions".padEnd(8))}  ${pc.bold("Agents")}`,
+					);
+					console.log(
+						`  ${"─".repeat(nameW)}  ${"─".repeat(urlW)}  ${"─".repeat(11)}  ${"─".repeat(9)}  ${"─".repeat(8)}  ${"─".repeat(10)}`,
+					);
+
+					for (const r of displayed) {
+						const statusColor = r.status === "healthy" ? pc.green : r.status === "degraded" ? pc.yellow : pc.red;
+						const latency = r.status === "unreachable" ? pc.dim("—") : `${Math.round(r.latencyMs)}ms`;
+						const sessions = r.status === "unreachable" ? pc.dim("—") : String(r.activeSessions);
+						const agents =
+							r.status === "unreachable" ? pc.dim("—") : r.agents.map((a) => a.provider).join(", ") || pc.dim("none");
+
+						console.log(
+							`  ${pc.cyan(r.name.padEnd(nameW))}  ${r.url.padEnd(urlW)}  ${statusColor(r.status.padEnd(11))}  ${String(latency).padEnd(9)}  ${String(sessions).padEnd(8)}  ${agents}`,
+						);
+					}
+				},
+				displayed.map((r) => ({
+					name: r.name,
+					url: r.url,
+					status: r.status,
+					latencyMs: r.latencyMs,
+					activeSessions: r.activeSessions,
+					agents: r.agents,
+					error: r.error,
+				})),
+			);
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
+
+server
+	.command("health")
+	.description("Detailed health check for a single server")
+	.argument("<name>", "Connection name")
+	.option("-t, --timeout <ms>", "Health check timeout in milliseconds", "10000")
+	.action(async (name: string, opts: { timeout: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const conn = await store.get(name);
+			if (!conn) {
+				throw new AhpxError(
+					`Connection "${name}" not found. Run ${pc.bold("ahpx server list")} to see saved connections.`,
+					ExitCode.Error,
+				);
+			}
+
+			const spinner = startSpinner(`Checking ${name}...`, spinnersEnabled(globalOpts));
+			const checker = new HealthChecker({ timeout: Number.parseInt(opts.timeout, 10) });
+			const health = await checker.check(conn.url, conn.name);
+			spinner.stop();
+
+			outputResult(
+				globalOpts,
+				() => {
+					const statusColor =
+						health.status === "healthy" ? pc.green : health.status === "degraded" ? pc.yellow : pc.red;
+
+					console.log(pc.bold("Server:"), pc.cyan(health.name));
+					console.log(pc.bold("URL:"), health.url);
+					console.log(pc.bold("Status:"), statusColor(health.status));
+					console.log(
+						pc.bold("Latency:"),
+						health.status === "unreachable" ? pc.dim("—") : `${Math.round(health.latencyMs)}ms`,
+					);
+					if (health.protocolVersion !== undefined) {
+						console.log(pc.bold("Protocol:"), `v${health.protocolVersion}`);
+					}
+					console.log(
+						pc.bold("Active sessions:"),
+						health.status === "unreachable" ? pc.dim("—") : String(health.activeSessions),
+					);
+
+					if (health.agents.length > 0) {
+						console.log(pc.bold("Agents:"));
+						for (const agent of health.agents) {
+							console.log(`  ${pc.cyan(agent.provider)}: ${agent.models.join(", ") || pc.dim("no models")}`);
+						}
+					} else if (health.status !== "unreachable") {
+						console.log(pc.bold("Agents:"), pc.dim("none"));
+					}
+
+					if (conn.tags && conn.tags.length > 0) {
+						console.log(pc.bold("Tags:"), conn.tags.join(", "));
+					}
+
+					if (health.error) {
+						console.log(pc.bold("Error:"), pc.red(health.error));
+					}
+
+					console.log(pc.bold("Checked at:"), health.checkedAt);
+				},
+				health,
+			);
+		} catch (err) {
+			handleError(err, globalOpts);
 		}
 	});
 

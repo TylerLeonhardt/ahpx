@@ -69,6 +69,17 @@ export type { ForwardingFormatterOptions } from "./events/forwarding-formatter.j
 export { AuthHandler } from "./auth/handler.js";
 export type { AuthHandlerOptions } from "./auth/handler.js";
 
+// ── Fleet management ────────────────────────────────────────────────────
+
+export { HealthChecker } from "./fleet/health.js";
+export type { ServerHealth } from "./fleet/health.js";
+export { FleetManager } from "./fleet/manager.js";
+export type { FleetManagerOptions, RoutingStrategy, ServerRequirements } from "./fleet/manager.js";
+
+// ── Connection config ───────────────────────────────────────────────────
+
+export type { ConnectionProfile } from "./config/connections.js";
+
 // ── Protocol types ──────────────────────────────────────────────────────
 //
 // Re-export the subset of protocol types that library consumers encounter

@@ -20,6 +20,8 @@ export interface ConnectionProfile {
 	token?: string;
 	/** Whether this is the default connection */
 	default?: boolean;
+	/** Optional tags for server grouping (e.g., ['gpu', 'cloud']) */
+	tags?: string[];
 }
 
 interface ConnectionsFile {

@@ -41,6 +41,11 @@ src/
 │   ├── forwarding-formatter.ts ForwardingFormatter — OutputFormatter decorator
 │   └── __tests__/
 │
+├── fleet/                  Fleet management (Phase 10)
+│   ├── health.ts           HealthChecker — server health probing
+│   ├── manager.ts          FleetManager — routing strategies & server selection
+│   └── __tests__/
+│
 ├── session/                Session persistence & scoping
 │   ├── store.ts            SessionStore — JSON files in ~/.ahpx/sessions/
 │   ├── scope.ts            Directory-walk session resolution
@@ -539,6 +544,8 @@ Verbosity controlled by `--verbose` flag or `setVerbose(true)`.
 9. **Exit codes** — well-defined codes (0–5, 130) for scripting and CI
 10. **Decorator forwarding** — `ForwardingFormatter` wraps any formatter, forwarding events fire-and-forget
 11. **Connection pooling** — URL-keyed reuse prevents redundant WebSocket connections
+12. **Stateless health checks** — each probe creates/destroys a temporary client, no leaked state
+13. **Strategy pattern (routing)** — FleetManager routing strategies are pluggable via enum
 
 ## Event forwarding (Phase 9)
 
@@ -645,6 +652,114 @@ session.on('action', (envelope) => {
 });
 ```
 
+## Fleet management (Phase 10)
+
+Multi-server health monitoring, capacity-aware routing, and server grouping.
+
+### Server health checking (`fleet/health.ts`)
+
+`HealthChecker` probes AHP servers for health status. Each check is stateless:
+connect → initialize → read root state → disconnect.
+
+```typescript
+interface ServerHealth {
+  name: string;
+  url: string;
+  status: 'healthy' | 'degraded' | 'unreachable';
+  latencyMs: number;
+  protocolVersion?: number;
+  agents: { provider: string; models: string[] }[];
+  activeSessions: number;
+  checkedAt: string;  // ISO 8601
+  error?: string;
+}
+
+class HealthChecker {
+  constructor(options?: { timeout?: number })  // default 10s
+  async check(url: string, name: string, timeout?: number): Promise<ServerHealth>
+  async checkAll(connections: Array<{ name: string; url: string }>): Promise<ServerHealth[]>
+}
+```
+
+- `check()` creates a temporary `AhpClient`, connects, reads `state.root` for
+  agents/sessions, measures latency via `performance.now()`, disconnects
+- On connection error or timeout: returns `status: 'unreachable'` with error
+- Always disconnects in `finally` block (best-effort cleanup)
+- `checkAll()` runs all checks concurrently via `Promise.all()`
+
+### Fleet manager (`fleet/manager.ts`)
+
+`FleetManager` caches health data and routes dispatches to the best server.
+
+```typescript
+type RoutingStrategy = 'least-sessions' | 'round-robin' | 'random' | 'preferred';
+
+interface FleetManagerOptions {
+  connections: ConnectionProfile[];
+  strategy?: RoutingStrategy;       // default: 'least-sessions'
+  preferredServer?: string;
+  tags?: Record<string, string[]>;  // tag → server names mapping
+  healthCheckTimeout?: number;
+}
+
+interface ServerRequirements {
+  provider?: string;   // server must have this agent provider
+  model?: string;      // server must have this model
+  tag?: string;        // server must have this tag
+}
+
+class FleetManager {
+  async selectServer(requirements?: ServerRequirements): Promise<{ name: string; url: string }>
+  async getHealth(): Promise<ServerHealth[]>
+  async refresh(): Promise<void>
+}
+```
+
+Routing strategies:
+- **least-sessions** — pick server with fewest `activeSessions`
+- **round-robin** — cycle through healthy servers with internal index
+- **random** — random selection from healthy candidates
+- **preferred** — use `preferredServer` if healthy, fallback to least-sessions
+
+Tag resolution merges `ConnectionProfile.tags` with `FleetManagerOptions.tags`:
+```typescript
+// Profile: { name: 'cloud', tags: ['gpu'] }
+// Options: { tags: { fast: ['cloud'] } }
+// → 'cloud' has effective tags: ['gpu', 'fast']
+```
+
+### Server tags on ConnectionProfile
+
+`ConnectionProfile` supports optional tags for server grouping:
+
+```typescript
+interface ConnectionProfile {
+  name: string;
+  url: string;
+  token?: string;
+  default?: boolean;
+  tags?: string[];  // e.g., ['gpu', 'cloud']
+}
+```
+
+CLI: `ahpx server add cloud --url wss://cloud:8082 --tag gpu --tag cloud`
+
+### CLI commands
+
+```
+ahpx server status [--all]        Health check all saved servers (table output)
+ahpx server health <name>         Detailed health for one server
+```
+
+`server status` shows a table:
+```
+Name    URL                    Status       Latency   Sessions  Agents
+local   ws://localhost:8082    healthy      12ms      2         copilot, mock
+cloud   wss://cloud:8082       healthy      45ms      0         copilot
+```
+
+By default, unreachable servers are hidden unless `--all` is passed.
+
 ## Library exports (`src/index.ts`)
 
 ahpx is both a CLI tool (`src/bin.ts`) and an npm library (`src/index.ts`).
@@ -659,6 +774,8 @@ The library exports:
 | Protocol layer | `ProtocolLayer`, `ProtocolLayerOptions`, `RpcError`, `RpcTimeoutError` |
 | State mirror | `StateMirror` |
 | Event forwarding | `EventForwarder`, `AhpxEvent`, `WebhookForwarder`, `WebSocketForwarder`, `ForwardingFormatter` |
+| Fleet management | `HealthChecker`, `ServerHealth`, `FleetManager`, `FleetManagerOptions`, `RoutingStrategy`, `ServerRequirements` |
+| Connection config | `ConnectionProfile` |
 | Auth | `AuthHandler`, `AuthHandlerOptions` |
 | Protocol types | State types (`IRootState`, `ISessionState`, …), action types, command result types |
 
@@ -686,7 +803,8 @@ ahpx v0.1 (Phases 0–6) shipped the foundation: core AHP client, connection
 management, sessions, prompting, output formatting, observation, and George
 integration. Phase 7 added library mode (`import { AhpClient } from 'ahpx'`),
 Phase 8 added multi-session support with `SessionHandle` and `ConnectionPool`,
-and Phase 9 added event forwarding (webhook + WebSocket). 365 tests pass.
+and Phase 9 added event forwarding (webhook + WebSocket), and Phase 10 added
+fleet management (HealthChecker, FleetManager, server tags). 398 tests pass.
 
 v0.2 evolves ahpx from CLI tool to **production-grade agent dispatch platform**:
 
@@ -695,7 +813,7 @@ v0.2 evolves ahpx from CLI tool to **production-grade agent dispatch platform**:
 | **7** | Library Mode | ✅ Complete — npm package with typed API |
 | **8** | Multi-Session | ✅ Complete — SessionHandle, ConnectionPool |
 | **9** | Event Forwarding | ✅ Complete — Webhook + WebSocket streaming |
-| **10** | Fleet Management | Planned — multi-server health monitoring, routing, dispatch |
+| **10** | Fleet Management | ✅ Complete — HealthChecker, FleetManager, server tags, CLI status/health |
 | **11** | Robust Multi-Turn | Planned — session resume, metadata, system prompts |
 | **12** | Production Hardening | Planned — bug fixes, CI/CD, comprehensive testing |
 
@@ -707,8 +825,8 @@ v0.2 evolves ahpx from CLI tool to **production-grade agent dispatch platform**:
   connection reuse simplify multi-session library usage (Phase 8, complete)
 - **Event forwarding:** `ForwardingFormatter` decorator + `WebhookForwarder` /
   `WebSocketForwarder` stream events to external consumers (Phase 9, complete)
-- **FleetManager:** New top-level class that manages multiple `AhpClient`
-  instances across servers (Phase 10, planned)
+- **FleetManager:** Health-aware routing across multiple servers with 4
+  strategies and tag-based filtering (Phase 10, complete)
 - **Session metadata:** Extended `SessionStore` with client-side metadata
   tracking (Phase 11, planned)
 
