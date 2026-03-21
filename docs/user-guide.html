@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ahpx — Agent Host Protocol CLI &amp; SDK</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #1c2128;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
+  --text-subtle: #6e7681;
+  --accent: #58a6ff;
+  --accent-hover: #79c0ff;
+  --green: #3fb950;
+  --red: #f85149;
+  --orange: #d29922;
+  --purple: #bc8cff;
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', Consolas, 'Liberation Mono', Menlo, monospace;
+  --sidebar-width: 280px;
+  --header-height: 64px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header-height) + 24px); }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; transition: color 0.15s; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* Header */
+.site-header {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  height: var(--header-height);
+  background: rgba(13, 17, 23, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 24px;
+}
+.header-inner {
+  max-width: 1400px; width: 100%; margin: 0 auto;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.header-logo { font-weight: 700; font-size: 20px; color: var(--text); font-family: var(--font-mono); }
+.header-logo span { color: var(--accent); }
+.header-links { display: flex; gap: 24px; }
+.header-links a { color: var(--text-muted); font-size: 14px; font-weight: 500; }
+.header-links a:hover { color: var(--text); text-decoration: none; }
+.mobile-menu-btn {
+  display: none; background: none; border: none; color: var(--text-muted);
+  cursor: pointer; padding: 8px; font-size: 24px; line-height: 1;
+}
+
+/* Layout */
+.layout { display: flex; margin-top: var(--header-height); min-height: calc(100vh - var(--header-height)); }
+
+/* Sidebar */
+.sidebar {
+  position: fixed; top: var(--header-height); left: 0; bottom: 0;
+  width: var(--sidebar-width); overflow-y: auto;
+  padding: 24px 16px; border-right: 1px solid var(--border);
+  background: var(--bg); z-index: 50;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+.sidebar::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.sidebar-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin: 16px 0 8px; }
+.sidebar-title:first-child { margin-top: 0; }
+.sidebar-link {
+  display: block; padding: 5px 12px; font-size: 13px; color: var(--text-muted);
+  border-radius: 6px; transition: all 0.15s; border-left: 2px solid transparent; margin: 1px 0;
+}
+.sidebar-link:hover { color: var(--text); background: var(--bg-secondary); text-decoration: none; }
+.sidebar-link.active { color: var(--accent); border-left-color: var(--accent); background: rgba(88, 166, 255, 0.08); }
+.sidebar-sub { padding-left: 16px; }
+.sidebar-sub .sidebar-link { font-size: 12px; padding: 3px 12px; }
+
+/* Main content */
+.main {
+  flex: 1; margin-left: var(--sidebar-width);
+  max-width: 900px; padding: 0 48px 80px;
+}
+
+/* Sections with scroll animation */
+.section { padding-top: 48px; opacity: 0; transform: translateY(20px); transition: opacity 0.5s ease, transform 0.5s ease; }
+.section.visible { opacity: 1; transform: translateY(0); }
+
+/* Hero */
+.hero { text-align: center; padding: 80px 0 60px; }
+.hero-badge {
+  display: inline-block; padding: 4px 14px; border-radius: 100px;
+  background: rgba(88, 166, 255, 0.12); color: var(--accent);
+  font-size: 13px; font-weight: 500; margin-bottom: 24px;
+  border: 1px solid rgba(88, 166, 255, 0.2);
+}
+.hero h1 { font-size: 56px; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 12px; font-family: var(--font-mono); }
+.hero h1 span { color: var(--accent); }
+.hero-subtitle { font-size: 22px; color: var(--text-muted); font-weight: 400; margin-bottom: 8px; }
+.hero-oneliner { font-size: 16px; color: var(--text-subtle); max-width: 600px; margin: 0 auto 32px; }
+.hero-stats { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-bottom: 40px; }
+.stat-badge {
+  padding: 6px 16px; border-radius: 100px; font-size: 13px; font-weight: 500;
+  border: 1px solid var(--border); color: var(--text-muted); background: var(--bg-secondary);
+}
+.stat-badge strong { color: var(--text); }
+.hero-terminal {
+  max-width: 560px; margin: 0 auto; border-radius: 10px;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  overflow: hidden; text-align: left;
+}
+.terminal-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 16px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border);
+}
+.terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
+.terminal-dot.r { background: #f85149; }
+.terminal-dot.y { background: #d29922; }
+.terminal-dot.g { background: #3fb950; }
+.terminal-title { margin-left: 8px; font-size: 12px; color: var(--text-subtle); font-family: var(--font-mono); }
+.terminal-body { padding: 16px 20px; font-family: var(--font-mono); font-size: 14px; line-height: 1.7; }
+.terminal-body .prompt { color: var(--green); }
+.terminal-body .cmd { color: var(--text); }
+.terminal-body .output { color: var(--text-muted); }
+.terminal-body .cursor {
+  display: inline-block; width: 8px; height: 16px; background: var(--accent);
+  animation: blink 1s step-end infinite; vertical-align: text-bottom;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* Typography */
+h2 { font-size: 32px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+h2 .anchor { color: var(--text-subtle); margin-left: 8px; opacity: 0; transition: opacity 0.15s; font-weight: 400; }
+h2:hover .anchor { opacity: 1; }
+h3 { font-size: 22px; font-weight: 600; margin: 36px 0 12px; color: var(--text); }
+h4 { font-size: 17px; font-weight: 600; margin: 28px 0 10px; color: var(--text); font-family: var(--font-mono); }
+p { margin-bottom: 16px; color: var(--text-muted); }
+ul, ol { margin-bottom: 16px; padding-left: 24px; color: var(--text-muted); }
+li { margin-bottom: 6px; }
+strong { color: var(--text); font-weight: 600; }
+
+/* Code */
+code {
+  font-family: var(--font-mono); font-size: 0.88em;
+  background: var(--bg-secondary); padding: 2px 7px; border-radius: 4px;
+  color: var(--accent); border: 1px solid var(--border);
+}
+pre { position: relative; margin: 16px 0 24px; border-radius: 8px; overflow: hidden; }
+pre code {
+  display: block; padding: 20px 24px; background: var(--bg-secondary);
+  border: 1px solid var(--border); border-radius: 8px;
+  overflow-x: auto; font-size: 13px; line-height: 1.65; color: var(--text);
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+}
+pre code::-webkit-scrollbar { height: 6px; }
+pre code::-webkit-scrollbar-track { background: transparent; }
+pre code::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.copy-btn {
+  position: absolute; top: 10px; right: 10px;
+  background: var(--bg-tertiary); border: 1px solid var(--border);
+  color: var(--text-muted); padding: 4px 10px; border-radius: 6px;
+  cursor: pointer; font-size: 12px; font-family: var(--font-body);
+  opacity: 0; transition: all 0.15s; z-index: 2;
+}
+pre:hover .copy-btn { opacity: 1; }
+.copy-btn:hover { background: var(--border); color: var(--text); }
+.copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+/* Tables */
+.table-wrap { overflow-x: auto; margin: 16px 0 24px; border-radius: 8px; border: 1px solid var(--border); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { background: var(--bg-tertiary); text-align: left; padding: 10px 16px; font-weight: 600; color: var(--text); white-space: nowrap; }
+td { padding: 10px 16px; border-top: 1px solid var(--border); color: var(--text-muted); }
+td code { font-size: 0.85em; }
+tr:hover td { background: rgba(88, 166, 255, 0.03); }
+
+/* Cards */
+.cmd-card {
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 10px; padding: 24px; margin: 20px 0;
+}
+.cmd-card h4 { margin-top: 0; color: var(--accent); }
+.cmd-card p { font-size: 14px; }
+
+/* Diagram */
+.diagram {
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 10px; padding: 24px; margin: 24px 0;
+  overflow-x: auto; font-family: var(--font-mono); font-size: 13px;
+  line-height: 1.5; color: var(--text-muted); white-space: pre;
+}
+
+/* Architecture boxes */
+.arch-layers { display: flex; flex-direction: column; gap: 12px; margin: 24px 0; }
+.arch-layer {
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px 24px; position: relative;
+}
+.arch-layer::before {
+  content: ''; position: absolute; top: -12px; left: 50%;
+  width: 2px; height: 12px; background: var(--border);
+}
+.arch-layer:first-child::before { display: none; }
+.arch-layer-label {
+  font-family: var(--font-mono); font-size: 13px;
+  font-weight: 600; color: var(--accent); margin-bottom: 6px;
+}
+.arch-layer-desc { font-size: 14px; color: var(--text-muted); }
+
+.arch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 24px 0; }
+.arch-box {
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: 8px; padding: 16px;
+}
+.arch-box-title { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+.arch-box-desc { font-size: 13px; color: var(--text-muted); }
+
+/* Comparison badges */
+.mode-yes { color: var(--green); }
+.mode-no { color: var(--red); }
+.mode-ask { color: var(--orange); }
+
+/* Steps */
+.steps { counter-reset: step; margin: 24px 0; }
+.step {
+  position: relative; padding-left: 56px; margin-bottom: 32px; counter-increment: step;
+}
+.step::before {
+  content: counter(step); position: absolute; left: 0; top: 0;
+  width: 36px; height: 36px; border-radius: 50%;
+  background: rgba(88, 166, 255, 0.12); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 16px; border: 1px solid rgba(88, 166, 255, 0.3);
+}
+.step::after {
+  content: ''; position: absolute; left: 17px; top: 40px; bottom: -28px;
+  width: 2px; background: var(--border);
+}
+.step:last-child::after { display: none; }
+.step h4 { margin-top: 4px; }
+
+/* Back to top */
+.back-to-top {
+  position: fixed; bottom: 32px; right: 32px; z-index: 90;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: var(--accent); color: #fff; border: none;
+  cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center;
+  opacity: 0; transform: translateY(10px); transition: all 0.3s;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+.back-to-top.visible { opacity: 1; transform: translateY(0); }
+.back-to-top:hover { background: var(--accent-hover); transform: translateY(-2px); }
+
+/* Footer */
+.site-footer {
+  margin-left: var(--sidebar-width);
+  padding: 48px; border-top: 1px solid var(--border);
+  text-align: center; color: var(--text-subtle); font-size: 14px;
+}
+.site-footer a { color: var(--text-muted); }
+
+/* Mobile overlay */
+.sidebar-overlay {
+  display: none; position: fixed; inset: 0; z-index: 40;
+  background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
+}
+
+/* Responsive */
+@media (max-width: 1100px) {
+  .main { padding: 0 32px 80px; }
+}
+@media (max-width: 800px) {
+  .mobile-menu-btn { display: block; }
+  .sidebar {
+    transform: translateX(-100%); transition: transform 0.25s ease;
+    width: 280px; background: var(--bg);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-overlay.open { display: block; }
+  .main { margin-left: 0; padding: 0 20px 60px; }
+  .site-footer { margin-left: 0; padding: 32px 20px; }
+  .hero h1 { font-size: 36px; }
+  .hero-subtitle { font-size: 18px; }
+  .hero { padding: 48px 0 40px; }
+  h2 { font-size: 26px; }
+  h3 { font-size: 19px; }
+  .cmd-card { padding: 16px; }
+  pre code { font-size: 12px; padding: 16px; }
+  .header-links { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="site-header">
+  <div class="header-inner">
+    <div style="display:flex;align-items:center;gap:16px;">
+      <button class="mobile-menu-btn" onclick="toggleSidebar()" aria-label="Menu">☰</button>
+      <a href="#hero" class="header-logo">ahp<span>x</span></a>
+    </div>
+    <nav class="header-links">
+      <a href="#quick-start">Quick Start</a>
+      <a href="#cli-reference">CLI</a>
+      <a href="#sdk-reference">SDK</a>
+      <a href="#fleet">Fleet</a>
+      <a href="https://github.com/anthropics/agent-host-protocol">Protocol</a>
+    </nav>
+  </div>
+</header>
+
+<!-- Sidebar Overlay -->
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+<!-- Sidebar -->
+<nav class="sidebar" id="sidebar">
+  <div class="sidebar-title">Getting Started</div>
+  <a class="sidebar-link" href="#hero">Overview</a>
+  <a class="sidebar-link" href="#what-is-ahpx">What is ahpx?</a>
+  <a class="sidebar-link" href="#quick-start">Quick Start</a>
+
+  <div class="sidebar-title">Reference</div>
+  <a class="sidebar-link" href="#cli-reference">CLI Reference</a>
+  <div class="sidebar-sub">
+    <a class="sidebar-link" href="#cli-global-options">Global Options</a>
+    <a class="sidebar-link" href="#cli-connect">connect</a>
+    <a class="sidebar-link" href="#cli-server">server *</a>
+    <a class="sidebar-link" href="#cli-session">session *</a>
+    <a class="sidebar-link" href="#cli-prompt">prompt</a>
+    <a class="sidebar-link" href="#cli-exec">exec</a>
+    <a class="sidebar-link" href="#cli-other">Other Commands</a>
+  </div>
+  <a class="sidebar-link" href="#sdk-reference">SDK Reference</a>
+  <div class="sidebar-sub">
+    <a class="sidebar-link" href="#sdk-connect">Connect</a>
+    <a class="sidebar-link" href="#sdk-sessions">Sessions</a>
+    <a class="sidebar-link" href="#sdk-events">Events</a>
+    <a class="sidebar-link" href="#sdk-pool">ConnectionPool</a>
+    <a class="sidebar-link" href="#sdk-fleet">FleetManager</a>
+    <a class="sidebar-link" href="#sdk-forwarding">Forwarding</a>
+    <a class="sidebar-link" href="#sdk-persistence">Persistence</a>
+    <a class="sidebar-link" href="#sdk-auth">Auth</a>
+  </div>
+
+  <div class="sidebar-title">Concepts</div>
+  <a class="sidebar-link" href="#output-formats">Output Formats</a>
+  <a class="sidebar-link" href="#permissions">Permission Modes</a>
+  <a class="sidebar-link" href="#fleet">Fleet Management</a>
+  <a class="sidebar-link" href="#event-forwarding">Event Forwarding</a>
+
+  <div class="sidebar-title">Deep Dives</div>
+  <a class="sidebar-link" href="#george-integration">George Integration</a>
+  <a class="sidebar-link" href="#architecture">Architecture</a>
+</nav>
+
+<!-- Main Content -->
+<div class="layout">
+<main class="main">
+
+<!-- 1. Hero -->
+<section class="section visible" id="hero">
+<div class="hero">
+  <div class="hero-badge">Agent Host Protocol Client</div>
+  <h1>ahp<span>x</span></h1>
+  <p class="hero-subtitle">Agent Host Protocol CLI &amp; SDK</p>
+  <p class="hero-oneliner">Connect to AHP servers. Manage AI agent sessions. Stream responses. Dispatch fleets.</p>
+  <div class="hero-stats">
+    <span class="stat-badge"><strong>485</strong> tests</span>
+    <span class="stat-badge"><strong>12</strong> phases shipped</span>
+    <span class="stat-badge">CLI + SDK in one package</span>
+  </div>
+  <div class="hero-terminal">
+    <div class="terminal-bar">
+      <span class="terminal-dot r"></span>
+      <span class="terminal-dot y"></span>
+      <span class="terminal-dot g"></span>
+      <span class="terminal-title">Terminal</span>
+    </div>
+    <div class="terminal-body">
+      <div><span class="prompt">$ </span><span class="cmd">ahpx exec "Hello, world!"</span></div>
+      <div class="output" style="margin-top:8px;">🤖 Hello! I'm an AI agent connected via the Agent Host</div>
+      <div class="output">Protocol. I can read files, run commands, and help you</div>
+      <div class="output">with your codebase. What would you like to do?</div>
+      <div style="margin-top:8px;"><span class="output">[done] 0 tool calls · 12 input tokens · 38 output tokens</span></div>
+      <div style="margin-top:8px;"><span class="prompt">$ </span><span class="cursor"></span></div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- 2. What is ahpx? -->
+<section class="section" id="what-is-ahpx">
+<h2>What is ahpx? <a href="#what-is-ahpx" class="anchor">#</a></h2>
+<p><strong>AHP</strong> (<a href="https://github.com/anthropics/agent-host-protocol">Agent Host Protocol</a>) is a WebSocket-based JSON-RPC protocol for managing AI agent sessions. It defines how clients connect to servers, create sessions, send prompts, receive streaming responses, and handle tool calls — all over a single persistent connection.</p>
+<p><strong>ahpx</strong> is the first full-featured AHP client. It's two things in one package:</p>
+<ul>
+  <li><strong>A CLI for humans</strong> — connect to servers, manage sessions, send prompts, and stream responses directly from your terminal.</li>
+  <li><strong>An SDK for automation</strong> — import <code>AhpClient</code>, <code>ConnectionPool</code>, <code>FleetManager</code>, and friends into your TypeScript/Node.js code and build on top of AHP programmatically.</li>
+</ul>
+<p>Built by George's engineering team as the dispatch backbone for an autonomous CTO bot. The codebase is ~9,800 lines of TypeScript: ~6,700 application code and ~3,100 vendored protocol types.</p>
+</section>
+
+<!-- 3. Quick Start -->
+<section class="section" id="quick-start">
+<h2>Quick Start <a href="#quick-start" class="anchor">#</a></h2>
+<p>Get from zero to your first agent interaction in three steps.</p>
+
+<div class="steps">
+  <div class="step">
+    <h4>Install</h4>
+    <pre><code>npm install -g ahpx</code></pre>
+  </div>
+  <div class="step">
+    <h4>Add a server</h4>
+    <pre><code>ahpx server add local --url ws://localhost:8080 --default</code></pre>
+  </div>
+  <div class="step">
+    <h4>Start prompting</h4>
+    <pre><code>ahpx exec --approve-all "What can you do?"</code></pre>
+  </div>
+</div>
+
+<h3>Starting an AHP Server</h3>
+<p>You need an AHP-compatible server to connect to. For example, a VS Code Server with the AHP endpoint enabled:</p>
+<pre><code># Start a VS Code Server with AHP endpoint
+./scripts/code-server.sh --agent-host-port 8080 --without-connection-token</code></pre>
+
+<h3>Implicit Prompt Shorthand</h3>
+<p>Any text that isn't a recognized command is treated as a prompt — no subcommand needed:</p>
+<pre><code># These are equivalent
+ahpx exec "what files are in this directory?"
+ahpx "what files are in this directory?"
+
+# Pipe from stdin
+echo "review this code" | ahpx
+
+# With flags
+ahpx --format json "summarize this repo"</code></pre>
+</section>
+
+<!-- 4. CLI Reference -->
+<section class="section" id="cli-reference">
+<h2>CLI Reference <a href="#cli-reference" class="anchor">#</a></h2>
+<p>Every command, every flag, every default — the complete catalog.</p>
+
+<!-- Global Options -->
+<div id="cli-global-options">
+<h3>Global Options</h3>
+<p>These flags are available on every command.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Flag</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>--format &lt;format&gt;</code></td><td>Output format: <code>text</code>, <code>json</code>, or <code>quiet</code></td><td><code>text</code></td></tr>
+    <tr><td><code>--json-strict</code></td><td>Suppress non-JSON stderr output (only with <code>--format json</code>)</td><td>—</td></tr>
+    <tr><td><code>-v, --verbose</code></td><td>Enable debug logging to stderr</td><td>—</td></tr>
+    <tr><td><code>--version</code></td><td>Print version</td><td>—</td></tr>
+    <tr><td><code>--help</code></td><td>Show help</td><td>—</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<!-- connect -->
+<div class="cmd-card" id="cli-connect">
+<h4>connect</h4>
+<p>Connect to an AHP server and print server info (protocol version, agents, capabilities).</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>[target]</code></td><td>WebSocket URL or saved connection name</td><td>Default server</td></tr>
+    <tr><td><code>-t, --timeout &lt;ms&gt;</code></td><td>Connection timeout in milliseconds</td><td><code>10000</code></td></tr>
+  </tbody>
+</table>
+</div>
+<pre><code>ahpx connect
+ahpx connect ws://192.168.1.50:8082
+ahpx connect my-server</code></pre>
+</div>
+
+<!-- server commands -->
+<div id="cli-server">
+<h3>server *</h3>
+
+<div class="cmd-card">
+<h4>server add</h4>
+<p>Save a named connection profile.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;name&gt;</code></td><td>Connection name (required)</td><td>—</td></tr>
+    <tr><td><code>--url &lt;url&gt;</code></td><td>WebSocket URL (required)</td><td>—</td></tr>
+    <tr><td><code>--token &lt;token&gt;</code></td><td>Authentication token</td><td>—</td></tr>
+    <tr><td><code>--default</code></td><td>Set as the default connection</td><td>—</td></tr>
+    <tr><td><code>--tag &lt;tag&gt;</code></td><td>Add a tag (repeatable)</td><td>—</td></tr>
+  </tbody>
+</table>
+</div>
+<pre><code>ahpx server add local --url ws://localhost:8082 --default
+ahpx server add gpu-box --url wss://gpu.example.com:8082 --tag gpu --tag fast</code></pre>
+</div>
+
+<div class="cmd-card">
+<h4>server list</h4>
+<p>List all saved connections. No additional options.</p>
+<pre><code>ahpx server list</code></pre>
+</div>
+
+<div class="cmd-card">
+<h4>server remove</h4>
+<p>Remove a saved connection.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;name&gt;</code></td><td>Connection name to remove</td></tr>
+  </tbody>
+</table>
+</div>
+<pre><code>ahpx server remove old-server</code></pre>
+</div>
+
+<div class="cmd-card">
+<h4>server test</h4>
+<p>Test connectivity to a server.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;target&gt;</code></td><td>Connection name or WebSocket URL</td><td>—</td></tr>
+    <tr><td><code>-t, --timeout &lt;ms&gt;</code></td><td>Timeout in milliseconds</td><td><code>10000</code></td></tr>
+  </tbody>
+</table>
+</div>
+<pre><code>ahpx server test local
+ahpx server test ws://192.168.1.50:8082</code></pre>
+</div>
+
+<div class="cmd-card">
+<h4>server status</h4>
+<p>Health check all saved servers.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Option</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>--all</code></td><td>Show unreachable servers too</td><td>—</td></tr>
+    <tr><td><code>-t, --timeout &lt;ms&gt;</code></td><td>Timeout in milliseconds</td><td><code>10000</code></td></tr>
+  </tbody>
+</table>
+</div>
+<pre><code>ahpx server status
+ahpx server status --all</code></pre>
+</div>
+
+<div class="cmd-card">
+<h4>server health</h4>
+<p>Detailed health check for a single server.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;name&gt;</code></td><td>Connection name</td><td>—</td></tr>
+    <tr><td><code>-t, --timeout &lt;ms&gt;</code></td><td>Timeout in milliseconds</td><td><code>10000</code></td></tr>
+  </tbody>
+</table>
+</div>
+<pre><code>ahpx server health gpu-box</code></pre>
+</div>
+</div><!-- /server -->
+
+<!-- session commands -->
+<div id="cli-session">
+<h3>session *</h3>
+
+<div class="cmd-card">
+<h4>session new</h4>
+<p>Create a new agent session.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Option</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server to use</td><td>Default server</td></tr>
+    <tr><td><code>-p, --provider &lt;provider&gt;</code></td><td>Agent provider</td><td>—</td></tr>
+    <tr><td><code>-m, --model &lt;model&gt;</code></td><td>Model ID</td><td>—</td></tr>
+    <tr><td><code>-n, --name &lt;name&gt;</code></td><td>Session name</td><td>—</td></tr>
+    <tr><td><code>--cwd &lt;dir&gt;</code></td><td>Working directory</td><td>—</td></tr>
+    <tr><td><code>-t, --timeout &lt;ms&gt;</code></td><td>Timeout</td><td><code>10000</code></td></tr>
+  </tbody>
+</table>
+</div>
+<pre><code>ahpx session new -p copilot -m gpt-4o -n my-session --cwd /project</code></pre>
+</div>
+
+<div class="cmd-card">
+<h4>session list</h4>
+<p>List sessions (default: active only).</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Option</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server to query</td></tr>
+    <tr><td><code>-a, --all</code></td><td>Include closed sessions</td></tr>
+  </tbody>
+</table>
+</div>
+<pre><code>ahpx session list
+ahpx session list --all</code></pre>
+</div>
+
+<div class="cmd-card">
+<h4>session show</h4>
+<p>Show details for a specific session.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>[id]</code></td><td>Session ID (optional)</td></tr>
+    <tr><td><code>-n, --name &lt;name&gt;</code></td><td>Lookup by session name</td></tr>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server to query</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="cmd-card">
+<h4>session close</h4>
+<p>Close a session (soft-close: the record is kept for history).</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>[id]</code></td><td>Session ID</td><td>—</td></tr>
+    <tr><td><code>-n, --name &lt;name&gt;</code></td><td>Lookup by name</td><td>—</td></tr>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server</td><td>Default</td></tr>
+    <tr><td><code>-t, --timeout &lt;ms&gt;</code></td><td>Timeout</td><td><code>10000</code></td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="cmd-card">
+<h4>session history</h4>
+<p>Show turn history for a session.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>[id]</code></td><td>Session ID</td><td>—</td></tr>
+    <tr><td><code>-n, --name &lt;name&gt;</code></td><td>Lookup by name</td><td>—</td></tr>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server</td><td>Default</td></tr>
+    <tr><td><code>-l, --limit &lt;n&gt;</code></td><td>Number of turns</td><td><code>10</code></td></tr>
+    <tr><td><code>-t, --timeout &lt;ms&gt;</code></td><td>Timeout</td><td><code>10000</code></td></tr>
+    <tr><td><code>--local</code></td><td>Local-only (no server connection)</td><td>—</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="cmd-card">
+<h4>session active</h4>
+<p>Show all active sessions on the server (live query).</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Option</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server to query</td><td>Default</td></tr>
+    <tr><td><code>-t, --timeout &lt;ms&gt;</code></td><td>Timeout</td><td><code>10000</code></td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="cmd-card">
+<h4>session export</h4>
+<p>Export a session record to JSON.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;id&gt;</code></td><td>Session ID (required)</td></tr>
+    <tr><td><code>-o, --output &lt;file&gt;</code></td><td>Output file path</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="cmd-card">
+<h4>session import</h4>
+<p>Import a session record from a JSON file.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;file&gt;</code></td><td>Path to JSON file (required)</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+</div><!-- /session -->
+
+<!-- prompt -->
+<div class="cmd-card" id="cli-prompt">
+<h4>prompt</h4>
+<p>Send a prompt to an existing agent session.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;text...&gt;</code></td><td>Prompt text (required)</td><td>—</td></tr>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server</td><td>Default</td></tr>
+    <tr><td><code>-n, --session-name &lt;name&gt;</code></td><td>Session name</td><td>—</td></tr>
+    <tr><td><code>-f, --file &lt;path&gt;</code></td><td>Read prompt from file (<code>-</code> for stdin)</td><td>—</td></tr>
+    <tr><td><code>--cwd &lt;dir&gt;</code></td><td>Working directory</td><td>—</td></tr>
+    <tr><td><code>--approve-all</code></td><td>Auto-approve all tool calls</td><td>—</td></tr>
+    <tr><td><code>--approve-reads</code></td><td>Auto-approve read operations</td><td>—</td></tr>
+    <tr><td><code>--deny-all</code></td><td>Deny all tool calls</td><td>—</td></tr>
+    <tr><td><code>--idle-timeout &lt;seconds&gt;</code></td><td>Idle timeout</td><td>—</td></tr>
+    <tr><td><code>--tag &lt;key=value...&gt;</code></td><td>Tags (repeatable)</td><td>—</td></tr>
+    <tr><td><code>--forward-webhook &lt;url...&gt;</code></td><td>Webhook endpoints (repeatable)</td><td>—</td></tr>
+    <tr><td><code>--forward-ws &lt;url...&gt;</code></td><td>WebSocket endpoints (repeatable)</td><td>—</td></tr>
+    <tr><td><code>--forward-filter &lt;types&gt;</code></td><td>Event types to forward</td><td>—</td></tr>
+    <tr><td><code>--forward-headers &lt;json&gt;</code></td><td>Custom headers for forwarders</td><td>—</td></tr>
+  </tbody>
+</table>
+</div>
+<pre><code># Prompt an existing session
+ahpx prompt -n my-session "add error handling to the API routes"
+
+# Read prompt from a file
+ahpx prompt -n my-session -f instructions.md
+
+# Pipe from stdin
+echo "review this PR" | ahpx prompt -n my-session -f -</code></pre>
+</div>
+
+<!-- exec -->
+<div class="cmd-card" id="cli-exec">
+<h4>exec</h4>
+<p>One-shot prompt: creates a temporary session, sends your prompt, streams the response, and disposes the session when done.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;text...&gt;</code></td><td>Prompt text (required)</td><td>—</td></tr>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server</td><td>Default</td></tr>
+    <tr><td><code>-p, --provider &lt;provider&gt;</code></td><td>Agent provider</td><td>—</td></tr>
+    <tr><td><code>-m, --model &lt;model&gt;</code></td><td>Model ID</td><td>—</td></tr>
+    <tr><td><code>--cwd &lt;dir&gt;</code></td><td>Working directory</td><td>—</td></tr>
+    <tr><td><code>--approve-all</code></td><td>Auto-approve all tool calls</td><td>—</td></tr>
+    <tr><td><code>--approve-reads</code></td><td>Auto-approve read operations</td><td>—</td></tr>
+    <tr><td><code>--deny-all</code></td><td>Deny all tool calls</td><td>—</td></tr>
+    <tr><td><code>--idle-timeout &lt;seconds&gt;</code></td><td>Idle timeout</td><td>—</td></tr>
+    <tr><td><code>--tag &lt;key=value...&gt;</code></td><td>Tags (repeatable)</td><td>—</td></tr>
+    <tr><td><code>--forward-webhook &lt;url...&gt;</code></td><td>Webhook endpoints (repeatable)</td><td>—</td></tr>
+    <tr><td><code>--forward-ws &lt;url...&gt;</code></td><td>WebSocket endpoints (repeatable)</td><td>—</td></tr>
+    <tr><td><code>--forward-filter &lt;types&gt;</code></td><td>Event types to forward</td><td>—</td></tr>
+    <tr><td><code>--forward-headers &lt;json&gt;</code></td><td>Custom headers for forwarders</td><td>—</td></tr>
+  </tbody>
+</table>
+</div>
+<pre><code># One-shot, fully automated
+ahpx exec --approve-all "fix the failing tests in auth.spec.ts"
+
+# With a specific model
+ahpx exec -m claude-sonnet-4 --approve-all "refactor the API layer"
+
+# Machine-readable output
+ahpx exec --format json --json-strict --approve-all "summarize this repo"</code></pre>
+</div>
+
+<!-- other commands -->
+<div id="cli-other">
+<h3>Other Commands</h3>
+
+<div class="cmd-card">
+<h4>cancel</h4>
+<p>Cancel the active turn in a session.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Option</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>-n, --session-name &lt;name&gt;</code></td><td>Session name</td></tr>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="cmd-card">
+<h4>watch</h4>
+<p>Attach to a session as an observer and stream all activity in real time.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>[id]</code></td><td>Session ID</td></tr>
+    <tr><td><code>-n, --session-name &lt;name&gt;</code></td><td>Session name</td></tr>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="cmd-card">
+<h4>browse</h4>
+<p>Browse the server's filesystem.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>[directory]</code></td><td>Directory URI (optional, uses server default)</td></tr>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="cmd-card">
+<h4>content</h4>
+<p>Fetch content by URI from the server.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;uri&gt;</code></td><td>Content reference URI (required)</td></tr>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server</td></tr>
+    <tr><td><code>-o, --output &lt;file&gt;</code></td><td>Write to file instead of stdout</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="cmd-card">
+<h4>model</h4>
+<p>Switch the model for a session.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Argument / Option</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>&lt;model-id&gt;</code></td><td>Model ID (required)</td></tr>
+    <tr><td><code>-n, --session-name &lt;name&gt;</code></td><td>Session name</td></tr>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="cmd-card">
+<h4>agents</h4>
+<p>List available agents and models on the server.</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Option</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>-s, --server &lt;name&gt;</code></td><td>Server to query</td></tr>
+  </tbody>
+</table>
+</div>
+</div>
+
+<div class="cmd-card">
+<h4>completions</h4>
+<p>Generate shell completion scripts.</p>
+<pre><code># Bash
+ahpx completions bash &gt;&gt; ~/.bashrc
+
+# Zsh
+ahpx completions zsh &gt;&gt; ~/.zshrc
+
+# Fish
+ahpx completions fish &gt; ~/.config/fish/completions/ahpx.fish</code></pre>
+</div>
+
+<div class="cmd-card">
+<h4>Implicit Prompt (Default Command)</h4>
+<p>Any text that isn't a recognized command is treated as a prompt:</p>
+<pre><code>ahpx "fix the failing tests"
+ahpx --format json "summarize this repo"
+echo "review this" | ahpx</code></pre>
+</div>
+</div><!-- /other -->
+
+</section>
+
+<!-- 5. SDK Reference -->
+<section class="section" id="sdk-reference">
+<h2>SDK Reference <a href="#sdk-reference" class="anchor">#</a></h2>
+<p>Import ahpx into your TypeScript or Node.js code and build on top of AHP programmatically.</p>
+
+<div id="sdk-connect">
+<h3>Connect and List Agents</h3>
+<pre><code>import { AhpClient } from 'ahpx';
+
+const client = new AhpClient();
+const result = await client.connect('ws://localhost:8082');
+
+console.log('Protocol version:', result.protocolVersion);
+console.log('Agents:', result.agents);
+
+await client.disconnect();</code></pre>
+</div>
+
+<div id="sdk-sessions">
+<h3>Create a Session</h3>
+<pre><code>import { AhpClient } from 'ahpx';
+
+const client = new AhpClient();
+await client.connect('ws://localhost:8082');
+
+const session = await client.openSession({
+  provider: 'copilot',
+  model: 'gpt-4o',
+  workingDirectory: '/my/project',
+  waitForReady: true,
+  readyTimeout: 30_000,
+});
+
+console.log('Session URI:', session.uri);
+console.log('Ready:', session.isReady);</code></pre>
+
+<h3>Send Prompts</h3>
+<pre><code>const result = await session.sendPrompt('Fix the failing test in auth.ts');
+
+console.log('Response:', result.responseText);
+console.log('Tool calls:', result.toolCalls);
+console.log('State:', result.state); // "complete" | "cancelled" | "error"
+console.log('Usage:', result.usage);</code></pre>
+
+<h3>Multi-Session on One Connection</h3>
+<pre><code>const client = new AhpClient();
+await client.connect('ws://localhost:8082');
+
+const session1 = await client.openSession({ provider: 'copilot' });
+const session2 = await client.openSession({ provider: 'copilot' });
+
+// Sessions are independent — events are pre-filtered by URI
+const [result1, result2] = await Promise.all([
+  session1.sendPrompt('Analyze the auth module'),
+  session2.sendPrompt('Analyze the database module'),
+]);
+
+await session1.dispose();
+await session2.dispose();
+await client.disconnect();</code></pre>
+</div>
+
+<div id="sdk-events">
+<h3>Listen for Events</h3>
+<pre><code>session.on('action', (envelope) =&gt; {
+  const { action } = envelope;
+  if (action.type === 'session/delta') {
+    process.stdout.write(action.content);
+  }
+});
+
+session.on('turnComplete', (turn) =&gt; {
+  console.log('Turn finished:', turn);
+});
+
+session.on('error', (err) =&gt; {
+  console.error('Session error:', err);
+});</code></pre>
+</div>
+
+<div id="sdk-pool">
+<h3>ConnectionPool</h3>
+<p>URL-keyed connection reuse — call <code>getClient()</code> multiple times with the same URL and you get the same client.</p>
+<pre><code>import { ConnectionPool } from 'ahpx';
+
+const pool = new ConnectionPool();
+
+// Returns existing client or creates new one
+const client1 = await pool.getClient('ws://server-a:8082');
+const client2 = await pool.getClient('ws://server-b:8082');
+const client3 = await pool.getClient('ws://server-a:8082'); // reuses client1
+
+console.log('Active connections:', pool.activeConnections); // 2
+
+await pool.closeAll();</code></pre>
+</div>
+
+<div id="sdk-fleet">
+<h3>FleetManager</h3>
+<p>Health-aware, multi-server routing with pluggable strategies.</p>
+<pre><code>import { FleetManager } from 'ahpx';
+
+const fleet = new FleetManager({
+  connections: [
+    { name: 'local', url: 'ws://localhost:8082' },
+    { name: 'cloud', url: 'wss://cloud.example.com:8082', tags: ['gpu'] },
+    { name: 'edge', url: 'wss://edge.example.com:8082', tags: ['fast'] },
+  ],
+  strategy: 'least-sessions',
+});
+
+// Select best server based on requirements
+const server = await fleet.selectServer({ tag: 'gpu' });
+console.log('Selected:', server.name, server.url);
+
+// Get health of all servers
+const health = await fleet.getHealth();
+for (const h of health) {
+  console.log(`${h.name}: ${h.status} (${h.latencyMs}ms, ${h.activeSessions} sessions)`);
+}</code></pre>
+</div>
+
+<div id="sdk-forwarding">
+<h3>Event Forwarding</h3>
+<pre><code>import { WebhookForwarder, WebSocketForwarder, ForwardingFormatter } from 'ahpx';
+
+const webhook = new WebhookForwarder({
+  url: 'https://hooks.example.com/ahpx-events',
+  batchSize: 10,
+  batchIntervalMs: 1000,
+  retries: 3,
+  filter: ['turn_complete', 'tool_call_complete'],
+});
+
+const ws = new WebSocketForwarder({
+  url: 'wss://dashboard.example.com/events',
+  reconnect: true,
+});
+
+// Use ForwardingFormatter to automatically forward all output events
+const formatter = new ForwardingFormatter({
+  inner: myBaseFormatter,
+  forwarders: [webhook, ws],
+  tags: { environment: 'production', job: 'job-123' },
+});
+
+// ... use formatter with TurnController ...
+
+await formatter.close(); // Flush pending events</code></pre>
+</div>
+
+<div id="sdk-persistence">
+<h3>Session Persistence</h3>
+<p>Resume sessions across process restarts.</p>
+<pre><code>import { SessionStore, SessionPersistence, AhpClient } from 'ahpx';
+
+const store = new SessionStore();
+const persistence = new SessionPersistence(store);
+
+// Resume a previously saved session
+const record = await store.get('session-id-123');
+const client = new AhpClient();
+await client.connect(record.serverUrl);
+
+const outcome = await persistence.resume(record, client);
+if (outcome.status === 'resumed') {
+  console.log('Session resumed successfully');
+} else if (outcome.status === 'not_found') {
+  console.log('Session was disposed — create a new one');
+}
+
+// Sync local records with server
+const sync = await persistence.sync(client, 'my-server');
+console.log('Added:', sync.added, 'Removed:', sync.removed);</code></pre>
+</div>
+
+<div id="sdk-auth">
+<h3>Auth Handling</h3>
+<pre><code>import { AhpClient, AuthHandler } from 'ahpx';
+
+const client = new AhpClient();
+const auth = new AuthHandler(client, {
+  token: process.env.AHPX_TOKEN,
+  interactive: false,
+});
+
+client.on('notification', async (notification) =&gt; {
+  if (notification.type === 'authRequired') {
+    await auth.handleAuthRequired(notification.resource);
+  }
+});
+
+await client.connect('wss://secure-server:8082');</code></pre>
+</div>
+</section>
+
+<!-- 6. Output Formats -->
+<section class="section" id="output-formats">
+<h2>Output Formats <a href="#output-formats" class="anchor">#</a></h2>
+<p>ahpx supports three output formats, controlled by <code>--format</code>.</p>
+
+<h3>--format text <span style="color:var(--text-subtle);font-weight:400;">(default)</span></h3>
+<p>Human-readable output with emoji indicators and color.</p>
+<pre><code>🤖 Analyzing your codebase...
+
+The repository contains a Node.js project with the following structure:
+- src/ — TypeScript source code
+- docs/ — Documentation
+- dist/ — Build output
+
+[tool] readFile src/index.ts
+[tool] ✓ Read 45 lines
+
+Based on my analysis, this is an AHP client library...
+
+[done] 1 tool call · 245 input tokens · 128 output tokens</code></pre>
+
+<h3>--format json <span style="color:var(--text-subtle);font-weight:400;">(NDJSON)</span></h3>
+<p>One JSON object per line — ideal for machine consumption. Use with <code>--json-strict</code> to suppress all non-JSON stderr output.</p>
+<pre><code>{"type":"delta","timestamp":"2026-03-21T10:00:00.000Z","data":{"content":"Analyzing"}}
+{"type":"delta","timestamp":"2026-03-21T10:00:00.100Z","data":{"content":" your codebase..."}}
+{"type":"tool_call_start","timestamp":"2026-03-21T10:00:01.000Z","data":{"toolCallId":"tc-1","name":"readFile"}}
+{"type":"tool_call_complete","timestamp":"2026-03-21T10:00:02.000Z","data":{"toolCallId":"tc-1","result":{"success":true}}}
+{"type":"usage","timestamp":"2026-03-21T10:00:03.000Z","data":{"usage":{"inputTokens":245,"outputTokens":128}}}
+{"type":"turn_complete","timestamp":"2026-03-21T10:00:03.000Z","data":{"responseText":"Analyzing your codebase..."}}</code></pre>
+
+<h3>--format quiet</h3>
+<p>Response text only — no progress indicators, no tool call output.</p>
+<pre><code>Analyzing your codebase...
+
+The repository contains a Node.js project with the following structure...</code></pre>
+</section>
+
+<!-- 7. Permission Modes -->
+<section class="section" id="permissions">
+<h2>Permission Modes <a href="#permissions" class="anchor">#</a></h2>
+<p>Control what tools the agent is allowed to use during a turn.</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Mode</th><th>Flag</th><th>Reads</th><th>Writes</th><th>Shell</th><th>Use Case</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Approve reads</strong></td><td><code>--approve-reads</code></td>
+      <td class="mode-yes">✅ Auto</td><td class="mode-ask">❓ Prompt</td><td class="mode-ask">❓ Prompt</td>
+      <td>Interactive use</td>
+    </tr>
+    <tr>
+      <td><strong>Approve all</strong></td><td><code>--approve-all</code></td>
+      <td class="mode-yes">✅ Auto</td><td class="mode-yes">✅ Auto</td><td class="mode-yes">✅ Auto</td>
+      <td>Automated dispatch, CI/CD</td>
+    </tr>
+    <tr>
+      <td><strong>Deny all</strong></td><td><code>--deny-all</code></td>
+      <td class="mode-no">❌ Deny</td><td class="mode-no">❌ Deny</td><td class="mode-no">❌ Deny</td>
+      <td>Read-only exploration</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<pre><code># Interactive — auto-approve reads, prompt for writes
+ahpx prompt "refactor the auth module"
+
+# Fully automated — approve everything
+ahpx exec --approve-all "fix the failing tests"
+
+# Read-only — deny all tool calls
+ahpx exec --deny-all "explain this codebase"</code></pre>
+</section>
+
+<!-- 8. Fleet Management -->
+<section class="section" id="fleet">
+<h2>Fleet Management <a href="#fleet" class="anchor">#</a></h2>
+<p>Manage multiple AHP servers with tagging, health checking, and intelligent routing.</p>
+
+<h3>Server Tags</h3>
+<pre><code>ahpx server add gpu-1 --url wss://gpu1.example.com:8082 --tag gpu --tag fast
+ahpx server add cpu-1 --url wss://cpu1.example.com:8082 --tag cpu
+ahpx server add cpu-2 --url wss://cpu2.example.com:8082 --tag cpu</code></pre>
+
+<h3>Health Checking</h3>
+<pre><code># Check all servers
+ahpx server status
+
+# Output:
+# Name    URL                          Status     Latency   Sessions  Agents
+# gpu-1   wss://gpu1.example.com:8082  healthy    12ms      2         copilot
+# cpu-1   wss://cpu1.example.com:8082  healthy    45ms      0         copilot
+# cpu-2   wss://cpu2.example.com:8082  healthy    38ms      1         copilot
+
+# Detailed health for one server
+ahpx server health gpu-1</code></pre>
+
+<h3>Routing Strategies</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Strategy</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>least-sessions</code></td><td>Pick the server with the fewest active sessions (default)</td></tr>
+    <tr><td><code>round-robin</code></td><td>Cycle through healthy servers in order</td></tr>
+    <tr><td><code>random</code></td><td>Random selection from healthy candidates</td></tr>
+    <tr><td><code>preferred</code></td><td>Use a specific server if healthy, fallback to least-sessions</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<!-- 9. Event Forwarding -->
+<section class="section" id="event-forwarding">
+<h2>Event Forwarding <a href="#event-forwarding" class="anchor">#</a></h2>
+<p>Stream agent events to external systems in real time via webhooks or WebSockets.</p>
+
+<h3>Webhook Forwarder</h3>
+<pre><code># Forward events to a webhook endpoint
+ahpx exec --approve-all \
+  --forward-webhook https://hooks.example.com/events \
+  --forward-filter turn_complete,tool_call_complete \
+  "fix the auth bug"</code></pre>
+<p>Features: batched delivery (configurable batch size and interval), retry with exponential backoff (up to 3 retries), event type filtering, and custom headers via <code>--forward-headers</code>.</p>
+
+<h3>WebSocket Forwarder</h3>
+<pre><code># Stream events over WebSocket in real-time
+ahpx exec --approve-all \
+  --forward-ws wss://dashboard.example.com/events \
+  "deploy the new feature"</code></pre>
+<p>Features: real-time streaming, auto-reconnect with exponential backoff, backpressure handling (pauses at 1 MB buffer), and disconnect buffering (up to 10,000 events).</p>
+
+<h3>Multiple Forwarders</h3>
+<pre><code># Forward to multiple destinations simultaneously
+ahpx exec --approve-all \
+  --forward-webhook https://logs.example.com/ingest \
+  --forward-ws wss://dashboard.example.com/live \
+  --forward-filter delta,turn_complete,tool_call_start,tool_call_complete \
+  "run the full test suite"</code></pre>
+</section>
+
+<!-- 10. George Integration Story -->
+<section class="section" id="george-integration">
+<h2>George Integration <a href="#george-integration" class="anchor">#</a></h2>
+<p>ahpx powers George's autonomous agent dispatch — an autonomous CTO bot that uses ahpx as its backbone for spawning and managing AI agent sessions.</p>
+
+<div class="diagram">┌─────────┐     spawn      ┌──────┐    WebSocket    ┌────────────┐     AI     ┌───────┐
+│  George  │───────────────→│ ahpx │───────────────→ │ AHP Server │ ─────────→│ Agent │
+│  (CTO)   │  (child proc)  │ CLI  │  (JSON-RPC 2.0) │ (VS Code)  │           │Backend│
+└─────────┘                └──────┘                  └────────────┘           └───────┘
+     │                         │                           │
+     │  stdout (NDJSON)        │   Actions (streaming)     │
+     │ ◄───────────────────── │ ◄─────────────────────── │
+     │                         │                           │
+     │  exit code              │   Session dispose         │
+     │ ◄───────────────────── │ ──────────────────────── →│</div>
+
+<p>Key points:</p>
+<ul>
+  <li><strong>Child process model</strong> — George spawns <code>ahpx exec</code> as a child process with <code>--format json --json-strict</code></li>
+  <li><strong>Structured NDJSON output</strong> — replaces fragile PTY scraping with typed event streams</li>
+  <li><strong>Semantic exit codes</strong> — codes 0–5 and 130 communicate job status without parsing output</li>
+  <li><strong>Session persistence</strong> — sessions survive across process boundaries for multi-turn tasks</li>
+  <li><strong>Real-time observation</strong> — event forwarders let George watch agent progress via WebSocket</li>
+</ul>
+
+<h3>Evolution</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Feature</th><th>V1 (Copilot CLI)</th><th>V2 (acpx)</th><th>AHP (ahpx)</th></tr></thead>
+  <tbody>
+    <tr><td>Protocol</td><td>Proprietary PTY</td><td>ACP</td><td>AHP (WebSocket + JSON-RPC)</td></tr>
+    <tr><td>Output</td><td>Raw text (PTY scraping)</td><td>NDJSON</td><td>NDJSON</td></tr>
+    <tr><td>Session persistence</td><td>No</td><td>No</td><td>Yes</td></tr>
+    <tr><td>Multi-client observation</td><td>No</td><td>No</td><td>Yes (watch)</td></tr>
+    <tr><td>Remote execution</td><td>No</td><td>No</td><td>Yes</td></tr>
+    <tr><td>Tool call tracking</td><td>Heuristic</td><td>Structured</td><td>Structured</td></tr>
+    <tr><td>Exit codes</td><td>Process-level</td><td>Process-level</td><td>Semantic (0–5, 130)</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+<!-- 11. Architecture -->
+<section class="section" id="architecture">
+<h2>Architecture <a href="#architecture" class="anchor">#</a></h2>
+<p>ahpx is structured in three layers, each adding higher-level abstractions on top of the one below.</p>
+
+<div class="arch-layers">
+  <div class="arch-layer">
+    <div class="arch-layer-label">CLI · bin.ts</div>
+    <div class="arch-layer-desc">Command parsing, output formatting, permission prompts, process lifecycle.</div>
+  </div>
+  <div class="arch-layer">
+    <div class="arch-layer-label">AhpClient</div>
+    <div class="arch-layer-desc">High-level typed API — sessions, state mirror, events, connection pool.</div>
+  </div>
+  <div class="arch-layer">
+    <div class="arch-layer-label">ProtocolLayer</div>
+    <div class="arch-layer-desc">JSON-RPC 2.0 message correlation — request/response pairing, notifications.</div>
+  </div>
+  <div class="arch-layer">
+    <div class="arch-layer-label">Transport · WebSocket</div>
+    <div class="arch-layer-desc">Raw WebSocket I/O — connect, send, close, events.</div>
+  </div>
+</div>
+
+<h3>Supporting Systems</h3>
+<div class="arch-grid">
+  <div class="arch-box">
+    <div class="arch-box-title">SessionHandle</div>
+    <div class="arch-box-desc">Per-session wrapper with scoped events and prompt API.</div>
+  </div>
+  <div class="arch-box">
+    <div class="arch-box-title">ConnectionPool</div>
+    <div class="arch-box-desc">URL-keyed connection reuse across sessions.</div>
+  </div>
+  <div class="arch-box">
+    <div class="arch-box-title">StateMirror</div>
+    <div class="arch-box-desc">Client-side state tracking via pure reducers.</div>
+  </div>
+  <div class="arch-box">
+    <div class="arch-box-title">OutputFormatter</div>
+    <div class="arch-box-desc">Strategy pattern: text, json, quiet.</div>
+  </div>
+  <div class="arch-box">
+    <div class="arch-box-title">PermissionHandler</div>
+    <div class="arch-box-desc">Configurable tool approval policies.</div>
+  </div>
+  <div class="arch-box">
+    <div class="arch-box-title">EventForwarder</div>
+    <div class="arch-box-desc">Webhook and WebSocket streaming.</div>
+  </div>
+  <div class="arch-box">
+    <div class="arch-box-title">FleetManager</div>
+    <div class="arch-box-desc">Health-aware multi-server routing.</div>
+  </div>
+</div>
+
+<h3>Exit Codes</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Code</th><th>Name</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>0</code></td><td>Success</td><td>Command completed successfully</td></tr>
+    <tr><td><code>1</code></td><td>Error</td><td>General runtime error</td></tr>
+    <tr><td><code>2</code></td><td>Usage</td><td>Invalid arguments</td></tr>
+    <tr><td><code>3</code></td><td>Timeout</td><td>Operation timed out</td></tr>
+    <tr><td><code>4</code></td><td>NoSession</td><td>No active session found</td></tr>
+    <tr><td><code>5</code></td><td>PermissionDenied</td><td>Permission denied</td></tr>
+    <tr><td><code>130</code></td><td>Interrupted</td><td>SIGINT (Ctrl+C)</td></tr>
+  </tbody>
+</table>
+</div>
+</section>
+
+</main>
+</div>
+
+<!-- Footer -->
+<footer class="site-footer">
+  <p>Built by George's engineering team · Powered by the <a href="https://github.com/anthropics/agent-host-protocol">Agent Host Protocol</a></p>
+</footer>
+
+<!-- Back to Top -->
+<button class="back-to-top" id="backToTop" onclick="window.scrollTo({top:0})" aria-label="Back to top">↑</button>
+
+<script>
+// Copy buttons
+document.querySelectorAll('pre').forEach(pre => {
+  const btn = document.createElement('button');
+  btn.className = 'copy-btn';
+  btn.textContent = 'Copy';
+  btn.addEventListener('click', () => {
+    const code = pre.querySelector('code');
+    if (!code) return;
+    navigator.clipboard.writeText(code.textContent).then(() => {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+    });
+  });
+  pre.appendChild(btn);
+});
+
+// Scroll animations
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.05 });
+document.querySelectorAll('.section').forEach(s => observer.observe(s));
+
+// Back to top
+const backBtn = document.getElementById('backToTop');
+window.addEventListener('scroll', () => {
+  backBtn.classList.toggle('visible', window.scrollY > 400);
+});
+
+// Active sidebar link
+const sidebarLinks = document.querySelectorAll('.sidebar-link');
+const sections = document.querySelectorAll('.section[id], div[id]');
+function updateActive() {
+  let current = '';
+  sections.forEach(s => {
+    const top = s.getBoundingClientRect().top;
+    if (top < 120) current = s.id;
+  });
+  sidebarLinks.forEach(link => {
+    link.classList.toggle('active', link.getAttribute('href') === '#' + current);
+  });
+}
+window.addEventListener('scroll', updateActive, { passive: true });
+updateActive();
+
+// Mobile sidebar
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarOverlay').classList.toggle('open');
+}
+// Close sidebar on link click (mobile)
+sidebarLinks.forEach(link => {
+  link.addEventListener('click', () => {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebarOverlay').classList.remove('open');
+  });
+});
+</script>
+</body>
+</html>
