@@ -497,3 +497,46 @@ npm run lint:fix    # biome check --write .
 - Dev: `typescript`, `tsup`, `vitest`, `@biomejs/biome`
 
 **Build output:** Single file `dist/bin.js` with `#!/usr/bin/env node` shebang.
+
+## Roadmap (v0.2)
+
+ahpx v0.1 (Phases 0–6) shipped the foundation: core AHP client, connection
+management, sessions, prompting, output formatting, observation, and George
+integration. 229 tests pass. It's integrated into George as AgentDispatcherV3.
+
+v0.2 evolves ahpx from CLI tool to **production-grade agent dispatch platform**:
+
+| Phase | Name | Goal |
+|-------|------|------|
+| **7** | Library Mode | Export as npm package with typed API (`import { AhpClient } from 'ahpx'`) |
+| **8** | Multi-Session | Concurrent sessions on a single WebSocket connection |
+| **9** | Event Forwarding | Webhook and WebSocket event streaming for dashboards |
+| **10** | Fleet Management | Multi-server health monitoring, routing, and dispatch |
+| **11** | Robust Multi-Turn | Session resume, metadata, system prompts, persistence |
+| **12** | Production Hardening | Bug fixes, CI/CD, comprehensive testing, error handling |
+
+### Key architectural implications for v0.2
+
+- **Dual entry points:** `src/index.ts` (library) and `src/bin.ts` (CLI) —
+  the client layer becomes a public API
+- **FleetManager:** New top-level class that manages multiple `AhpClient`
+  instances across servers
+- **Event forwarding:** New forwarding layer between `OutputFormatter` and
+  external consumers (webhooks, WebSocket streams)
+- **Session metadata:** Extended `SessionStore` with client-side metadata
+  tracking (workaround for protocol gap #26)
+
+### Protocol dependencies
+
+7 open issues require AHP protocol changes. ahpx implements client-side
+workarounds where feasible. See [docs/roadmap.md](../../../docs/roadmap.md) for
+the full protocol dependency analysis.
+
+### 24 open issues mapped to phases
+
+- Phase 7: #7, #9
+- Phase 8: #31
+- Phase 9: #8
+- Phase 10: #28, #30
+- Phase 11: #5, #6, #10, #25, #26, #29
+- Phase 12: #11, #12, #13, #14, #15, #16, #17, #18, #19, #20, #21, #27
