@@ -45,12 +45,13 @@ import { PermissionHandler } from "./permissions/index.js";
 import type { PermissionMode } from "./permissions/index.js";
 import { TurnController } from "./prompt/index.js";
 import { ActionType } from "./protocol/actions.js";
-import { SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
+import { SessionPersistence, SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
 import type { SessionRecord } from "./session/index.js";
 import { SessionWatcher } from "./watch/index.js";
 
 const store = new ConnectionStore();
 const sessionStore = new SessionStore();
+const sessionPersistence = new SessionPersistence(sessionStore);
 
 // ── Global options (parsed before Commander routes to a subcommand) ──────────
 
@@ -1179,6 +1180,35 @@ session
 
 // ── session history ──────────────────────────────────────────────────────────
 
+/** Format a turn for text output (shared by server and local history). */
+function formatTurnEntry(entry: {
+	id: string;
+	userMessage: string;
+	responsePreview: string;
+	toolCalls: number;
+	usage?: { inputTokens?: number; outputTokens?: number; model?: string } | null;
+	timestamp?: string;
+}): void {
+	const userMsg = truncate(entry.userMessage, 80);
+	const responseMsg = truncate(entry.responsePreview, 80);
+	const usageStr = entry.usage ? `${entry.usage.inputTokens ?? "?"}→${entry.usage.outputTokens ?? "?"}t` : "";
+	const timeStr = entry.timestamp ? pc.dim(` (${formatAge(entry.timestamp)})`) : "";
+
+	console.log(pc.bold(pc.cyan(`  Turn ${entry.id.slice(0, 8)}`)) + timeStr);
+	console.log(`    ${pc.bold("User:")} ${userMsg}`);
+	console.log(`    ${pc.bold("Response:")} ${responseMsg}`);
+	if (entry.toolCalls > 0) {
+		console.log(`    ${pc.bold("Tool calls:")} ${entry.toolCalls}`);
+	}
+	if (usageStr) {
+		console.log(`    ${pc.bold("Tokens:")} ${usageStr}`);
+	}
+	if (entry.usage?.model) {
+		console.log(`    ${pc.bold("Model:")} ${entry.usage.model}`);
+	}
+	console.log();
+}
+
 session
 	.command("history")
 	.description("Show turn history for a session")
@@ -1187,10 +1217,11 @@ session
 	.option("-s, --server <name>", "Server name")
 	.option("-l, --limit <n>", "Maximum number of turns to show", "10")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
+	.option("--local", "Show only locally-cached turn history (no server connection)")
 	.action(
 		async (
 			id: string | undefined,
-			opts: { name?: string; server?: string; limit: string; timeout: string },
+			opts: { name?: string; server?: string; limit: string; timeout: string; local?: boolean },
 			cmd: Command,
 		) => {
 			const globalOpts = parseGlobalOpts(cmd);
@@ -1198,71 +1229,208 @@ session
 
 			try {
 				const record = await resolveSessionRecord(id, opts);
-				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 				const limit = Number.parseInt(opts.limit, 10);
 
-				await withConnection(
-					{
-						server: record.serverName,
-						config: cfg,
-						timeout: Number.parseInt(opts.timeout, 10),
-					},
-					async (client) => {
-						const result = await client.fetchTurns(record.sessionUri, undefined, limit);
+				// --local flag: show only locally-cached turns
+				if (opts.local) {
+					showLocalHistory(record, limit, globalOpts);
+					return;
+				}
 
-						outputResult(
-							globalOpts,
-							() => {
-								if (result.turns.length === 0) {
-									console.log(pc.dim("No turns in this session."));
-									return;
-								}
+				// Try server first, fall back to local
+				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+				try {
+					await withConnection(
+						{
+							server: record.serverName,
+							config: cfg,
+							timeout: Number.parseInt(opts.timeout, 10),
+						},
+						async (client) => {
+							const result = await client.fetchTurns(record.sessionUri, undefined, limit);
 
-								console.log(
-									pc.bold(`History for session ${record.id.slice(0, 8)}`),
-									result.hasMore ? pc.dim(`(showing last ${result.turns.length}, more available)`) : "",
-								);
-								console.log();
-
-								for (const turn of result.turns) {
-									const userMsg = truncate(turn.userMessage.text, 80);
-									const responsePreview = truncate(turn.responseText || "(no response)", 80);
-									const toolCount = turn.toolCalls.length;
-									const usageStr = turn.usage
-										? `${turn.usage.inputTokens ?? "?"}→${turn.usage.outputTokens ?? "?"}t`
-										: "";
-
-									console.log(pc.bold(pc.cyan(`  Turn ${turn.id}`)));
-									console.log(`    ${pc.bold("User:")} ${userMsg}`);
-									console.log(`    ${pc.bold("Response:")} ${responsePreview}`);
-									if (toolCount > 0) {
-										console.log(`    ${pc.bold("Tool calls:")} ${toolCount}`);
+							outputResult(
+								globalOpts,
+								() => {
+									if (result.turns.length === 0) {
+										console.log(pc.dim("No turns in this session."));
+										return;
 									}
-									if (usageStr) {
-										console.log(`    ${pc.bold("Tokens:")} ${usageStr}`);
-									}
+
+									console.log(
+										pc.bold(`History for session ${record.id.slice(0, 8)}`),
+										result.hasMore ? pc.dim(`(showing last ${result.turns.length}, more available)`) : "",
+									);
 									console.log();
-								}
-							},
-							{
-								sessionId: record.id,
-								hasMore: result.hasMore,
-								turns: result.turns.map((t) => ({
-									id: t.id,
-									userMessage: t.userMessage.text,
-									responseText: t.responseText,
-									toolCalls: t.toolCalls.length,
-									usage: t.usage,
-								})),
-							},
-						);
-					},
-				);
+
+									for (const turn of result.turns) {
+										formatTurnEntry({
+											id: turn.id,
+											userMessage: turn.userMessage.text,
+											responsePreview: turn.responseText || "(no response)",
+											toolCalls: turn.toolCalls.length,
+											usage: turn.usage,
+										});
+									}
+								},
+								{
+									source: "server",
+									sessionId: record.id,
+									hasMore: result.hasMore,
+									turns: result.turns.map((t) => ({
+										id: t.id,
+										userMessage: t.userMessage.text,
+										responseText: t.responseText,
+										toolCalls: t.toolCalls.length,
+										usage: t.usage,
+									})),
+								},
+							);
+						},
+					);
+				} catch {
+					// Server unreachable — fall back to local history
+					if (globalOpts.format === "text") {
+						console.error(pc.yellow("Server unavailable. Showing locally-cached history.\n"));
+					}
+					showLocalHistory(record, limit, globalOpts);
+				}
 			} catch (err) {
 				handleError(err, globalOpts);
 			}
 		},
 	);
+
+/** Display locally-cached turn history from a session record. */
+function showLocalHistory(record: SessionRecord, limit: number, globalOpts: GlobalOpts): void {
+	const turns = record.turns ?? [];
+	const display = turns.slice(-limit);
+
+	outputResult(
+		globalOpts,
+		() => {
+			if (display.length === 0) {
+				console.log(pc.dim("No locally-cached turns for this session."));
+				return;
+			}
+
+			console.log(
+				pc.bold(`Local history for session ${record.id.slice(0, 8)}`),
+				pc.dim(`(${display.length} of ${turns.length} turns)`),
+			);
+			console.log();
+
+			for (const turn of display) {
+				formatTurnEntry({
+					id: turn.turnId,
+					userMessage: turn.userMessage,
+					responsePreview: turn.responsePreview,
+					toolCalls: turn.toolCallCount,
+					usage: turn.tokenUsage
+						? { inputTokens: turn.tokenUsage.input, outputTokens: turn.tokenUsage.output, model: turn.tokenUsage.model }
+						: undefined,
+					timestamp: turn.timestamp,
+				});
+			}
+		},
+		{
+			source: "local",
+			sessionId: record.id,
+			turns: display.map((t) => ({
+				turnId: t.turnId,
+				userMessage: t.userMessage,
+				responsePreview: t.responsePreview,
+				toolCallCount: t.toolCallCount,
+				tokenUsage: t.tokenUsage,
+				state: t.state,
+				timestamp: t.timestamp,
+			})),
+		},
+	);
+}
+
+// ── session export / import ─────────────────────────────────────────────────
+
+session
+	.command("export")
+	.description("Export a session record (with local turn history) to JSON")
+	.argument("<id>", "Session ID")
+	.option("-o, --output <file>", "Write to file instead of stdout")
+	.action(async (id: string, opts: { output?: string }, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const record = await sessionStore.get(id);
+			if (!record) {
+				throw new NoSessionError(`Session "${id}" not found.`);
+			}
+
+			const exported = JSON.stringify(record, null, "\t");
+
+			if (opts.output) {
+				await fs.writeFile(path.resolve(opts.output), `${exported}\n`, "utf-8");
+				if (globalOpts.format === "text") {
+					console.error(pc.green(`Session exported to ${opts.output}`));
+				}
+			} else {
+				console.log(exported);
+			}
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
+
+session
+	.command("import")
+	.description("Import a session record from a JSON file")
+	.argument("<file>", "Path to JSON file")
+	.action(async (filePath: string, _opts: Record<string, unknown>, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const resolved = path.resolve(filePath);
+			const raw = await fs.readFile(resolved, "utf-8");
+			let record: SessionRecord;
+			try {
+				record = JSON.parse(raw) as SessionRecord;
+			} catch {
+				throw new UsageError(`Failed to parse "${filePath}" as JSON.`);
+			}
+
+			// Validate required fields
+			if (!record.id || !record.sessionUri || !record.serverName || !record.serverUrl || !record.provider) {
+				throw new UsageError(
+					"Invalid session record: missing required fields (id, sessionUri, serverName, serverUrl, provider).",
+				);
+			}
+			if (!record.status || (record.status !== "active" && record.status !== "closed")) {
+				throw new UsageError('Invalid session record: status must be "active" or "closed".');
+			}
+			if (!record.createdAt) {
+				throw new UsageError("Invalid session record: missing createdAt timestamp.");
+			}
+
+			await sessionStore.save(record);
+
+			outputResult(
+				globalOpts,
+				() => {
+					console.log(pc.green(`Session ${record.id.slice(0, 8)} imported successfully.`));
+					console.log(`  ${pc.bold("URI:")} ${record.sessionUri}`);
+					console.log(`  ${pc.bold("Server:")} ${record.serverName}`);
+					console.log(`  ${pc.bold("Status:")} ${record.status}`);
+					if (record.turns?.length) {
+						console.log(`  ${pc.bold("Local turns:")} ${record.turns.length}`);
+					}
+				},
+				{ id: record.id, sessionUri: record.sessionUri, status: record.status },
+			);
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
 
 // ── session active ───────────────────────────────────────────────────────────
 
@@ -1476,6 +1644,18 @@ async function runPrompt(
 						lastPromptAt: new Date().toISOString(),
 						title: client.state.getSession(sessionUri)?.summary.title ?? sessionRecord.title,
 					});
+
+					// Persist turn summary locally
+					if (result.state === "complete" || result.state === "cancelled" || result.state === "error") {
+						await sessionPersistence.saveTurn(sessionRecord.id, {
+							turnId: result.turnId,
+							responseText: result.responseText,
+							toolCalls: result.toolCalls,
+							usage: result.usage,
+							state: result.state as "complete" | "cancelled" | "error",
+							userMessage: opts.text,
+						});
+					}
 				}
 
 				if (result.state === "error") {
@@ -1547,8 +1727,23 @@ async function resolveOrCreateSession(
 	});
 
 	if (record) {
-		await client.subscribe(record.sessionUri);
-		return { sessionUri: record.sessionUri, record };
+		// Verify the session still exists on the server
+		const outcome = await sessionPersistence.resume(record, client);
+
+		if (outcome.status === "resumed") {
+			return { sessionUri: record.sessionUri, record };
+		}
+
+		if (outcome.status === "not_found") {
+			// Session was disposed on the server — warn and create a new one
+			if (globalOpts.format === "text") {
+				console.error(
+					pc.yellow(`Previous session ${record.id.slice(0, 8)} was disposed on the server. Creating a new one.`),
+				);
+			}
+			await sessionStore.close(record.id);
+		}
+		// For "error" outcomes, fall through to create new
 	}
 
 	// Auto-create a session
