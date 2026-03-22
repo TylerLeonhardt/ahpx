@@ -107,9 +107,26 @@ Key things to know when working on ahpx:
 
 - **Unit tests** for pure logic — reducers, state mirror, config loading, scoping
 - **Integration tests** for client layers — mock WebSocket, verify message flow
+- **Acceptance tests** that prove the feature works from the user's perspective,
+  end-to-end — not just that individual functions return correct values. If the
+  user can't actually USE the feature, the test suite is lying.
+- **Live validation** — if the feature is user-facing, verify it works in a real
+  environment after deployment, not just in test output
 - **No mocking the thing under test** — mocks isolate boundaries, they don't
-  replace the system being tested
+  replace the system being tested. If your tests would still pass with the
+  feature completely broken, they're not real tests.
 - Tests live in `__tests__/` directories adjacent to the code they test
+
+## Definition of Done
+
+A task is not complete until:
+1. Code reviewed and merged via PR
+2. Quality gates pass (typecheck, lint, tests, build)
+3. Acceptance test exists proving the feature works from the user's perspective
+4. Feature validated live against real infrastructure (not just mocked tests)
+5. Documentation updated if applicable
+
+"Shipped" is not "done." "Validated" is done.
 
 ## When you're done
 
