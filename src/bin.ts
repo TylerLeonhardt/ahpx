@@ -861,7 +861,7 @@ session
 				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 				const provider = opts.provider ?? cfg.defaultProvider;
 				const model = opts.model ?? cfg.defaultModel;
-				const cwd = path.resolve(opts.cwd);
+				const cwd = opts.cwd;
 				const gitRoot = await findGitRoot(cwd);
 
 				await withConnection(
@@ -1569,7 +1569,7 @@ async function runPrompt(
 	globalOpts: GlobalOpts,
 ): Promise<void> {
 	const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
-	const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
+	const cwd = opts.cwd ?? process.cwd();
 	const gitRoot = await findGitRoot(cwd);
 	const permMode = resolvePermissionMode(opts, cfg);
 	let formatter: OutputFormatter = formatterFromOpts(globalOpts, opts.tags);

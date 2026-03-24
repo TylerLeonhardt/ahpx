@@ -308,4 +308,52 @@ describe("resolveSession", () => {
 		});
 		expect(result).toBeUndefined();
 	});
+
+	it("stores Windows-style workingDirectory without mangling", async () => {
+		// When ahpx on macOS targets a remote Windows server, the workingDirectory
+		// is a Windows path like "C:\Users\...". The path must be stored as-is —
+		// not resolved through path.resolve() which would mangle it on macOS.
+		// Note: resolveSession uses path.resolve internally for local scope matching,
+		// so a stored Windows path won't be found via local directory scope — that's
+		// correct. Remote sessions are resumed by session ID, not local scope.
+		const windowsCwd = "C:\\Users\\tyler\\Code\\project";
+
+		await store.save(
+			makeSession({
+				id: "windows-session",
+				workingDirectory: windowsCwd,
+				serverName: "remote-win",
+			}),
+		);
+
+		// The stored record preserves the Windows path exactly
+		const record = await store.get("windows-session");
+		expect(record).toBeDefined();
+		expect(record!.workingDirectory).toBe(windowsCwd);
+
+		// getByScope with exact Windows path also works (no path.resolve in store)
+		const scoped = await store.getByScope({
+			serverName: "remote-win",
+			workingDirectory: windowsCwd,
+		});
+		expect(scoped).toBeDefined();
+		expect(scoped!.id).toBe("windows-session");
+	});
+
+	it("does not mangle Windows paths through resolution", async () => {
+		// Verify that a Windows path round-trips through store and scope correctly
+		const windowsCwd = "D:\\Projects\\my-app\\src";
+
+		await store.save(
+			makeSession({
+				id: "win-roundtrip",
+				workingDirectory: windowsCwd,
+				serverName: "remote-win",
+			}),
+		);
+
+		const record = await store.get("win-roundtrip");
+		expect(record).toBeDefined();
+		expect(record!.workingDirectory).toBe(windowsCwd);
+	});
 });
