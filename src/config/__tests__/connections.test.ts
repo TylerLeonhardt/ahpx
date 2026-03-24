@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ConnectionStore, ConnectionValidationError, isValidWsUrl } from "../connections.js";
+import { ConnectionStore, ConnectionValidationError, isLocalUrl, isValidWsUrl } from "../connections.js";
 
 describe("isValidWsUrl", () => {
 	it("accepts ws:// URLs", () => {
@@ -24,6 +24,33 @@ describe("isValidWsUrl", () => {
 		expect(isValidWsUrl("not-a-url")).toBe(false);
 		expect(isValidWsUrl("")).toBe(false);
 		expect(isValidWsUrl("ftp://files.example.com")).toBe(false);
+	});
+});
+
+describe("isLocalUrl", () => {
+	it("recognizes localhost", () => {
+		expect(isLocalUrl("ws://localhost:3000")).toBe(true);
+		expect(isLocalUrl("wss://localhost:8443/path")).toBe(true);
+	});
+
+	it("recognizes 127.0.0.1", () => {
+		expect(isLocalUrl("ws://127.0.0.1:3000")).toBe(true);
+		expect(isLocalUrl("wss://127.0.0.1")).toBe(true);
+	});
+
+	it("recognizes IPv6 loopback", () => {
+		expect(isLocalUrl("ws://[::1]:3000")).toBe(true);
+	});
+
+	it("rejects remote hosts", () => {
+		expect(isLocalUrl("ws://example.com:3000")).toBe(false);
+		expect(isLocalUrl("wss://cloud.example.com")).toBe(false);
+		expect(isLocalUrl("ws://192.168.1.100:3000")).toBe(false);
+	});
+
+	it("rejects invalid input", () => {
+		expect(isLocalUrl("not-a-url")).toBe(false);
+		expect(isLocalUrl("")).toBe(false);
 	});
 });
 

@@ -27,6 +27,7 @@ import {
 	ConnectionValidationError,
 	globalConfigPath,
 	initGlobalConfig,
+	isLocalUrl,
 	isValidWsUrl,
 	loadConfig,
 	loadConfigWithSources,
@@ -831,6 +832,30 @@ function applyGlobalOpts(globalOpts: GlobalOpts): void {
 	setVerbose(globalOpts.verbose);
 }
 
+/**
+ * Validate that --cwd is provided when targeting a remote server.
+ * Throws UsageError if --server points to a non-local host and --cwd is missing.
+ */
+async function requireCwdForRemoteServer(server: string | undefined, cwd: string | undefined): Promise<void> {
+	if (!server || cwd) return;
+
+	let url: string;
+	if (isValidWsUrl(server)) {
+		url = server;
+	} else {
+		const store = new ConnectionStore();
+		const conn = await store.get(server);
+		if (!conn) return; // Unknown server — let withConnection() handle the error
+		url = conn.url;
+	}
+
+	if (!isLocalUrl(url)) {
+		throw new UsageError(
+			`--cwd is required when targeting a remote server.\nUse 'ahpx browse --server ${server}' to browse the remote filesystem and find the correct working directory.`,
+		);
+	}
+}
+
 // ── session new ──────────────────────────────────────────────────────────────
 
 session
@@ -840,7 +865,7 @@ session
 	.option("-p, --provider <provider>", "Agent provider (e.g. copilot)")
 	.option("-m, --model <model>", "Model to use")
 	.option("-n, --name <name>", "Name this session (for scoped lookups)")
-	.option("--cwd <dir>", "Working directory", process.cwd())
+	.option("--cwd <dir>", "Working directory")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
 	.action(
 		async (
@@ -849,7 +874,7 @@ session
 				provider?: string;
 				model?: string;
 				name?: string;
-				cwd: string;
+				cwd?: string;
 				timeout: string;
 			},
 			cmd: Command,
@@ -858,10 +883,11 @@ session
 			applyGlobalOpts(globalOpts);
 
 			try {
+				await requireCwdForRemoteServer(opts.server, opts.cwd);
 				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 				const provider = opts.provider ?? cfg.defaultProvider;
 				const model = opts.model ?? cfg.defaultModel;
-				const cwd = opts.cwd;
+				const cwd = opts.cwd ?? process.cwd();
 				const gitRoot = await findGitRoot(cwd);
 
 				await withConnection(
@@ -1568,6 +1594,7 @@ async function runPrompt(
 	},
 	globalOpts: GlobalOpts,
 ): Promise<void> {
+	await requireCwdForRemoteServer(opts.server, opts.cwd);
 	const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 	const cwd = opts.cwd ?? process.cwd();
 	const gitRoot = await findGitRoot(cwd);
