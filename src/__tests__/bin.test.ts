@@ -288,3 +288,51 @@ describe("CLI integration: implicit prompt detection", () => {
 		expect(result.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
 	});
 });
+
+// ── Remote server --cwd validation ──────────────────────────────────────────
+
+describe("CLI integration: --cwd required for remote servers", () => {
+	it("session new with remote ws:// URL and no --cwd exits with usage error", async () => {
+		const result = await runCli("session", "new", "--server", "ws://remote.example.com:3000");
+		expect(result.exitCode).toBe(2);
+		expect(result.stderr).toContain("--cwd is required when targeting a remote server");
+	});
+
+	it("session new with remote ws:// URL and --cwd succeeds past validation", async () => {
+		// Will fail on connection (no server running), but should NOT fail on --cwd validation
+		const result = await runCli("session", "new", "--server", "ws://remote.example.com:3000", "--cwd", "/remote/path");
+		expect(result.exitCode).not.toBe(2);
+		expect(result.stderr).not.toContain("--cwd is required");
+	});
+
+	it("session new with localhost URL and no --cwd does not require --cwd", async () => {
+		// Will fail on connection, but should NOT fail on --cwd validation
+		const result = await runCli("session", "new", "--server", "ws://localhost:9999");
+		expect(result.exitCode).not.toBe(2);
+		expect(result.stderr).not.toContain("--cwd is required");
+	});
+
+	it("prompt with remote ws:// URL and no --cwd exits with usage error", async () => {
+		const result = await runCli("prompt", "hello", "--server", "ws://remote.example.com:3000");
+		expect(result.exitCode).toBe(2);
+		expect(result.stderr).toContain("--cwd is required when targeting a remote server");
+	});
+
+	it("exec with remote ws:// URL and no --cwd exits with usage error", async () => {
+		const result = await runCli("exec", "hello", "--server", "ws://remote.example.com:3000");
+		expect(result.exitCode).toBe(2);
+		expect(result.stderr).toContain("--cwd is required when targeting a remote server");
+	});
+
+	it("error message suggests ahpx browse", async () => {
+		const result = await runCli("session", "new", "--server", "ws://remote.example.com:3000");
+		expect(result.stderr).toContain("ahpx browse");
+	});
+
+	it("session new with no --server does not require --cwd", async () => {
+		// Without --server, uses default (local) — no --cwd requirement
+		// May fail for other reasons (no default server) but not for --cwd
+		const result = await runCli("session", "new");
+		expect(result.stderr).not.toContain("--cwd is required");
+	});
+});

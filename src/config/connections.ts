@@ -43,6 +43,17 @@ export function isValidWsUrl(url: string): boolean {
 	}
 }
 
+/** Check whether a WebSocket URL points to a local server (localhost, 127.0.0.1, ::1). */
+export function isLocalUrl(url: string): boolean {
+	try {
+		const parsed = new URL(url);
+		const host = parsed.hostname;
+		return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+	} catch {
+		return false;
+	}
+}
+
 export class ConnectionValidationError extends Error {
 	constructor(message: string) {
 		super(message);

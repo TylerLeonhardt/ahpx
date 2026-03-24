@@ -206,5 +206,5 @@ export async function loadConfigWithSources(options?: {
 	return { config: merged, sources, globalPath: gPath, projectPath: pPath };
 }
 
-export { ConnectionStore, ConnectionValidationError, isValidWsUrl } from "./connections.js";
+export { ConnectionStore, ConnectionValidationError, isLocalUrl, isValidWsUrl } from "./connections.js";
 export type { ConnectionProfile } from "./connections.js";
