@@ -160,9 +160,7 @@ describe("SessionHandle", () => {
 			const completedTurn: ITurn = {
 				id: "turn-1",
 				userMessage: { text: "Hello" },
-				responseParts: [
-					{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" },
-				],
+				responseParts: [{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" }],
 				usage: undefined,
 				state: TurnState.Complete,
 			};

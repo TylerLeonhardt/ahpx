@@ -7,7 +7,7 @@
  *   - quiet: Accumulates silently, prints only the final response
  */
 
-import type { IErrorInfo, IPermissionRequest, IToolCallResult, IUsageInfo } from "../protocol/state.js";
+import type { IErrorInfo, IToolCallResult, IUsageInfo } from "../protocol/state.js";
 import type { ToolCallInfo } from "./renderer.js";
 
 export type OutputFormat = "text" | "json" | "quiet";
@@ -26,7 +26,6 @@ export interface OutputFormatter {
 	onToolCallReady(id: string, call: ToolCallInfo): void;
 	onToolCallComplete(id: string, result: IToolCallResult): void;
 	onToolCallCancelled(id: string, reason: string): void;
-	onPermissionRequest(req: IPermissionRequest): void;
 	onUsage(usage: IUsageInfo): void;
 	onTurnComplete(responseText: string): void;
 	onTurnError(error: IErrorInfo): void;

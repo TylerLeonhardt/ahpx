@@ -14,7 +14,7 @@ import { createLogger } from "../logger.js";
 import type { OutputFormatter } from "../output/format.js";
 import type { JsonEventType } from "../output/json-formatter.js";
 import type { ToolCallInfo } from "../output/renderer.js";
-import type { IErrorInfo, IPermissionRequest, IToolCallResult, IUsageInfo } from "../protocol/state.js";
+import type { IErrorInfo, IToolCallResult, IUsageInfo } from "../protocol/state.js";
 import type { AhpxEvent, EventForwarder } from "./forwarder.js";
 
 const log = createLogger("forwarding-formatter");
@@ -84,11 +84,6 @@ export class ForwardingFormatter implements OutputFormatter {
 	onToolCallCancelled(id: string, reason: string): void {
 		this.inner.onToolCallCancelled(id, reason);
 		this.emit("tool_call_cancelled", { toolCallId: id, reason });
-	}
-
-	onPermissionRequest(req: IPermissionRequest): void {
-		this.inner.onPermissionRequest(req);
-		this.emit("permission", { request: req });
 	}
 
 	onUsage(usage: IUsageInfo): void {

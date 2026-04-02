@@ -10,11 +10,20 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { IActionEnvelope, IStateAction } from "../protocol/actions.js";
 import type {
-	IBrowseDirectoryResult,
-	IFetchContentResult,
+	ContentEncoding,
 	IFetchTurnsResult,
 	IInitializeResult,
 	IListSessionsResult,
+	IResourceCopyParams,
+	IResourceCopyResult,
+	IResourceDeleteParams,
+	IResourceDeleteResult,
+	IResourceListResult,
+	IResourceMoveParams,
+	IResourceMoveResult,
+	IResourceReadResult,
+	IResourceWriteParams,
+	IResourceWriteResult,
 	ISubscribeResult,
 } from "../protocol/commands.js";
 import type { IProtocolNotification } from "../protocol/notifications.js";
@@ -303,19 +312,51 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	}
 
 	/**
-	 * Fetch large content by URI.
+	 * Read content by URI (files, tool outputs, etc.).
 	 */
-	async fetchContent(uri: string): Promise<IFetchContentResult> {
+	async resourceRead(uri: string, encoding?: ContentEncoding): Promise<IResourceReadResult> {
 		this.ensureConnected();
-		return this.protocol!.request("fetchContent", { uri });
+		return this.protocol!.request("resourceRead", { uri, ...(encoding ? { encoding } : {}) });
 	}
 
 	/**
-	 * Browse a directory on the server's filesystem.
+	 * Write content to a file on the server's filesystem.
 	 */
-	async browseDirectory(uri?: URI): Promise<IBrowseDirectoryResult> {
+	async resourceWrite(params: IResourceWriteParams): Promise<IResourceWriteResult> {
 		this.ensureConnected();
-		return this.protocol!.request("browseDirectory", { uri: uri ?? "" });
+		return this.protocol!.request("resourceWrite", params);
+	}
+
+	/**
+	 * List directory entries on the server's filesystem.
+	 */
+	async resourceList(uri: URI): Promise<IResourceListResult> {
+		this.ensureConnected();
+		return this.protocol!.request("resourceList", { uri });
+	}
+
+	/**
+	 * Copy a resource from one URI to another.
+	 */
+	async resourceCopy(params: IResourceCopyParams): Promise<IResourceCopyResult> {
+		this.ensureConnected();
+		return this.protocol!.request("resourceCopy", params);
+	}
+
+	/**
+	 * Delete a resource at a URI.
+	 */
+	async resourceDelete(params: IResourceDeleteParams): Promise<IResourceDeleteResult> {
+		this.ensureConnected();
+		return this.protocol!.request("resourceDelete", params);
+	}
+
+	/**
+	 * Move (rename) a resource from one URI to another.
+	 */
+	async resourceMove(params: IResourceMoveParams): Promise<IResourceMoveResult> {
+		this.ensureConnected();
+		return this.protocol!.request("resourceMove", params);
 	}
 
 	/**

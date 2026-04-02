@@ -230,7 +230,14 @@ describe("library exports", () => {
 		});
 
 		it("exports all expected enums", () => {
-			const expectedEnums = ["ActionType", "SessionLifecycle", "SessionStatus", "ToolCallStatus", "PendingMessageKind", "ResponsePartKind"];
+			const expectedEnums = [
+				"ActionType",
+				"SessionLifecycle",
+				"SessionStatus",
+				"ToolCallStatus",
+				"PendingMessageKind",
+				"ResponsePartKind",
+			];
 
 			for (const name of expectedEnums) {
 				expect(ahpx).toHaveProperty(name);

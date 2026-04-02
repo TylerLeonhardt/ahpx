@@ -8,11 +8,11 @@ import type { IActionEnvelope, IStateAction } from "../../protocol/actions.js";
 import { ActionType } from "../../protocol/actions.js";
 import type { ISessionState } from "../../protocol/state.js";
 import {
+	ResponsePartKind,
 	SessionLifecycle,
 	SessionStatus,
 	ToolCallConfirmationReason,
 	ToolCallStatus,
-	ResponsePartKind,
 } from "../../protocol/state.js";
 import { TurnController } from "../controller.js";
 

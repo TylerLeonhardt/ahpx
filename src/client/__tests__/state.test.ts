@@ -206,9 +206,7 @@ describe("StateMirror", () => {
 					activeTurn: {
 						id: "t1",
 						userMessage: { text: "Hello" },
-						responseParts: [
-							{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" },
-						],
+						responseParts: [{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" }],
 						usage: undefined,
 					},
 				}),
@@ -230,9 +228,7 @@ describe("StateMirror", () => {
 			expect(session.activeTurn).toBeUndefined();
 			expect(session.turns).toHaveLength(1);
 			expect(session.turns[0].id).toBe("t1");
-			const mdParts = session.turns[0].responseParts.filter(
-				(p) => p.kind === ResponsePartKind.Markdown,
-			);
+			const mdParts = session.turns[0].responseParts.filter((p) => p.kind === ResponsePartKind.Markdown);
 			expect(mdParts).toHaveLength(1);
 			expect((mdParts[0] as { content: string }).content).toBe("Hi there!");
 			expect(session.summary.status).toBe(SessionStatus.Idle);

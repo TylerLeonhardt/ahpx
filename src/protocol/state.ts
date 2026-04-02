@@ -18,6 +18,50 @@ export type URI = string;
  */
 export type StringOrMarkdown = string | { markdown: string };
 
+// ─── Icon ────────────────────────────────────────────────────────────────────
+
+/**
+ * An optionally-sized icon that can be displayed in a user interface.
+ *
+ * @category Common Types
+ */
+export interface Icon {
+  /**
+   * A standard URI pointing to an icon resource. May be an HTTP/HTTPS URL or a
+   * `data:` URI with Base64-encoded image data.
+   *
+   * Consumers SHOULD take steps to ensure URLs serving icons are from the
+   * same domain as the client/server or a trusted domain.
+   *
+   * Consumers SHOULD take appropriate precautions when consuming SVGs as they can contain
+   * executable JavaScript.
+   */
+  src: URI;
+
+  /**
+   * Optional MIME type override if the source MIME type is missing or generic.
+   * For example: `"image/png"`, `"image/jpeg"`, or `"image/svg+xml"`.
+   */
+  contentType?: string;
+
+  /**
+   * Optional array of strings that specify sizes at which the icon can be used.
+   * Each string should be in WxH format (e.g., `"48x48"`, `"96x96"`) or `"any"` for scalable formats like SVG.
+   *
+   * If not provided, the client should assume that the icon can be used at any size.
+   */
+  sizes?: string[];
+
+  /**
+   * Optional specifier for the theme this icon is designed for. `"light"` indicates
+   * the icon is designed to be used with a light background, and `"dark"` indicates
+   * the icon is designed to be used with a dark background.
+   *
+   * If not provided, the client should assume the icon can be used with any theme.
+   */
+  theme?: 'light' | 'dark';
+}
+
 // ─── Protected Resource Metadata (RFC 9728) ─────────────────────────────────
 
 /**
@@ -91,7 +135,7 @@ export interface IProtectedResourceMetadata {
  *
  * @category Root State
  */
-export enum PolicyState {
+export const enum PolicyState {
   Enabled = 'enabled',
   Disabled = 'disabled',
   Unconfigured = 'unconfigured',
@@ -133,6 +177,13 @@ export interface IAgentInfo {
    * @see {@link /specification/authentication | Authentication}
    */
   protectedResources?: IProtectedResourceMetadata[];
+  /**
+   * Customizations (Open Plugins) associated with this agent.
+   *
+   * Each entry is a reference to an [Open Plugins](https://open-plugins.com/)
+   * plugin that the agent host can activate for sessions using this agent.
+   */
+  customizations?: ICustomizationRef[];
 }
 
 /**
@@ -153,6 +204,36 @@ export interface ISessionModelInfo {
   policyState?: PolicyState;
 }
 
+// ─── Pending Message Types ───────────────────────────────────────────────────
+
+/**
+ * Discriminant for pending message kinds.
+ *
+ * @category Pending Message Types
+ */
+export const enum PendingMessageKind {
+  /** Injected into the current turn at a convenient point */
+  Steering = 'steering',
+  /** Sent automatically as a new turn after the current turn finishes */
+  Queued = 'queued',
+}
+
+/**
+ * A message queued for future delivery to the agent.
+ *
+ * Steering messages are injected into the current turn mid-flight.
+ * Queued messages are automatically started as new turns after the
+ * current turn naturally finishes.
+ *
+ * @category Pending Message Types
+ */
+export interface IPendingMessage {
+  /** Unique identifier for this pending message */
+  id: string;
+  /** The message content */
+  userMessage: IUserMessage;
+}
+
 // ─── Session State ───────────────────────────────────────────────────────────
 
 /**
@@ -160,7 +241,7 @@ export interface ISessionModelInfo {
  *
  * @category Session State
  */
-export enum SessionLifecycle {
+export const enum SessionLifecycle {
   Creating = 'creating',
   Ready = 'ready',
   CreationFailed = 'creationFailed',
@@ -171,7 +252,7 @@ export enum SessionLifecycle {
  *
  * @category Session State
  */
-export enum SessionStatus {
+export const enum SessionStatus {
   Idle = 'idle',
   InProgress = 'in-progress',
   Error = 'error',
@@ -193,10 +274,23 @@ export interface ISessionState {
   serverTools?: IToolDefinition[];
   /** The client currently providing tools and interactive capabilities to this session */
   activeClient?: ISessionActiveClient;
+  /** The working directory URI for this session */
+  workingDirectory?: URI;
   /** Completed turns */
   turns: ITurn[];
   /** Currently in-progress turn */
   activeTurn?: IActiveTurn;
+  /** Message to inject into the current turn at a convenient point */
+  steeringMessage?: IPendingMessage;
+  /** Messages to send automatically as new turns after the current turn finishes */
+  queuedMessages?: IPendingMessage[];
+  /**
+   * Server-provided customizations active in this session.
+   *
+   * Client-provided customizations are available on
+   * {@link ISessionActiveClient.customizations | activeClient.customizations}.
+   */
+  customizations?: ISessionCustomization[];
 }
 
 /**
@@ -214,6 +308,8 @@ export interface ISessionActiveClient {
   displayName?: string;
   /** Tools this client provides to the session */
   tools: IToolDefinition[];
+  /** Customizations this client contributes to the session */
+  customizations?: ICustomizationRef[];
 }
 
 /**
@@ -234,6 +330,8 @@ export interface ISessionSummary {
   modifiedAt: number;
   /** Currently selected model */
   model?: string;
+  /** The working directory URI for this session */
+  workingDirectory?: URI;
 }
 
 // ─── Turn Types ──────────────────────────────────────────────────────────────
@@ -243,7 +341,7 @@ export interface ISessionSummary {
  *
  * @category Turn Types
  */
-export enum TurnState {
+export const enum TurnState {
   Complete = 'complete',
   Cancelled = 'cancelled',
   Error = 'error',
@@ -254,7 +352,7 @@ export enum TurnState {
  *
  * @category Turn Types
  */
-export enum AttachmentType {
+export const enum AttachmentType {
   File = 'file',
   Directory = 'directory',
   Selection = 'selection',
@@ -270,12 +368,13 @@ export interface ITurn {
   id: string;
   /** The user's input */
   userMessage: IUserMessage;
-  /** Final response text (captured from streaming) */
-  responseText: string;
-  /** Structured response content */
+  /**
+   * All response content in stream order: text, tool calls, reasoning, and content refs.
+   *
+   * Consumers should derive display text by concatenating markdown parts,
+   * and find tool calls by filtering for `ToolCall` parts.
+   */
   responseParts: IResponsePart[];
-  /** Tool invocations in terminal states (completed or cancelled) */
-  toolCalls: (IToolCallCompletedState | IToolCallCancelledState)[];
   /** Token usage info */
   usage: IUsageInfo | undefined;
   /** How the turn ended */
@@ -294,16 +393,12 @@ export interface IActiveTurn {
   id: string;
   /** The user's input */
   userMessage: IUserMessage;
-  /** Accumulated streaming response text */
-  streamingText: string;
-  /** Structured response content so far */
+  /**
+   * All response content in stream order: text, tool calls, reasoning, and content refs.
+   *
+   * Tool call parts include `pendingPermissions` when permissions are awaiting user approval.
+   */
   responseParts: IResponsePart[];
-  /** Active tool invocations keyed by tool call ID */
-  toolCalls: Record<string, IToolCallState>;
-  /** Pending permission requests keyed by request ID */
-  pendingPermissions: Record<string, IPermissionRequest>;
-  /** Accumulated reasoning/thinking text */
-  reasoning: string;
   /** Token usage info */
   usage: IUsageInfo | undefined;
 }
@@ -337,9 +432,11 @@ export interface IMessageAttachment {
  *
  * @category Response Parts
  */
-export enum ResponsePartKind {
+export const enum ResponsePartKind {
   Markdown = 'markdown',
   ContentRef = 'contentRef',
+  ToolCall = 'toolCall',
+  Reasoning = 'reasoning',
 }
 
 /**
@@ -348,20 +445,18 @@ export enum ResponsePartKind {
 export interface IMarkdownResponsePart {
   /** Discriminant */
   kind: ResponsePartKind.Markdown;
+  /** Part identifier, used by `session/delta` to target this part for content appends */
+  id: string;
   /** Markdown content */
   content: string;
 }
 
 /**
  * A reference to large content stored outside the state tree.
- *
- * @category Response Parts
  */
 export interface IContentRef {
-  /** Discriminant */
-  kind: ResponsePartKind.ContentRef;
   /** Content URI */
-  uri: string;
+  uri: URI;
   /** Approximate size in bytes */
   sizeHint?: number;
   /** Content MIME type */
@@ -369,9 +464,49 @@ export interface IContentRef {
 }
 
 /**
+ * A content part that's a reference to large content stored outside the state tree.
+ *
  * @category Response Parts
  */
-export type IResponsePart = IMarkdownResponsePart | IContentRef;
+export interface IResourceReponsePart extends IContentRef {
+  /** Discriminant */
+  kind: ResponsePartKind.ContentRef;
+}
+
+/**
+ * A tool call represented as a response part.
+ *
+ * Tool calls are part of the response stream, interleaved with text and
+ * reasoning. The `toolCall.toolCallId` serves as the part identifier for
+ * actions that target this part.
+ *
+ * @category Response Parts
+ */
+export interface IToolCallResponsePart {
+  /** Discriminant */
+  kind: ResponsePartKind.ToolCall;
+  /** Full tool call lifecycle state */
+  toolCall: IToolCallState;
+}
+
+/**
+ * Reasoning/thinking content from the model.
+ *
+ * @category Response Parts
+ */
+export interface IReasoningResponsePart {
+  /** Discriminant */
+  kind: ResponsePartKind.Reasoning;
+  /** Part identifier, used by `session/reasoning` to target this part for content appends */
+  id: string;
+  /** Accumulated reasoning text */
+  content: string;
+}
+
+/**
+ * @category Response Parts
+ */
+export type IResponsePart = IMarkdownResponsePart | IResourceReponsePart | IToolCallResponsePart | IReasoningResponsePart;
 
 // ─── Tool Call Types ─────────────────────────────────────────────────────────
 
@@ -380,7 +515,7 @@ export type IResponsePart = IMarkdownResponsePart | IContentRef;
  *
  * @category Tool Call Types
  */
-export enum ToolCallStatus {
+export const enum ToolCallStatus {
   Streaming = 'streaming',
   PendingConfirmation = 'pending-confirmation',
   Running = 'running',
@@ -398,7 +533,7 @@ export enum ToolCallStatus {
  *
  * @category Tool Call Types
  */
-export enum ToolCallConfirmationReason {
+export const enum ToolCallConfirmationReason {
   NotNeeded = 'not-needed',
   UserAction = 'user-action',
   Setting = 'setting',
@@ -409,7 +544,7 @@ export enum ToolCallConfirmationReason {
  *
  * @category Tool Call Types
  */
-export enum ToolCallCancellationReason {
+export const enum ToolCallCancellationReason {
   Denied = 'denied',
   Skipped = 'skipped',
   ResultDenied = 'result-denied',
@@ -503,12 +638,15 @@ export interface IToolCallStreamingState extends IToolCallBase {
 }
 
 /**
- * Parameters are complete, waiting for client to confirm execution.
+ * Parameters are complete, or a running tool requires re-confirmation
+ * (e.g. a mid-execution permission check).
  *
  * @category Tool Call Types
  */
 export interface IToolCallPendingConfirmationState extends IToolCallBase, IToolCallParameterFields {
   status: ToolCallStatus.PendingConfirmation;
+  /** Short title for the confirmation prompt (e.g. `"Run in terminal"`, `"Write file"`) */
+  confirmationTitle?: StringOrMarkdown;
 }
 
 /**
@@ -651,9 +789,11 @@ export interface IToolAnnotations {
  *
  * @category Tool Result Content
  */
-export enum ToolResultContentType {
+export const enum ToolResultContentType {
   Text = 'text',
-  Binary = 'binary',
+  EmbeddedResource = 'embeddedResource',
+  Resource = 'resource',
+  FileEdit = 'fileEdit',
 }
 
 /**
@@ -670,14 +810,14 @@ export interface IToolResultTextContent {
 }
 
 /**
- * Base64-encoded binary content in a tool result.
+ * Base64-encoded binary content embedded in a tool result.
  *
- * Mirrors MCP `ImageContent` but generalized to any binary content type.
+ * Mirrors MCP `EmbeddedResource` for inline binary data.
  *
  * @category Tool Result Content
  */
-export interface IToolResultBinaryContent {
-  type: ToolResultContentType.Binary;
+export interface IToolResultEmbeddedResourceContent {
+  type: ToolResultContentType.EmbeddedResource;
   /** Base64-encoded data */
   data: string;
   /** Content type (e.g. `"image/png"`, `"application/pdf"`) */
@@ -685,60 +825,128 @@ export interface IToolResultBinaryContent {
 }
 
 /**
+ * A reference to a resource stored outside the tool result.
+ *
+ * Wraps {@link IContentRef} for lazy-loading large results.
+ *
+ * @category Tool Result Content
+ */
+export interface IToolResultResourceContent extends IContentRef {
+  type: ToolResultContentType.Resource;
+}
+
+/**
+ * Describes a file modification performed by a tool.
+ *
+ * Supports creates (only `after`), deletes (only `before`), renames/moves
+ * (different `uri` in `before` and `after`), and edits (same `uri`, different content).
+ *
+ * @category Tool Result Content
+ */
+export interface IToolResultFileEditContent {
+  type: ToolResultContentType.FileEdit;
+  /** The file state before the edit. Absent for file creations or for in-place file edits. */
+  before?: {
+    /** URI of the file before the edit */
+    uri: URI;
+    /** Reference to the file content before the edit */
+    content: IContentRef;
+  };
+  /** The file state after the edit. Absent for file deletions. */
+  after?: {
+    /** URI of the file after the edit */
+    uri: URI;
+    /** Reference to the file content after the edit */
+    content: IContentRef;
+  };
+  /** Optional diff display metadata */
+  diff?: {
+    /** Number of items added (e.g., lines for text files, cells for notebooks) */
+    added?: number;
+    /** Number of items removed (e.g., lines for text files, cells for notebooks) */
+    removed?: number;
+  };
+}
+
+/**
  * Content block in a tool result.
  *
- * Mirrors the content blocks in MCP `CallToolResult.content`, plus `IContentRef`
- * for lazy-loading large results (an AHP extension).
+ * Mirrors the content blocks in MCP `CallToolResult.content`, plus
+ * `IToolResultResourceContent` for lazy-loading large results and
+ * `IToolResultFileEditContent` for file edit diffs (AHP extensions).
  *
  * @category Tool Result Content
  */
 export type IToolResultContent =
   | IToolResultTextContent
-  | IToolResultBinaryContent
-  | IContentRef;
+  | IToolResultEmbeddedResourceContent
+  | IToolResultResourceContent
+  | IToolResultFileEditContent;
 
-// ─── Permission Types ────────────────────────────────────────────────────────
+// ─── Customization Types ─────────────────────────────────────────────────────
 
 /**
- * Type of permission requested.
+ * A reference to an [Open Plugins](https://open-plugins.com/) plugin.
  *
- * @category Permission Types
+ * This is intentionally thin — AHP specifies plugin identity and metadata
+ * but not implementation details, which are defined by the Open Plugins spec.
+ *
+ * @category Customization Types
  */
-export enum PermissionKind {
-  Shell = 'shell',
-  Write = 'write',
-  Mcp = 'mcp',
-  Read = 'read',
-  Url = 'url',
+export interface ICustomizationRef {
+  /** Plugin URI (e.g. an HTTPS URL or marketplace identifier) */
+  uri: URI;
+  /** Human-readable name */
+  displayName: string;
+  /** Description of what the plugin provides */
+  description?: string;
+  /** Icons for the plugin */
+  icons?: Icon[];
+  /**
+   * Opaque version token for this customization.
+   *
+   * Clients SHOULD include a nonce with every customization they provide.
+   * Consumers can compare nonces to detect whether a customization has
+   * changed since it was last seen, avoiding redundant reloads or copies.
+   */
+  nonce?: string;
 }
 
 /**
- * @category Permission Types
- * @remarks
- * Fields like `serverName`, `toolName`, and `rawRequest` carry agent-specific
- * identifiers on the wire despite the agent-agnostic design principle. These exist
- * for debugging and logging purposes.
- * @todo @connor4312, split this up into well-separated union types
+ * Loading status for a server-managed customization.
+ *
+ * @category Customization Types
  */
-export interface IPermissionRequest {
-  /** Unique request identifier */
-  requestId: string;
-  /** Type of permission */
-  permissionKind: PermissionKind;
-  /** Associated tool call */
-  toolCallId?: string;
-  /** File/directory path */
-  path?: string;
-  /** Full command to execute */
-  fullCommandText?: string;
-  /** What the tool intends to do */
-  intention?: string;
-  /** MCP server name */
-  serverName?: string;
-  /** Tool requesting permission */
-  toolName?: string;
-  /** Raw request data */
-  rawRequest?: string;
+export const enum CustomizationStatus {
+  /** Plugin is being loaded */
+  Loading = 'loading',
+  /** Plugin is fully operational */
+  Loaded = 'loaded',
+  /** Plugin partially loaded but has warnings */
+  Degraded = 'degraded',
+  /** Plugin was unable to load */
+  Error = 'error',
+}
+
+/**
+ * A customization active in a session.
+ *
+ * Entries without a `clientId` are server-provided; entries with a `clientId`
+ * originate from that client.
+ *
+ * @category Customization Types
+ */
+export interface ISessionCustomization {
+  /** The plugin this customization refers to */
+  customization: ICustomizationRef;
+  /** Whether this customization is currently enabled */
+  enabled: boolean;
+  /** Server-reported loading status */
+  status?: CustomizationStatus;
+  /**
+   * Human-readable status detail (e.g. error message or degradation warning).
+   */
+  statusMessage?: string;
 }
 
 // ─── Common Types ────────────────────────────────────────────────────────────

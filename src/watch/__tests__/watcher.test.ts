@@ -8,12 +8,12 @@ import { ActionType } from "../../protocol/actions.js";
 import type { ISubscribeResult } from "../../protocol/commands.js";
 import type { ISessionState } from "../../protocol/state.js";
 import {
+	ResponsePartKind,
 	SessionLifecycle,
 	SessionStatus,
 	ToolCallConfirmationReason,
 	ToolCallStatus,
 	TurnState,
-	ResponsePartKind,
 } from "../../protocol/state.js";
 import { SessionWatcher } from "../watcher.js";
 
@@ -274,9 +274,7 @@ describe("SessionWatcher", () => {
 				{
 					id: "t1",
 					userMessage: { text: "Hello" },
-					responseParts: [
-						{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" },
-					],
+					responseParts: [{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" }],
 					usage: undefined,
 					state: TurnState.Complete,
 				},

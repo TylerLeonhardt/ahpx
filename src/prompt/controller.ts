@@ -16,7 +16,6 @@ import { ActionType } from "../protocol/actions.js";
 import type {
 	ISessionDeltaAction,
 	ISessionErrorAction,
-	ISessionPermissionRequestAction,
 	ISessionReasoningAction,
 	ISessionTitleChangedAction,
 	ISessionToolCallCompleteAction,
@@ -25,7 +24,7 @@ import type {
 	ISessionToolCallStartAction,
 	ISessionUsageAction,
 } from "../protocol/actions.js";
-import { ToolCallCancellationReason, ToolCallConfirmationReason } from "../protocol/state.js";
+import { ResponsePartKind, ToolCallCancellationReason, ToolCallConfirmationReason } from "../protocol/state.js";
 import type { IMessageAttachment, IUsageInfo, URI } from "../protocol/state.js";
 
 export interface TurnResult {
@@ -156,10 +155,14 @@ export class TurnController {
 
 						// Look up the actual tool name from state mirror
 						const session = this.client.state.getSession(this.sessionUri);
-						if (session?.activeTurn?.toolCalls[a.toolCallId]) {
-							const tc = session.activeTurn.toolCalls[a.toolCallId];
-							callInfo.toolName = tc.toolName;
-							callInfo.displayName = tc.displayName;
+						if (session?.activeTurn) {
+							for (const part of session.activeTurn.responseParts) {
+								if (part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === a.toolCallId) {
+									callInfo.toolName = part.toolCall.toolName;
+									callInfo.displayName = part.toolCall.displayName;
+									break;
+								}
+							}
 						}
 
 						this.renderer.onToolCallReady(a.toolCallId, callInfo);
@@ -193,24 +196,6 @@ export class TurnController {
 					case ActionType.SessionToolCallComplete: {
 						const a = action as ISessionToolCallCompleteAction;
 						this.renderer.onToolCallComplete(a.toolCallId, a.result);
-						break;
-					}
-
-					case ActionType.SessionPermissionRequest: {
-						const a = action as ISessionPermissionRequestAction;
-						this.renderer.onPermissionRequest(a.request);
-
-						// Handle permission asynchronously
-						this.permissionHandler.handlePermission(a.request).then((approved) => {
-							if (this.cancelled) return;
-							this.client.dispatchAction({
-								type: ActionType.SessionPermissionResolved,
-								session: this.sessionUri,
-								turnId,
-								requestId: a.request.requestId,
-								approved,
-							});
-						});
 						break;
 					}
 
