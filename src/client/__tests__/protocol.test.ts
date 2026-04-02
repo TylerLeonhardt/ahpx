@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ContentEncoding } from "../../protocol/commands.js";
 import { ProtocolLayer, RpcError, RpcTimeoutError } from "../protocol.js";
 import type { Transport } from "../transport.js";
 
@@ -242,6 +243,86 @@ describe("ProtocolLayer", () => {
 
 			await expect(p1).rejects.toThrow("shutting down");
 			await expect(p2).rejects.toThrow("shutting down");
+		});
+	});
+
+	describe("resource commands", () => {
+		it("sends resourceWrite with correct params", async () => {
+			const promise = protocol.request("resourceWrite", {
+				uri: "file:///workspace/hello.txt",
+				data: "SGVsbG8=",
+				encoding: ContentEncoding.Base64,
+				contentType: "text/plain",
+			});
+
+			expect(mock.sent).toHaveLength(1);
+			const sent = mock.sent[0] as Record<string, unknown>;
+			expect(sent.method).toBe("resourceWrite");
+			const params = sent.params as Record<string, unknown>;
+			expect(params.uri).toBe("file:///workspace/hello.txt");
+			expect(params.data).toBe("SGVsbG8=");
+			expect(params.encoding).toBe("base64");
+			expect(params.contentType).toBe("text/plain");
+
+			mock.receive({ jsonrpc: "2.0", id: 1, result: {} });
+			const result = await promise;
+			expect(result).toEqual({});
+		});
+
+		it("sends resourceCopy with correct params", async () => {
+			const promise = protocol.request("resourceCopy", {
+				source: "file:///a.txt",
+				destination: "file:///b.txt",
+				failIfExists: true,
+			});
+
+			expect(mock.sent).toHaveLength(1);
+			const sent = mock.sent[0] as Record<string, unknown>;
+			expect(sent.method).toBe("resourceCopy");
+			const params = sent.params as Record<string, unknown>;
+			expect(params.source).toBe("file:///a.txt");
+			expect(params.destination).toBe("file:///b.txt");
+			expect(params.failIfExists).toBe(true);
+
+			mock.receive({ jsonrpc: "2.0", id: 1, result: {} });
+			const result = await promise;
+			expect(result).toEqual({});
+		});
+
+		it("sends resourceDelete with correct params", async () => {
+			const promise = protocol.request("resourceDelete", {
+				uri: "file:///workspace/old.txt",
+				recursive: true,
+			});
+
+			expect(mock.sent).toHaveLength(1);
+			const sent = mock.sent[0] as Record<string, unknown>;
+			expect(sent.method).toBe("resourceDelete");
+			const params = sent.params as Record<string, unknown>;
+			expect(params.uri).toBe("file:///workspace/old.txt");
+			expect(params.recursive).toBe(true);
+
+			mock.receive({ jsonrpc: "2.0", id: 1, result: {} });
+			const result = await promise;
+			expect(result).toEqual({});
+		});
+
+		it("sends resourceMove with correct params", async () => {
+			const promise = protocol.request("resourceMove", {
+				source: "file:///old.txt",
+				destination: "file:///new.txt",
+			});
+
+			expect(mock.sent).toHaveLength(1);
+			const sent = mock.sent[0] as Record<string, unknown>;
+			expect(sent.method).toBe("resourceMove");
+			const params = sent.params as Record<string, unknown>;
+			expect(params.source).toBe("file:///old.txt");
+			expect(params.destination).toBe("file:///new.txt");
+
+			mock.receive({ jsonrpc: "2.0", id: 1, result: {} });
+			const result = await promise;
+			expect(result).toEqual({});
 		});
 	});
 });
