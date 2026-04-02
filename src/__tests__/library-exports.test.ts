@@ -133,26 +133,29 @@ describe("library exports", () => {
 
 	describe("protocol types — enums", () => {
 		it("exports ActionType enum", () => {
-			expect(ahpx.ActionType).toBeDefined();
 			expect(ahpx.ActionType.SessionDelta).toBe("session/delta");
 			expect(ahpx.ActionType.SessionTurnStarted).toBe("session/turnStarted");
 			expect(ahpx.ActionType.SessionTurnComplete).toBe("session/turnComplete");
 		});
 
 		it("exports SessionLifecycle enum", () => {
-			expect(ahpx.SessionLifecycle).toBeDefined();
+			expect(ahpx.SessionLifecycle.Creating).toBe("creating");
 		});
 
 		it("exports SessionStatus enum", () => {
-			expect(ahpx.SessionStatus).toBeDefined();
+			expect(ahpx.SessionStatus.Idle).toBe("idle");
 		});
 
 		it("exports ToolCallStatus enum", () => {
-			expect(ahpx.ToolCallStatus).toBeDefined();
+			expect(ahpx.ToolCallStatus.Running).toBe("running");
 		});
 
-		it("exports PermissionKind enum", () => {
-			expect(ahpx.PermissionKind).toBeDefined();
+		it("exports PendingMessageKind enum", () => {
+			expect(ahpx.PendingMessageKind.Queued).toBe("queued");
+		});
+
+		it("exports ResponsePartKind enum", () => {
+			expect(ahpx.ResponsePartKind.Markdown).toBe("markdown");
 		});
 	});
 
@@ -227,7 +230,14 @@ describe("library exports", () => {
 		});
 
 		it("exports all expected enums", () => {
-			const expectedEnums = ["ActionType", "SessionLifecycle", "SessionStatus", "ToolCallStatus", "PermissionKind"];
+			const expectedEnums = [
+				"ActionType",
+				"SessionLifecycle",
+				"SessionStatus",
+				"ToolCallStatus",
+				"PendingMessageKind",
+				"ResponsePartKind",
+			];
 
 			for (const name of expectedEnums) {
 				expect(ahpx).toHaveProperty(name);
@@ -307,6 +317,7 @@ describe("library exports", () => {
 					type: ahpx.ActionType.SessionDelta,
 					session: "copilot:/test",
 					turnId: "t1",
+					partId: "p1",
 					content: "hello",
 				},
 				origin: { clientId: "c1", clientSeq: 1 },

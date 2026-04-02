@@ -6,7 +6,7 @@
  * to stderr.
  */
 
-import type { IErrorInfo, IPermissionRequest, IToolCallResult, IUsageInfo } from "../protocol/state.js";
+import type { IErrorInfo, IToolCallResult, IUsageInfo } from "../protocol/state.js";
 import type { OutputFormatter, WritableOutput } from "./format.js";
 import type { ToolCallInfo } from "./renderer.js";
 
@@ -44,10 +44,6 @@ export class QuietFormatter implements OutputFormatter {
 	}
 
 	onToolCallCancelled(_id: string, _reason: string): void {
-		// Silent
-	}
-
-	onPermissionRequest(_req: IPermissionRequest): void {
 		// Silent
 	}
 

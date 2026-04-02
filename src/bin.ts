@@ -46,6 +46,8 @@ import { PermissionHandler } from "./permissions/index.js";
 import type { PermissionMode } from "./permissions/index.js";
 import { TurnController } from "./prompt/index.js";
 import { ActionType } from "./protocol/actions.js";
+import { ResponsePartKind } from "./protocol/state.js";
+import type { ITurn } from "./protocol/state.js";
 import { SessionPersistence, SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
 import type { SessionRecord } from "./session/index.js";
 import { SessionWatcher } from "./watch/index.js";
@@ -53,6 +55,28 @@ import { SessionWatcher } from "./watch/index.js";
 const store = new ConnectionStore();
 const sessionStore = new SessionStore();
 const sessionPersistence = new SessionPersistence(sessionStore);
+
+/** Derive response text from a turn's response parts (markdown parts concatenated). */
+function turnResponseText(turn: ITurn): string {
+	let text = "";
+	for (const p of turn.responseParts) {
+		if (p.kind === ResponsePartKind.Markdown) {
+			text += p.content;
+		}
+	}
+	return text;
+}
+
+/** Count tool calls in a turn's response parts. */
+function turnToolCallCount(turn: ITurn): number {
+	let count = 0;
+	for (const p of turn.responseParts) {
+		if (p.kind === ResponsePartKind.ToolCall) {
+			count++;
+		}
+	}
+	return count;
+}
 
 // ── Global options (parsed before Commander routes to a subcommand) ──────────
 
@@ -1293,8 +1317,8 @@ session
 										formatTurnEntry({
 											id: turn.id,
 											userMessage: turn.userMessage.text,
-											responsePreview: turn.responseText || "(no response)",
-											toolCalls: turn.toolCalls.length,
+											responsePreview: turnResponseText(turn) || "(no response)",
+											toolCalls: turnToolCallCount(turn),
 											usage: turn.usage,
 										});
 									}
@@ -1306,8 +1330,8 @@ session
 									turns: result.turns.map((t) => ({
 										id: t.id,
 										userMessage: t.userMessage.text,
-										responseText: t.responseText,
-										toolCalls: t.toolCalls.length,
+										responseText: turnResponseText(t),
+										toolCalls: turnToolCallCount(t),
 										usage: t.usage,
 									})),
 								},
@@ -2094,7 +2118,7 @@ program
 			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 
 			await withConnection({ server: opts.server, config: cfg }, async (client) => {
-				const result = await client.browseDirectory(directory);
+				const result = await client.resourceList(directory ?? "");
 
 				outputResult(
 					globalOpts,
@@ -2140,7 +2164,7 @@ program
 			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 
 			await withConnection({ server: opts.server, config: cfg }, async (client) => {
-				const result = await client.fetchContent(uri);
+				const result = await client.resourceRead(uri);
 
 				const data =
 					result.encoding === "base64" ? Buffer.from(result.data, "base64") : Buffer.from(result.data, "utf-8");
@@ -2155,7 +2179,7 @@ program
 						JSON.stringify({
 							uri,
 							encoding: result.encoding,
-							mimeType: result.mimeType,
+							contentType: result.contentType,
 							data: result.data,
 							size: data.length,
 						}),

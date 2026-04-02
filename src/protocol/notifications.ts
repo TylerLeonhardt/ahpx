@@ -13,7 +13,7 @@ import type { URI, ISessionSummary } from './state.js';
  *
  * @category Protocol Notifications
  */
-export enum AuthRequiredReason {
+export const enum AuthRequiredReason {
   /** The client has not yet authenticated for the resource */
   Required = 'required',
   /** A previously valid token has expired or been revoked */
@@ -27,7 +27,7 @@ export enum AuthRequiredReason {
  *
  * @category Protocol Notifications
  */
-export enum NotificationType {
+export const enum NotificationType {
   SessionAdded = 'notify/sessionAdded',
   SessionRemoved = 'notify/sessionRemoved',
   AuthRequired = 'notify/authRequired',

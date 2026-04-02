@@ -24,6 +24,8 @@ import type {
   IMessageAttachment,
   IMarkdownResponsePart,
   IContentRef,
+  IToolCallResponsePart,
+  IReasoningResponsePart,
   IToolCallResult,
   IToolCallStreamingState,
   IToolCallPendingConfirmationState,
@@ -35,11 +37,16 @@ import type {
   IToolDefinition,
   IToolAnnotations,
   IToolResultTextContent,
-  IToolResultBinaryContent,
-  IPermissionRequest,
+  IToolResultEmbeddedResourceContent,
+  IToolResultResourceContent,
+  IToolResultFileEditContent,
   IUsageInfo,
   IErrorInfo,
   ISnapshot,
+  IPendingMessage,
+  Icon,
+  ICustomizationRef,
+  ISessionCustomization,
 } from '../state.js';
 
 import type {
@@ -52,6 +59,12 @@ import type {
   ISessionServerToolsChangedAction,
   ISessionActiveClientChangedAction,
   ISessionActiveClientToolsChangedAction,
+  ISessionPendingMessageSetAction,
+  ISessionPendingMessageRemovedAction,
+  ISessionQueuedMessagesReorderedAction,
+  ISessionCustomizationsChangedAction,
+  ISessionCustomizationToggledAction,
+  ISessionTruncatedAction,
 } from '../actions.js';
 
 import type {
@@ -63,6 +76,19 @@ import type {
   IListSessionsResult,
   IAuthenticateParams,
   IAuthenticateResult,
+  IResourceWriteParams,
+  IResourceWriteResult,
+  ISessionForkSource,
+  IResourceReadParams,
+  IResourceReadResult,
+  IResourceListParams,
+  IResourceListResult,
+  IResourceCopyParams,
+  IResourceCopyResult,
+  IResourceDeleteParams,
+  IResourceDeleteResult,
+  IResourceMoveParams,
+  IResourceMoveResult,
 } from '../commands.js';
 
 import type {
@@ -104,6 +130,8 @@ type V1_IUserMessage = IUserMessage;
 type V1_IMessageAttachment = IMessageAttachment;
 type V1_IMarkdownResponsePart = IMarkdownResponsePart;
 type V1_IContentRef = IContentRef;
+type V1_IToolCallResponsePart = IToolCallResponsePart;
+type V1_IReasoningResponsePart = IReasoningResponsePart;
 type V1_IToolCallResult = IToolCallResult;
 type V1_IToolCallStreamingState = IToolCallStreamingState;
 type V1_IToolCallPendingConfirmationState = IToolCallPendingConfirmationState;
@@ -115,11 +143,16 @@ type V1_IToolCallState = IToolCallState;
 type V1_IToolDefinition = IToolDefinition;
 type V1_IToolAnnotations = IToolAnnotations;
 type V1_IToolResultTextContent = IToolResultTextContent;
-type V1_IToolResultBinaryContent = IToolResultBinaryContent;
-type V1_IPermissionRequest = IPermissionRequest;
+type V1_IToolResultEmbeddedResourceContent = IToolResultEmbeddedResourceContent;
+type V1_IToolResultResourceContent = IToolResultResourceContent;
+type V1_IToolResultFileEditContent = IToolResultFileEditContent;
 type V1_IUsageInfo = IUsageInfo;
 type V1_IErrorInfo = IErrorInfo;
 type V1_ISnapshot = ISnapshot;
+type V1_IPendingMessage = IPendingMessage;
+type V1_Icon = Icon;
+type V1_ICustomizationRef = ICustomizationRef;
+type V1_ISessionCustomization = ISessionCustomization;
 type V1_IStateAction = IStateAction;
 type V1_IActionEnvelope = IActionEnvelope;
 type V1_IActionOrigin = IActionOrigin;
@@ -129,11 +162,30 @@ type V1_ISessionToolCallDeniedAction = ISessionToolCallDeniedAction;
 type V1_ISessionServerToolsChangedAction = ISessionServerToolsChangedAction;
 type V1_ISessionActiveClientChangedAction = ISessionActiveClientChangedAction;
 type V1_ISessionActiveClientToolsChangedAction = ISessionActiveClientToolsChangedAction;
+type V1_ISessionPendingMessageSetAction = ISessionPendingMessageSetAction;
+type V1_ISessionPendingMessageRemovedAction = ISessionPendingMessageRemovedAction;
+type V1_ISessionQueuedMessagesReorderedAction = ISessionQueuedMessagesReorderedAction;
+type V1_ISessionCustomizationsChangedAction = ISessionCustomizationsChangedAction;
+type V1_ISessionCustomizationToggledAction = ISessionCustomizationToggledAction;
+type V1_ISessionTruncatedAction = ISessionTruncatedAction;
+type V1_ISessionForkSource = ISessionForkSource;
 type V1_IProtocolNotification = IProtocolNotification;
 type V1_IAuthRequiredNotification = IAuthRequiredNotification;
 type V1_IListSessionsResult = IListSessionsResult;
 type V1_IAuthenticateParams = IAuthenticateParams;
 type V1_IAuthenticateResult = IAuthenticateResult;
+type V1_IResourceWriteParams = IResourceWriteParams;
+type V1_IResourceWriteResult = IResourceWriteResult;
+type V1_IResourceReadParams = IResourceReadParams;
+type V1_IResourceReadResult = IResourceReadResult;
+type V1_IResourceListParams = IResourceListParams;
+type V1_IResourceListResult = IResourceListResult;
+type V1_IResourceCopyParams = IResourceCopyParams;
+type V1_IResourceCopyResult = IResourceCopyResult;
+type V1_IResourceDeleteParams = IResourceDeleteParams;
+type V1_IResourceDeleteResult = IResourceDeleteResult;
+type V1_IResourceMoveParams = IResourceMoveParams;
+type V1_IResourceMoveResult = IResourceMoveResult;
 type V1_ICommandMap = ICommandMap;
 type V1_IClientNotificationMap = IClientNotificationMap;
 type V1_IServerNotificationMap = IServerNotificationMap;
@@ -169,6 +221,10 @@ type _CheckMarkdownResponsePart = AssertCompatible<V1_IMarkdownResponsePart, IMa
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckContentRef = AssertCompatible<V1_IContentRef, IContentRef>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckToolCallResponsePart = AssertCompatible<V1_IToolCallResponsePart, IToolCallResponsePart>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckReasoningResponsePart = AssertCompatible<V1_IReasoningResponsePart, IReasoningResponsePart>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckToolCallResult = AssertCompatible<V1_IToolCallResult, IToolCallResult>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckToolCallStreamingState = AssertCompatible<V1_IToolCallStreamingState, IToolCallStreamingState>;
@@ -184,8 +240,6 @@ type _CheckToolCallCompletedState = AssertCompatible<V1_IToolCallCompletedState,
 type _CheckToolCallCancelledState = AssertCompatible<V1_IToolCallCancelledState, IToolCallCancelledState>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckToolCallState = AssertCompatible<V1_IToolCallState, IToolCallState>;
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-type _CheckPermissionRequest = AssertCompatible<V1_IPermissionRequest, IPermissionRequest>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckUsageInfo = AssertCompatible<V1_IUsageInfo, IUsageInfo>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -213,13 +267,39 @@ type _CheckToolAnnotations = AssertCompatible<V1_IToolAnnotations, IToolAnnotati
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckToolResultTextContent = AssertCompatible<V1_IToolResultTextContent, IToolResultTextContent>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-type _CheckToolResultBinaryContent = AssertCompatible<V1_IToolResultBinaryContent, IToolResultBinaryContent>;
+type _CheckToolResultEmbeddedResourceContent = AssertCompatible<V1_IToolResultEmbeddedResourceContent, IToolResultEmbeddedResourceContent>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckToolResultResourceContent = AssertCompatible<V1_IToolResultResourceContent, IToolResultResourceContent>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckToolResultFileEditContent = AssertCompatible<V1_IToolResultFileEditContent, IToolResultFileEditContent>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckServerToolsChangedAction = AssertCompatible<V1_ISessionServerToolsChangedAction, ISessionServerToolsChangedAction>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckActiveClientChangedAction = AssertCompatible<V1_ISessionActiveClientChangedAction, ISessionActiveClientChangedAction>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckActiveClientToolsChangedAction = AssertCompatible<V1_ISessionActiveClientToolsChangedAction, ISessionActiveClientToolsChangedAction>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckPendingMessage = AssertCompatible<V1_IPendingMessage, IPendingMessage>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckPendingMessageSetAction = AssertCompatible<V1_ISessionPendingMessageSetAction, ISessionPendingMessageSetAction>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckPendingMessageRemovedAction = AssertCompatible<V1_ISessionPendingMessageRemovedAction, ISessionPendingMessageRemovedAction>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckQueuedMessagesReorderedAction = AssertCompatible<V1_ISessionQueuedMessagesReorderedAction, ISessionQueuedMessagesReorderedAction>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckIcon = AssertCompatible<V1_Icon, Icon>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckCustomizationRef = AssertCompatible<V1_ICustomizationRef, ICustomizationRef>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckSessionCustomization = AssertCompatible<V1_ISessionCustomization, ISessionCustomization>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckCustomizationsChangedAction = AssertCompatible<V1_ISessionCustomizationsChangedAction, ISessionCustomizationsChangedAction>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckCustomizationToggledAction = AssertCompatible<V1_ISessionCustomizationToggledAction, ISessionCustomizationToggledAction>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckTruncatedAction = AssertCompatible<V1_ISessionTruncatedAction, ISessionTruncatedAction>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckSessionForkSource = AssertCompatible<V1_ISessionForkSource, ISessionForkSource>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckProtocolNotification = AssertCompatible<V1_IProtocolNotification, IProtocolNotification>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -228,6 +308,30 @@ type _CheckListSessionsResult = AssertCompatible<V1_IListSessionsResult, IListSe
 type _CheckAuthenticateParams = AssertCompatible<V1_IAuthenticateParams, IAuthenticateParams>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckAuthenticateResult = AssertCompatible<V1_IAuthenticateResult, IAuthenticateResult>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceWriteParams = AssertCompatible<V1_IResourceWriteParams, IResourceWriteParams>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceWriteResult = AssertCompatible<V1_IResourceWriteResult, IResourceWriteResult>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceReadParams = AssertCompatible<V1_IResourceReadParams, IResourceReadParams>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceReadResult = AssertCompatible<V1_IResourceReadResult, IResourceReadResult>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceListParams = AssertCompatible<V1_IResourceListParams, IResourceListParams>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceListResult = AssertCompatible<V1_IResourceListResult, IResourceListResult>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceCopyParams = AssertCompatible<V1_IResourceCopyParams, IResourceCopyParams>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceCopyResult = AssertCompatible<V1_IResourceCopyResult, IResourceCopyResult>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceDeleteParams = AssertCompatible<V1_IResourceDeleteParams, IResourceDeleteParams>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceDeleteResult = AssertCompatible<V1_IResourceDeleteResult, IResourceDeleteResult>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceMoveParams = AssertCompatible<V1_IResourceMoveParams, IResourceMoveParams>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckResourceMoveResult = AssertCompatible<V1_IResourceMoveResult, IResourceMoveResult>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckProtectedResourceMetadata = AssertCompatible<V1_IProtectedResourceMetadata, IProtectedResourceMetadata>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

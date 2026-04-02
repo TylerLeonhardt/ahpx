@@ -11,7 +11,7 @@
  * When `strict` mode is enabled, non-JSON stderr output is suppressed.
  */
 
-import type { IErrorInfo, IPermissionRequest, IToolCallResult, IUsageInfo } from "../protocol/state.js";
+import type { IErrorInfo, IToolCallResult, IUsageInfo } from "../protocol/state.js";
 import type { OutputFormatter, WritableOutput } from "./format.js";
 import type { ToolCallInfo } from "./renderer.js";
 
@@ -23,7 +23,6 @@ export type JsonEventType =
 	| "tool_call_ready"
 	| "tool_call_complete"
 	| "tool_call_cancelled"
-	| "permission"
 	| "usage"
 	| "turn_complete"
 	| "turn_error"
@@ -86,10 +85,6 @@ export class JsonFormatter implements OutputFormatter {
 
 	onToolCallCancelled(id: string, reason: string): void {
 		this.emit("tool_call_cancelled", { toolCallId: id, reason });
-	}
-
-	onPermissionRequest(req: IPermissionRequest): void {
-		this.emit("permission", { request: req });
 	}
 
 	onUsage(usage: IUsageInfo): void {

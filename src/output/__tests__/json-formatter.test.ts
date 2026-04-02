@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PermissionKind } from "../../protocol/state.js";
-import type { IPermissionRequest, IToolCallResult, IUsageInfo } from "../../protocol/state.js";
+import type { IToolCallResult, IUsageInfo } from "../../protocol/state.js";
 import { JsonFormatter } from "../json-formatter.js";
 import type { JsonEnvelope } from "../json-formatter.js";
 import type { WritableOutput } from "../renderer.js";
@@ -179,21 +178,6 @@ describe("JsonFormatter", () => {
 			const env = cap.envelopes()[0];
 			expect(env.type).toBe("tool_call_cancelled");
 			expect(env.data).toEqual({ toolCallId: "tc1", reason: "user denied" });
-		});
-
-		it("permission event", () => {
-			const cap = createCapture();
-			const fmt = new JsonFormatter(cap.out);
-			const req: IPermissionRequest = {
-				requestId: "p1",
-				permissionKind: PermissionKind.Shell,
-				fullCommandText: "npm test",
-			};
-			fmt.onPermissionRequest(req);
-
-			const env = cap.envelopes()[0];
-			expect(env.type).toBe("permission");
-			expect((env.data.request as IPermissionRequest).requestId).toBe("p1");
 		});
 
 		it("usage event", () => {

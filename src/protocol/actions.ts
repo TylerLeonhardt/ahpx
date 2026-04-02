@@ -17,10 +17,10 @@ import type {
   IToolDefinition,
   ISessionActiveClient,
   IUsageInfo,
-  IPermissionRequest,
+  ISessionCustomization,
 } from './state.js';
 
-import { ToolCallConfirmationReason, ToolCallCancellationReason } from './state.js';
+import { ToolCallConfirmationReason, ToolCallCancellationReason, PendingMessageKind } from './state.js';
 
 // ─── Action Type Enum ────────────────────────────────────────────────────────
 
@@ -29,7 +29,7 @@ import { ToolCallConfirmationReason, ToolCallCancellationReason } from './state.
  *
  * @category Actions
  */
-export enum ActionType {
+export const enum ActionType {
   RootAgentsChanged = 'root/agentsChanged',
   RootActiveSessionsChanged = 'root/activeSessionsChanged',
   SessionReady = 'session/ready',
@@ -43,8 +43,6 @@ export enum ActionType {
   SessionToolCallConfirmed = 'session/toolCallConfirmed',
   SessionToolCallComplete = 'session/toolCallComplete',
   SessionToolCallResultConfirmed = 'session/toolCallResultConfirmed',
-  SessionPermissionRequest = 'session/permissionRequest',
-  SessionPermissionResolved = 'session/permissionResolved',
   SessionTurnComplete = 'session/turnComplete',
   SessionTurnCancelled = 'session/turnCancelled',
   SessionError = 'session/error',
@@ -55,6 +53,12 @@ export enum ActionType {
   SessionServerToolsChanged = 'session/serverToolsChanged',
   SessionActiveClientChanged = 'session/activeClientChanged',
   SessionActiveClientToolsChanged = 'session/activeClientToolsChanged',
+  SessionPendingMessageSet = 'session/pendingMessageSet',
+  SessionPendingMessageRemoved = 'session/pendingMessageRemoved',
+  SessionQueuedMessagesReordered = 'session/queuedMessagesReordered',
+  SessionCustomizationsChanged = 'session/customizationsChanged',
+  SessionCustomizationToggled = 'session/customizationToggled',
+  SessionTruncated = 'session/truncated',
 }
 
 // ─── Action Envelope ─────────────────────────────────────────────────────────
@@ -170,10 +174,15 @@ export interface ISessionTurnStartedAction {
   turnId: string;
   /** User's message */
   userMessage: IUserMessage;
+  /** If this turn was auto-started from a queued message, the ID of that message */
+  queuedMessageId?: string;
 }
 
 /**
- * Streaming text chunk from the assistant.
+ * Streaming text chunk from the assistant, appended to a specific response part.
+ *
+ * The server MUST first emit a `session/responsePart` to create the target
+ * part (markdown or reasoning), then use this action to append text to it.
  *
  * @category Session Actions
  * @version 1
@@ -184,6 +193,8 @@ export interface ISessionDeltaAction {
   session: URI;
   /** Turn identifier */
   turnId: string;
+  /** Identifier of the response part to append to */
+  partId: string;
   /** Text chunk */
   content: string;
 }
@@ -242,8 +253,15 @@ export interface ISessionToolCallDeltaAction extends IToolCallActionBase {
 }
 
 /**
- * Tool call parameters are complete. Transitions to `pending-confirmation`
+ * Tool call parameters are complete, or a running tool requires re-confirmation.
+ *
+ * When dispatched for a `streaming` tool call, transitions to `pending-confirmation`
  * or directly to `running` if `confirmed` is set.
+ *
+ * When dispatched for a `running` tool call (e.g. mid-execution permission needed),
+ * transitions back to `pending-confirmation`. The `invocationMessage` and `_meta`
+ * SHOULD be updated to describe the specific confirmation needed. Clients use the
+ * standard `session/toolCallConfirmed` flow to approve or deny.
  *
  * For client-provided tools, the server typically sets `confirmed` to
  * `'not-needed'` so the tool transitions directly to `running`, where the
@@ -254,10 +272,12 @@ export interface ISessionToolCallDeltaAction extends IToolCallActionBase {
  */
 export interface ISessionToolCallReadyAction extends IToolCallActionBase {
   type: ActionType.SessionToolCallReady;
-  /** Message describing what the tool will do */
+  /** Message describing what the tool will do or what confirmation is needed */
   invocationMessage: StringOrMarkdown;
   /** Raw tool input */
   toolInput?: string;
+  /** Short title for the confirmation prompt (e.g. `"Run in terminal"`, `"Write file"`) */
+  confirmationTitle?: StringOrMarkdown;
   /** If set, the tool was auto-confirmed and transitions directly to `running` */
   confirmed?: ToolCallConfirmationReason;
 }
@@ -350,41 +370,6 @@ export interface ISessionToolCallResultConfirmedAction extends IToolCallActionBa
 }
 
 /**
- * Permission needed from the user to proceed.
- *
- * @category Session Actions
- * @version 1
- */
-export interface ISessionPermissionRequestAction {
-  type: ActionType.SessionPermissionRequest;
-  /** Session URI */
-  session: URI;
-  /** Turn identifier */
-  turnId: string;
-  /** Permission request details */
-  request: IPermissionRequest;
-}
-
-/**
- * Permission granted or denied.
- *
- * @category Session Actions
- * @version 1
- * @clientDispatchable
- */
-export interface ISessionPermissionResolvedAction {
-  type: ActionType.SessionPermissionResolved;
-  /** Session URI */
-  session: URI;
-  /** Turn identifier */
-  turnId: string;
-  /** Permission request ID */
-  requestId: string;
-  /** Whether permission was granted */
-  approved: boolean;
-}
-
-/**
  * Turn finished — the assistant is idle.
  *
  * @category Session Actions
@@ -430,9 +415,11 @@ export interface ISessionErrorAction {
 }
 
 /**
- * Session title updated (typically auto-generated from conversation).
+ * Session title updated. Fired by the server when the title is auto-generated
+ * from conversation, or dispatched by a client to rename a session.
  *
  * @category Session Actions
+ * @clientDispatchable
  * @version 1
  */
 export interface ISessionTitleChangedAction {
@@ -460,7 +447,10 @@ export interface ISessionUsageAction {
 }
 
 /**
- * Reasoning/thinking text from the model.
+ * Reasoning/thinking text from the model, appended to a specific reasoning response part.
+ *
+ * The server MUST first emit a `session/responsePart` to create the target
+ * reasoning part, then use this action to append text to it.
  *
  * @category Session Actions
  * @version 1
@@ -471,6 +461,8 @@ export interface ISessionReasoningAction {
   session: URI;
   /** Turn identifier */
   turnId: string;
+  /** Identifier of the reasoning response part to append to */
+  partId: string;
   /** Reasoning text chunk */
   content: string;
 }
@@ -545,6 +537,139 @@ export interface ISessionActiveClientToolsChangedAction {
   tools: IToolDefinition[];
 }
 
+// ─── Customization Actions ───────────────────────────────────────────────────
+
+/**
+ * The session's customizations have changed.
+ *
+ * Full-replacement semantics: the `customizations` array replaces the
+ * previous `customizations` entirely.
+ *
+ * @category Session Actions
+ * @version 1
+ */
+export interface ISessionCustomizationsChangedAction {
+  type: ActionType.SessionCustomizationsChanged;
+  /** Session URI */
+  session: URI;
+  /** Updated customization list (full replacement) */
+  customizations: ISessionCustomization[];
+}
+
+/**
+ * A client toggled a customization on or off.
+ *
+ * The server locates the customization by `uri` in the session's
+ * customization list and sets its `enabled` flag.
+ *
+ * @category Session Actions
+ * @version 1
+ * @clientDispatchable
+ */
+export interface ISessionCustomizationToggledAction {
+  type: ActionType.SessionCustomizationToggled;
+  /** Session URI */
+  session: URI;
+  /** The URI of the customization to toggle */
+  uri: URI;
+  /** Whether to enable or disable the customization */
+  enabled: boolean;
+}
+
+// ─── Truncation ──────────────────────────────────────────────────────────────
+
+/**
+ * Truncates a session's history. If `turnId` is provided, all turns after that
+ * turn are removed and the specified turn is kept. If `turnId` is omitted, all
+ * turns are removed.
+ *
+ * If there is an active turn it is silently dropped and the session status
+ * returns to `idle`.
+ *
+ * Common use-case: truncate old data then dispatch a new
+ * `session/turnStarted` with an edited message.
+ *
+ * @category Session Actions
+ * @version 1
+ * @clientDispatchable
+ */
+export interface ISessionTruncatedAction {
+  type: ActionType.SessionTruncated;
+  /** Session URI */
+  session: URI;
+  /** Keep turns up to and including this turn. Omit to clear all turns. */
+  turnId?: string;
+}
+
+// ─── Pending Message Actions ─────────────────────────────────────────────────
+
+/**
+ * A pending message was set (upsert semantics: creates or replaces).
+ *
+ * For steering messages, this always replaces the single steering message.
+ * For queued messages, if a message with the given `id` already exists it is
+ * updated in place; otherwise it is appended to the queue. If the session is
+ * idle when a queued message is set, the server SHOULD immediately consume it
+ * and start a new turn.
+ *
+ * @category Session Actions
+ * @version 1
+ * @clientDispatchable
+ */
+export interface ISessionPendingMessageSetAction {
+  type: ActionType.SessionPendingMessageSet;
+  /** Session URI */
+  session: URI;
+  /** Whether this is a steering or queued message */
+  kind: PendingMessageKind;
+  /** Unique identifier for this pending message */
+  id: string;
+  /** The message content */
+  userMessage: IUserMessage;
+}
+
+/**
+ * A pending message was removed (steering or queued).
+ *
+ * Dispatched by clients to cancel a pending message, or by the server when
+ * it consumes a message (e.g. starting a turn from a queued message or
+ * injecting a steering message into the current turn).
+ *
+ * @category Session Actions
+ * @version 1
+ * @clientDispatchable
+ */
+export interface ISessionPendingMessageRemovedAction {
+  type: ActionType.SessionPendingMessageRemoved;
+  /** Session URI */
+  session: URI;
+  /** Whether this is a steering or queued message */
+  kind: PendingMessageKind;
+  /** Identifier of the pending message to remove */
+  id: string;
+}
+
+/**
+ * Reorder the queued messages.
+ *
+ * The `order` array contains the IDs of queued messages in their new
+ * desired order. IDs not present in the current queue are ignored.
+ * Queued messages whose IDs are absent from `order` are appended at
+ * the end in their original relative order (so a client with a stale
+ * view of the queue never silently drops messages).
+ *
+ * @category Session Actions
+ * @version 1
+ * @clientDispatchable
+ */
+export interface ISessionQueuedMessagesReorderedAction {
+  type: ActionType.SessionQueuedMessagesReordered;
+  /** Session URI */
+  session: URI;
+  /** Queued message IDs in the desired order */
+  order: string[];
+}
+
 // ─── Discriminated Union ─────────────────────────────────────────────────────
 
 /**
@@ -564,8 +689,6 @@ export type IStateAction =
   | ISessionToolCallConfirmedAction
   | ISessionToolCallCompleteAction
   | ISessionToolCallResultConfirmedAction
-  | ISessionPermissionRequestAction
-  | ISessionPermissionResolvedAction
   | ISessionTurnCompleteAction
   | ISessionTurnCancelledAction
   | ISessionErrorAction
@@ -575,4 +698,10 @@ export type IStateAction =
   | ISessionModelChangedAction
   | ISessionServerToolsChangedAction
   | ISessionActiveClientChangedAction
-  | ISessionActiveClientToolsChangedAction;
+  | ISessionActiveClientToolsChangedAction
+  | ISessionPendingMessageSetAction
+  | ISessionPendingMessageRemovedAction
+  | ISessionQueuedMessagesReorderedAction
+  | ISessionCustomizationsChangedAction
+  | ISessionCustomizationToggledAction
+  | ISessionTruncatedAction;

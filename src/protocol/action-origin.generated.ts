@@ -16,8 +16,6 @@ import type {
   ISessionToolCallConfirmedAction,
   ISessionToolCallCompleteAction,
   ISessionToolCallResultConfirmedAction,
-  ISessionPermissionRequestAction,
-  ISessionPermissionResolvedAction,
   ISessionTurnCompleteAction,
   ISessionTurnCancelledAction,
   ISessionErrorAction,
@@ -28,6 +26,12 @@ import type {
   ISessionServerToolsChangedAction,
   ISessionActiveClientChangedAction,
   ISessionActiveClientToolsChangedAction,
+  ISessionPendingMessageSetAction,
+  ISessionPendingMessageRemovedAction,
+  ISessionQueuedMessagesReorderedAction,
+  ISessionCustomizationsChangedAction,
+  ISessionCustomizationToggledAction,
+  ISessionTruncatedAction,
 } from './actions.js';
 
 import { ActionType } from './actions.js';
@@ -53,8 +57,6 @@ export type ISessionAction =
   | ISessionToolCallConfirmedAction
   | ISessionToolCallCompleteAction
   | ISessionToolCallResultConfirmedAction
-  | ISessionPermissionRequestAction
-  | ISessionPermissionResolvedAction
   | ISessionTurnCompleteAction
   | ISessionTurnCancelledAction
   | ISessionErrorAction
@@ -65,6 +67,12 @@ export type ISessionAction =
   | ISessionServerToolsChangedAction
   | ISessionActiveClientChangedAction
   | ISessionActiveClientToolsChangedAction
+  | ISessionPendingMessageSetAction
+  | ISessionPendingMessageRemovedAction
+  | ISessionQueuedMessagesReorderedAction
+  | ISessionCustomizationsChangedAction
+  | ISessionCustomizationToggledAction
+  | ISessionTruncatedAction
 ;
 
 /** Union of session actions that clients may dispatch. */
@@ -73,11 +81,16 @@ export type IClientSessionAction =
   | ISessionToolCallConfirmedAction
   | ISessionToolCallCompleteAction
   | ISessionToolCallResultConfirmedAction
-  | ISessionPermissionResolvedAction
   | ISessionTurnCancelledAction
+  | ISessionTitleChangedAction
   | ISessionModelChangedAction
   | ISessionActiveClientChangedAction
   | ISessionActiveClientToolsChangedAction
+  | ISessionPendingMessageSetAction
+  | ISessionPendingMessageRemovedAction
+  | ISessionQueuedMessagesReorderedAction
+  | ISessionCustomizationToggledAction
+  | ISessionTruncatedAction
 ;
 
 /** Union of session actions that only the server may produce. */
@@ -89,13 +102,12 @@ export type IServerSessionAction =
   | ISessionToolCallStartAction
   | ISessionToolCallDeltaAction
   | ISessionToolCallReadyAction
-  | ISessionPermissionRequestAction
   | ISessionTurnCompleteAction
   | ISessionErrorAction
-  | ISessionTitleChangedAction
   | ISessionUsageAction
   | ISessionReasoningAction
   | ISessionServerToolsChangedAction
+  | ISessionCustomizationsChangedAction
 ;
 
 // ─── Client-Dispatchable Map ─────────────────────────────────────────────────
@@ -118,16 +130,20 @@ export const IS_CLIENT_DISPATCHABLE: { readonly [K in IStateAction['type']]: boo
   [ActionType.SessionToolCallConfirmed]: true,
   [ActionType.SessionToolCallComplete]: true,
   [ActionType.SessionToolCallResultConfirmed]: true,
-  [ActionType.SessionPermissionRequest]: false,
-  [ActionType.SessionPermissionResolved]: true,
   [ActionType.SessionTurnComplete]: false,
   [ActionType.SessionTurnCancelled]: true,
   [ActionType.SessionError]: false,
-  [ActionType.SessionTitleChanged]: false,
+  [ActionType.SessionTitleChanged]: true,
   [ActionType.SessionUsage]: false,
   [ActionType.SessionReasoning]: false,
   [ActionType.SessionModelChanged]: true,
   [ActionType.SessionServerToolsChanged]: false,
   [ActionType.SessionActiveClientChanged]: true,
   [ActionType.SessionActiveClientToolsChanged]: true,
+  [ActionType.SessionPendingMessageSet]: true,
+  [ActionType.SessionPendingMessageRemoved]: true,
+  [ActionType.SessionQueuedMessagesReordered]: true,
+  [ActionType.SessionCustomizationsChanged]: false,
+  [ActionType.SessionCustomizationToggled]: true,
+  [ActionType.SessionTruncated]: true,
 };

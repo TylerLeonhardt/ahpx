@@ -101,7 +101,6 @@ export type {
 	IActiveTurn,
 	ITurn,
 	IToolCallState,
-	IPermissionRequest,
 	IUserMessage,
 	IUsageInfo,
 	IErrorInfo,
@@ -109,14 +108,26 @@ export type {
 	IToolDefinition,
 	IToolAnnotations,
 	IAgentInfo,
+	IPendingMessage,
+	IResponsePart,
+	IMarkdownResponsePart,
+	IToolCallResponsePart,
+	IReasoningResponsePart,
 } from "./protocol/index.js";
+
+export type {
+	ICustomizationRef,
+	ISessionCustomization,
+	Icon,
+} from "./protocol/state.js";
 
 // State enums
 export {
 	SessionLifecycle,
 	SessionStatus,
 	ToolCallStatus,
-	PermissionKind,
+	PendingMessageKind,
+	ResponsePartKind,
 } from "./protocol/index.js";
 
 // Action types
@@ -127,12 +138,23 @@ export { ActionType } from "./protocol/index.js";
 export type {
 	IInitializeResult,
 	ICreateSessionParams,
+	ISessionForkSource,
 	ISubscribeResult,
 	IListSessionsResult,
 	IFetchTurnsResult,
-	IFetchContentResult,
-	IBrowseDirectoryResult,
+	IResourceReadResult,
+	IResourceWriteParams,
+	IResourceWriteResult,
+	IResourceListResult,
+	IResourceCopyParams,
+	IResourceCopyResult,
+	IResourceDeleteParams,
+	IResourceDeleteResult,
+	IResourceMoveParams,
+	IResourceMoveResult,
 } from "./protocol/index.js";
+
+export { ContentEncoding } from "./protocol/index.js";
 
 // Notification types (emitted by AhpClient 'notification' event)
 export type { IProtocolNotification } from "./protocol/index.js";

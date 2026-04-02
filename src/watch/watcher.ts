@@ -15,7 +15,6 @@ import { ActionType } from "../protocol/actions.js";
 import type {
 	ISessionDeltaAction,
 	ISessionErrorAction,
-	ISessionPermissionRequestAction,
 	ISessionReasoningAction,
 	ISessionTitleChangedAction,
 	ISessionToolCallCompleteAction,
@@ -25,7 +24,7 @@ import type {
 	ISessionUsageAction,
 } from "../protocol/actions.js";
 import type { ISessionState, URI } from "../protocol/state.js";
-import { ToolCallStatus } from "../protocol/state.js";
+import { ResponsePartKind, ToolCallStatus } from "../protocol/state.js";
 
 /** Writable stream interface for status output. */
 export interface StatusOutput {
@@ -121,35 +120,41 @@ export class SessionWatcher {
 
 		this.statusOut.write(pc.dim("[watch] Joining turn in progress...\n"));
 
-		// Show any streaming text accumulated so far
-		if (turn.streamingText) {
-			this.formatter.onDelta(turn.streamingText);
-		}
-
-		// Show any reasoning text
-		if (turn.reasoning) {
-			this.formatter.onReasoning(turn.reasoning);
-		}
-
-		// Show active tool calls
-		for (const tc of Object.values(turn.toolCalls)) {
-			if (tc.status === ToolCallStatus.Streaming || tc.status === ToolCallStatus.Running) {
-				this.formatter.onToolCallStart(tc.toolCallId, tc.displayName);
-			} else if (tc.status === ToolCallStatus.PendingConfirmation) {
-				const info: ToolCallInfo = {
-					toolCallId: tc.toolCallId,
-					toolName: tc.toolName,
-					displayName: tc.displayName,
-					invocationMessage: tc.invocationMessage,
-					toolInput: tc.toolInput,
-				};
-				this.formatter.onToolCallReady(tc.toolCallId, info);
-			} else if (tc.status === ToolCallStatus.Completed) {
-				this.formatter.onToolCallComplete(tc.toolCallId, {
-					success: tc.success,
-					pastTenseMessage: tc.pastTenseMessage,
-					content: tc.content,
-				});
+		// Walk response parts to reconstruct current state
+		for (const part of turn.responseParts) {
+			switch (part.kind) {
+				case ResponsePartKind.Markdown:
+					if (part.content) {
+						this.formatter.onDelta(part.content);
+					}
+					break;
+				case ResponsePartKind.Reasoning:
+					if (part.content) {
+						this.formatter.onReasoning(part.content);
+					}
+					break;
+				case ResponsePartKind.ToolCall: {
+					const tc = part.toolCall;
+					if (tc.status === ToolCallStatus.Streaming || tc.status === ToolCallStatus.Running) {
+						this.formatter.onToolCallStart(tc.toolCallId, tc.displayName);
+					} else if (tc.status === ToolCallStatus.PendingConfirmation) {
+						const info: ToolCallInfo = {
+							toolCallId: tc.toolCallId,
+							toolName: tc.toolName,
+							displayName: tc.displayName,
+							invocationMessage: tc.invocationMessage,
+							toolInput: tc.toolInput,
+						};
+						this.formatter.onToolCallReady(tc.toolCallId, info);
+					} else if (tc.status === ToolCallStatus.Completed) {
+						this.formatter.onToolCallComplete(tc.toolCallId, {
+							success: tc.success,
+							pastTenseMessage: tc.pastTenseMessage,
+							content: tc.content,
+						});
+					}
+					break;
+				}
 			}
 		}
 	}
@@ -208,10 +213,14 @@ export class SessionWatcher {
 
 				// Try to get actual names from state
 				const session = this.client.state.getSession(this.sessionUri);
-				if (session?.activeTurn?.toolCalls[a.toolCallId]) {
-					const tc = session.activeTurn.toolCalls[a.toolCallId];
-					info.toolName = tc.toolName;
-					info.displayName = tc.displayName;
+				if (session?.activeTurn) {
+					for (const part of session.activeTurn.responseParts) {
+						if (part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === a.toolCallId) {
+							info.toolName = part.toolCall.toolName;
+							info.displayName = part.toolCall.displayName;
+							break;
+						}
+					}
 				}
 
 				this.formatter.onToolCallReady(a.toolCallId, info);
@@ -221,12 +230,6 @@ export class SessionWatcher {
 			case ActionType.SessionToolCallComplete: {
 				const a = action as ISessionToolCallCompleteAction;
 				this.formatter.onToolCallComplete(a.toolCallId, a.result);
-				break;
-			}
-
-			case ActionType.SessionPermissionRequest: {
-				const a = action as ISessionPermissionRequestAction;
-				this.formatter.onPermissionRequest(a.request);
 				break;
 			}
 
@@ -244,7 +247,16 @@ export class SessionWatcher {
 
 			case ActionType.SessionTurnComplete: {
 				const session = this.client.state.getSession(this.sessionUri);
-				const responseText = session?.turns[session.turns.length - 1]?.responseText ?? "";
+				const lastTurn = session?.turns[session.turns.length - 1];
+				// Derive response text from markdown response parts
+				let responseText = "";
+				if (lastTurn) {
+					for (const p of lastTurn.responseParts) {
+						if (p.kind === ResponsePartKind.Markdown) {
+							responseText += p.content;
+						}
+					}
+				}
 				this.formatter.onTurnComplete(responseText);
 				break;
 			}

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { OutputFormatter } from "../../output/format.js";
 import type { ToolCallInfo } from "../../output/renderer.js";
-import type { IErrorInfo, IPermissionRequest, IToolCallResult, IUsageInfo } from "../../protocol/state.js";
+import type { IErrorInfo, IToolCallResult, IUsageInfo } from "../../protocol/state.js";
 import type { AhpxEvent, EventForwarder } from "../forwarder.js";
 import { ForwardingFormatter, type ForwardingFormatterOptions } from "../forwarding-formatter.js";
 
@@ -18,7 +18,6 @@ function createMockFormatter(): OutputFormatter & { calls: Array<{ method: strin
 		onToolCallReady: vi.fn((...args: unknown[]) => calls.push({ method: "onToolCallReady", args })),
 		onToolCallComplete: vi.fn((...args: unknown[]) => calls.push({ method: "onToolCallComplete", args })),
 		onToolCallCancelled: vi.fn((...args: unknown[]) => calls.push({ method: "onToolCallCancelled", args })),
-		onPermissionRequest: vi.fn((...args: unknown[]) => calls.push({ method: "onPermissionRequest", args })),
 		onUsage: vi.fn((...args: unknown[]) => calls.push({ method: "onUsage", args })),
 		onTurnComplete: vi.fn((...args: unknown[]) => calls.push({ method: "onTurnComplete", args })),
 		onTurnError: vi.fn((...args: unknown[]) => calls.push({ method: "onTurnError", args })),
@@ -68,12 +67,6 @@ const sampleToolCallInfo: ToolCallInfo = {
 const sampleToolCallResult: IToolCallResult = {
 	success: true,
 	pastTenseMessage: "Read file.txt",
-};
-
-const samplePermissionRequest: IPermissionRequest = {
-	requestId: "perm-1",
-	permissionKind: "write" as IPermissionRequest["permissionKind"],
-	toolCallId: "tc-1",
 };
 
 const sampleUsage: IUsageInfo = {
@@ -131,12 +124,6 @@ describe("ForwardingFormatter", () => {
 			const { formatter, inner } = createFormatter();
 			formatter.onToolCallCancelled("tc-1", "timeout");
 			expect(inner.onToolCallCancelled).toHaveBeenCalledWith("tc-1", "timeout");
-		});
-
-		it("calls inner.onPermissionRequest with same args", () => {
-			const { formatter, inner } = createFormatter();
-			formatter.onPermissionRequest(samplePermissionRequest);
-			expect(inner.onPermissionRequest).toHaveBeenCalledWith(samplePermissionRequest);
 		});
 
 		it("calls inner.onUsage with same args", () => {
@@ -286,7 +273,7 @@ describe("ForwardingFormatter", () => {
 		});
 	});
 
-	describe("all 13 event types produce correct AhpxEvent shapes", () => {
+	describe("all 12 event types produce correct AhpxEvent shapes", () => {
 		const toolCallInfoNoInput: ToolCallInfo = {
 			toolCallId: "tc-2",
 			toolName: "search",
@@ -358,12 +345,6 @@ describe("ForwardingFormatter", () => {
 				invoke: (f) => f.onToolCallCancelled("tc-1", "timeout"),
 				expectedType: "tool_call_cancelled",
 				expectedData: { toolCallId: "tc-1", reason: "timeout" },
-			},
-			{
-				method: "onPermissionRequest",
-				invoke: (f) => f.onPermissionRequest(samplePermissionRequest),
-				expectedType: "permission",
-				expectedData: { request: samplePermissionRequest },
 			},
 			{
 				method: "onUsage",

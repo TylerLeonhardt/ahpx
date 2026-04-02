@@ -6,13 +6,7 @@
  */
 
 import pc from "picocolors";
-import type {
-	IErrorInfo,
-	IPermissionRequest,
-	IToolCallResult,
-	IUsageInfo,
-	StringOrMarkdown,
-} from "../protocol/state.js";
+import type { IErrorInfo, IToolCallResult, IUsageInfo, StringOrMarkdown } from "../protocol/state.js";
 import type { OutputFormatter } from "./format.js";
 
 /** Minimal info about a tool call ready for display. */
@@ -107,15 +101,6 @@ export class PromptRenderer implements OutputFormatter {
 	/** Tool call was cancelled. */
 	onToolCallCancelled(_id: string, reason: string): void {
 		this.out.write(`${pc.red("[tool]")} cancelled: ${reason}\n`);
-	}
-
-	/** Permission request received. */
-	onPermissionRequest(req: IPermissionRequest): void {
-		this.closeReasoningIfNeeded();
-		this.ensureNewline();
-		const label = req.permissionKind.charAt(0).toUpperCase() + req.permissionKind.slice(1);
-		const detail = req.fullCommandText ?? req.path ?? req.intention ?? req.toolName ?? "";
-		this.out.write(`${pc.magenta("[permission]")} ${label}: ${detail}\n`);
 	}
 
 	/** Token usage report. */
