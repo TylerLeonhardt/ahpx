@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { PermissionKind } from "../../protocol/state.js";
 import { QuietFormatter } from "../quiet-formatter.js";
 import type { WritableOutput } from "../renderer.js";
 
@@ -56,21 +55,6 @@ describe("QuietFormatter", () => {
 			});
 			fmt.onToolCallComplete("tc1", { success: true, pastTenseMessage: "Ran npm test" });
 			fmt.onToolCallCancelled("tc2", "user denied");
-
-			expect(stdout.text()).toBe("");
-			expect(stderr.text()).toBe("");
-		});
-
-		it("does not output permission requests", () => {
-			const stdout = createCapture();
-			const stderr = createCapture();
-			const fmt = new QuietFormatter(stdout.out, stderr.out);
-
-			fmt.onPermissionRequest({
-				requestId: "p1",
-				permissionKind: PermissionKind.Shell,
-				fullCommandText: "npm test",
-			});
 
 			expect(stdout.text()).toBe("");
 			expect(stderr.text()).toBe("");

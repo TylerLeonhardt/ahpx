@@ -8,11 +8,11 @@ import type { IActionEnvelope, IStateAction } from "../../protocol/actions.js";
 import { ActionType } from "../../protocol/actions.js";
 import type { ISessionState } from "../../protocol/state.js";
 import {
-	PermissionKind,
 	SessionLifecycle,
 	SessionStatus,
 	ToolCallConfirmationReason,
 	ToolCallStatus,
+	ResponsePartKind,
 } from "../../protocol/state.js";
 import { TurnController } from "../controller.js";
 
@@ -113,6 +113,7 @@ describe("TurnController", () => {
 			type: ActionType.SessionDelta,
 			session: SESSION_URI,
 			turnId,
+			partId: "part-1",
 			content: "Hi there!",
 		});
 
@@ -191,6 +192,7 @@ describe("TurnController", () => {
 			type: ActionType.SessionReasoning,
 			session: SESSION_URI,
 			turnId,
+			partId: "reason-1",
 			content: "analyzing...",
 		});
 
@@ -198,6 +200,7 @@ describe("TurnController", () => {
 			type: ActionType.SessionDelta,
 			session: SESSION_URI,
 			turnId,
+			partId: "part-1",
 			content: "Here's the answer.",
 		});
 
@@ -299,19 +302,18 @@ describe("TurnController", () => {
 			activeTurn: {
 				id: "placeholder",
 				userMessage: { text: "test" },
-				streamingText: "",
-				responseParts: [],
-				toolCalls: {
-					tc1: {
-						toolCallId: "tc1",
-						toolName: "shell",
-						displayName: "Run Shell Command",
-						status: ToolCallStatus.PendingConfirmation,
-						invocationMessage: "npm test",
+				responseParts: [
+					{
+						kind: ResponsePartKind.ToolCall,
+						toolCall: {
+							toolCallId: "tc1",
+							toolName: "shell",
+							displayName: "Run Shell Command",
+							status: ToolCallStatus.PendingConfirmation,
+							invocationMessage: "npm test",
+						},
 					},
-				},
-				pendingPermissions: {},
-				reasoning: "",
+				],
 				usage: undefined,
 			},
 		});
@@ -347,45 +349,6 @@ describe("TurnController", () => {
 		await resultPromise;
 	});
 
-	it("handles permission request in approve-all mode", async () => {
-		const { client, dispatched, emitAction } = createMockClient();
-		const cap = createCapture();
-		const renderer = new PromptRenderer(cap.out);
-		const handler = new PermissionHandler("approve-all", { output: cap.out });
-
-		const controller = new TurnController(client, SESSION_URI, renderer, handler);
-		const resultPromise = controller.prompt("need permission");
-
-		const turnId = (dispatched[0] as { turnId: string }).turnId;
-
-		emitAction({
-			type: ActionType.SessionPermissionRequest,
-			session: SESSION_URI,
-			turnId,
-			request: {
-				requestId: "perm1",
-				permissionKind: PermissionKind.Shell,
-				fullCommandText: "rm -rf /tmp/test",
-			},
-		});
-
-		// Give async handler time to run
-		await new Promise((r) => setTimeout(r, 50));
-
-		// Should have dispatched permissionResolved with approved=true
-		const resolveAction = dispatched.find((a) => a.type === ActionType.SessionPermissionResolved);
-		expect(resolveAction).toBeDefined();
-		expect((resolveAction as { approved: boolean }).approved).toBe(true);
-
-		emitAction({
-			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
-			turnId,
-		});
-
-		await resultPromise;
-	});
-
 	it("ignores actions for other sessions", async () => {
 		const { client, dispatched, emitAction } = createMockClient();
 		const cap = createCapture();
@@ -402,6 +365,7 @@ describe("TurnController", () => {
 			type: ActionType.SessionDelta,
 			session: "copilot:/other-session",
 			turnId,
+			partId: "part-1",
 			content: "wrong session",
 		});
 
@@ -432,6 +396,7 @@ describe("TurnController", () => {
 			type: ActionType.SessionDelta,
 			session: SESSION_URI,
 			turnId: "different-turn-id",
+			partId: "part-1",
 			content: "wrong turn",
 		});
 
@@ -541,6 +506,7 @@ describe("TurnController", () => {
 				type: ActionType.SessionDelta,
 				session: SESSION_URI,
 				turnId,
+				partId: "part-1",
 				content: `chunk ${i}`,
 			});
 		}

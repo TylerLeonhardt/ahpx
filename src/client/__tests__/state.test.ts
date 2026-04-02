@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ActionType } from "../../protocol/actions.js";
 import type { IActionEnvelope } from "../../protocol/actions.js";
-import { SessionLifecycle, SessionStatus, ToolCallStatus } from "../../protocol/state.js";
+import { ResponsePartKind, SessionLifecycle, SessionStatus, ToolCallStatus } from "../../protocol/state.js";
 import type { ISessionState, ISnapshot } from "../../protocol/state.js";
 import { StateMirror } from "../state.js";
 
@@ -162,6 +162,19 @@ describe("StateMirror", () => {
 			expect(session.activeTurn!.id).toBe("t1");
 			expect(session.summary.status).toBe(SessionStatus.InProgress);
 
+			// Add a markdown response part
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionResponsePart,
+						session: "copilot:/s1",
+						turnId: "t1",
+						part: { kind: ResponsePartKind.Markdown, id: "part-1", content: "" },
+					},
+					2,
+				),
+			);
+
 			// Stream a delta
 			mirror.applyAction(
 				envelope(
@@ -169,14 +182,19 @@ describe("StateMirror", () => {
 						type: ActionType.SessionDelta,
 						session: "copilot:/s1",
 						turnId: "t1",
+						partId: "part-1",
 						content: "Hi there!",
 					},
-					2,
+					3,
 				),
 			);
 
 			session = mirror.getSession("copilot:/s1")!;
-			expect(session.activeTurn!.streamingText).toBe("Hi there!");
+			const mdPart = session.activeTurn!.responseParts.find(
+				(p) => p.kind === ResponsePartKind.Markdown && p.id === "part-1",
+			);
+			expect(mdPart).toBeDefined();
+			expect((mdPart as { content: string }).content).toBe("Hi there!");
 		});
 
 		it("handles SessionTurnComplete", () => {
@@ -188,11 +206,9 @@ describe("StateMirror", () => {
 					activeTurn: {
 						id: "t1",
 						userMessage: { text: "Hello" },
-						streamingText: "Hi there!",
-						responseParts: [],
-						toolCalls: {},
-						pendingPermissions: {},
-						reasoning: "",
+						responseParts: [
+							{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" },
+						],
 						usage: undefined,
 					},
 				}),
@@ -214,7 +230,11 @@ describe("StateMirror", () => {
 			expect(session.activeTurn).toBeUndefined();
 			expect(session.turns).toHaveLength(1);
 			expect(session.turns[0].id).toBe("t1");
-			expect(session.turns[0].responseText).toBe("Hi there!");
+			const mdParts = session.turns[0].responseParts.filter(
+				(p) => p.kind === ResponsePartKind.Markdown,
+			);
+			expect(mdParts).toHaveLength(1);
+			expect((mdParts[0] as { content: string }).content).toBe("Hi there!");
 			expect(session.summary.status).toBe(SessionStatus.Idle);
 		});
 
@@ -250,11 +270,7 @@ describe("StateMirror", () => {
 					activeTurn: {
 						id: "t1",
 						userMessage: { text: "Run a tool" },
-						streamingText: "",
 						responseParts: [],
-						toolCalls: {},
-						pendingPermissions: {},
-						reasoning: "",
 						usage: undefined,
 					},
 				}),
@@ -276,8 +292,11 @@ describe("StateMirror", () => {
 			);
 
 			const session = mirror.getSession("copilot:/s1")!;
-			const tc = session.activeTurn!.toolCalls.tc1;
-			expect(tc).toBeDefined();
+			const tcPart = session.activeTurn!.responseParts.find(
+				(p) => p.kind === ResponsePartKind.ToolCall && p.toolCall.toolCallId === "tc1",
+			);
+			expect(tcPart).toBeDefined();
+			const tc = (tcPart as { toolCall: { status: string; toolName: string } }).toolCall;
 			expect(tc.status).toBe(ToolCallStatus.Streaming);
 			expect(tc.toolName).toBe("readFile");
 		});

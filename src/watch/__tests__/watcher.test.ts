@@ -13,6 +13,7 @@ import {
 	ToolCallConfirmationReason,
 	ToolCallStatus,
 	TurnState,
+	ResponsePartKind,
 } from "../../protocol/state.js";
 import { SessionWatcher } from "../watcher.js";
 
@@ -46,7 +47,6 @@ function createMockFormatter(): OutputFormatter & { calls: Array<{ method: strin
 		onToolCallReady: record("onToolCallReady"),
 		onToolCallComplete: record("onToolCallComplete"),
 		onToolCallCancelled: record("onToolCallCancelled"),
-		onPermissionRequest: record("onPermissionRequest"),
 		onUsage: record("onUsage"),
 		onTurnComplete: record("onTurnComplete"),
 		onTurnError: record("onTurnError"),
@@ -128,6 +128,7 @@ describe("SessionWatcher", () => {
 			type: ActionType.SessionDelta,
 			session: SESSION_URI,
 			turnId: "t1",
+			partId: "part-1",
 			content: "Hello world",
 		});
 
@@ -164,20 +165,21 @@ describe("SessionWatcher", () => {
 				activeTurn: {
 					id: "t1",
 					userMessage: { text: "Hello" },
-					streamingText: "Existing text",
-					responseParts: [],
-					toolCalls: {
-						tc1: {
-							toolCallId: "tc1",
-							toolName: "shell",
-							displayName: "Shell",
-							status: ToolCallStatus.Running,
-							invocationMessage: "npm test",
-							confirmed: ToolCallConfirmationReason.NotNeeded,
+					responseParts: [
+						{ kind: ResponsePartKind.Reasoning, id: "reason-1", content: "thinking..." },
+						{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Existing text" },
+						{
+							kind: ResponsePartKind.ToolCall,
+							toolCall: {
+								toolCallId: "tc1",
+								toolName: "shell",
+								displayName: "Shell",
+								status: ToolCallStatus.Running,
+								invocationMessage: "npm test",
+								confirmed: ToolCallConfirmationReason.NotNeeded,
+							},
 						},
-					},
-					pendingPermissions: {},
-					reasoning: "thinking...",
+					],
 					usage: undefined,
 				},
 			}),
@@ -254,6 +256,7 @@ describe("SessionWatcher", () => {
 			type: ActionType.SessionDelta,
 			session: "copilot:/other-session",
 			turnId: "t1",
+			partId: "part-1",
 			content: "Wrong session",
 		});
 
@@ -271,9 +274,9 @@ describe("SessionWatcher", () => {
 				{
 					id: "t1",
 					userMessage: { text: "Hello" },
-					responseText: "Hi there!",
-					responseParts: [],
-					toolCalls: [],
+					responseParts: [
+						{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" },
+					],
 					usage: undefined,
 					state: TurnState.Complete,
 				},

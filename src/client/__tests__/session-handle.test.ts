@@ -4,7 +4,7 @@ import type { AhpClient } from "../../client/index.js";
 import type { IActionEnvelope, IStateAction } from "../../protocol/actions.js";
 import { ActionType } from "../../protocol/actions.js";
 import type { IActiveTurn, ISessionState, ITurn } from "../../protocol/state.js";
-import { SessionLifecycle, SessionStatus, TurnState } from "../../protocol/state.js";
+import { ResponsePartKind, SessionLifecycle, SessionStatus, TurnState } from "../../protocol/state.js";
 import { SessionHandle } from "../session-handle.js";
 
 const SESSION_URI = "copilot:/test-session";
@@ -104,11 +104,7 @@ describe("SessionHandle", () => {
 			const activeTurn: IActiveTurn = {
 				id: "turn-1",
 				userMessage: { text: "Hello" },
-				streamingText: "",
 				responseParts: [],
-				toolCalls: {},
-				pendingPermissions: {},
-				reasoning: "",
 				usage: undefined,
 			};
 
@@ -130,6 +126,7 @@ describe("SessionHandle", () => {
 					type: ActionType.SessionDelta,
 					session: SESSION_URI,
 					turnId: "t1",
+					partId: "part-1",
 					content: "hello",
 				}),
 			);
@@ -140,6 +137,7 @@ describe("SessionHandle", () => {
 					type: ActionType.SessionDelta,
 					session: OTHER_SESSION_URI,
 					turnId: "t2",
+					partId: "part-1",
 					content: "world",
 				}),
 			);
@@ -162,9 +160,9 @@ describe("SessionHandle", () => {
 			const completedTurn: ITurn = {
 				id: "turn-1",
 				userMessage: { text: "Hello" },
-				responseText: "Hi there!",
-				responseParts: [],
-				toolCalls: [],
+				responseParts: [
+					{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" },
+				],
 				usage: undefined,
 				state: TurnState.Complete,
 			};
@@ -238,6 +236,7 @@ describe("SessionHandle", () => {
 					type: ActionType.SessionDelta,
 					session: SESSION_URI,
 					turnId: "t1",
+					partId: "part-1",
 					content: "for session 1",
 				}),
 			);
@@ -248,6 +247,7 @@ describe("SessionHandle", () => {
 					type: ActionType.SessionDelta,
 					session: OTHER_SESSION_URI,
 					turnId: "t2",
+					partId: "part-1",
 					content: "for session 2",
 				}),
 			);
@@ -383,6 +383,7 @@ describe("SessionHandle", () => {
 					type: ActionType.SessionDelta,
 					session: SESSION_URI,
 					turnId,
+					partId: "part-1",
 					content: "Hi ",
 				}),
 			);
@@ -391,6 +392,7 @@ describe("SessionHandle", () => {
 					type: ActionType.SessionDelta,
 					session: SESSION_URI,
 					turnId,
+					partId: "part-1",
 					content: "there!",
 				}),
 			);
@@ -535,6 +537,7 @@ describe("SessionHandle", () => {
 					type: ActionType.SessionDelta,
 					session: SESSION_URI,
 					turnId: "different-turn",
+					partId: "part-1",
 					content: "stale data",
 				}),
 			);
@@ -545,6 +548,7 @@ describe("SessionHandle", () => {
 					type: ActionType.SessionDelta,
 					session: SESSION_URI,
 					turnId,
+					partId: "part-1",
 					content: "correct",
 				}),
 			);
@@ -680,6 +684,7 @@ describe("SessionHandle", () => {
 					type: ActionType.SessionDelta,
 					session: SESSION_URI,
 					turnId: "t1",
+					partId: "part-1",
 					content: "late",
 				}),
 			);

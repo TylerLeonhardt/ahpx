@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { PermissionKind, ToolResultContentType } from "../../protocol/state.js";
-import type { IPermissionRequest, IToolCallResult, IUsageInfo } from "../../protocol/state.js";
+import { ToolResultContentType } from "../../protocol/state.js";
+import type { IToolCallResult, IUsageInfo } from "../../protocol/state.js";
 import { PromptRenderer } from "../renderer.js";
 import type { ToolCallInfo, WritableOutput } from "../renderer.js";
 
@@ -162,22 +162,6 @@ describe("PromptRenderer", () => {
 			expect(cap.text()).toContain("[tool]");
 			expect(cap.text()).toContain("cancelled");
 			expect(cap.text()).toContain("user denied");
-		});
-	});
-
-	describe("onPermissionRequest", () => {
-		it("shows permission kind and detail", () => {
-			const cap = createCapture();
-			const r = new PromptRenderer(cap.out);
-			const req: IPermissionRequest = {
-				requestId: "p1",
-				permissionKind: PermissionKind.Shell,
-				fullCommandText: "npm test -- --reporter=verbose",
-			};
-			r.onPermissionRequest(req);
-			expect(cap.text()).toContain("[permission]");
-			expect(cap.text()).toContain("Shell");
-			expect(cap.text()).toContain("npm test -- --reporter=verbose");
 		});
 	});
 
