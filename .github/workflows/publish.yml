@@ -3,11 +3,17 @@ on:
   push:
     branches: [master]
 
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Skip version-bump commits to prevent infinite publish loops
+    if: "!contains(github.event.head_commit.message, 'chore: bump version')"
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -20,20 +26,15 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
-      - name: Check if version changed
-        id: version
+      - name: Bump patch version
         run: |
-          CURRENT=$(node -p "require('./package.json').version")
-          PUBLISHED=$(npm view "$(node -p "require('./package.json').name")" version 2>/dev/null || echo "0.0.0")
-          if [ "$CURRENT" != "$PUBLISHED" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Version $CURRENT is new (published: $PUBLISHED)"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "Version $CURRENT is already published"
-          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version patch --no-git-tag-version
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to $(node -p 'require("./package.json").version')"
+          git push
       - name: Publish to npm
-        if: steps.version.outputs.changed == 'true'
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
