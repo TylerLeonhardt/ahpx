@@ -1,6 +1,6 @@
 {
 	"name": "@tylerl0706/ahpx",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"type": "module",
 	"description": "Agent Host Protocol client — use as a library or CLI to manage AHP server connections, sessions, and agent interactions",
 	"license": "MIT",
@@ -19,7 +19,10 @@
 	"bin": {
 		"ahpx": "./dist/bin.js"
 	},
-	"files": ["dist", "LICENSE"],
+	"files": [
+		"dist",
+		"LICENSE"
+	],
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/TylerLeonhardt/ahpx.git"
@@ -28,7 +31,15 @@
 	"bugs": {
 		"url": "https://github.com/TylerLeonhardt/ahpx/issues"
 	},
-	"keywords": ["ahp", "agent-host-protocol", "cli", "agent", "ai", "websocket", "json-rpc"],
+	"keywords": [
+		"ahp",
+		"agent-host-protocol",
+		"cli",
+		"agent",
+		"ai",
+		"websocket",
+		"json-rpc"
+	],
 	"engines": {
 		"node": ">=20"
 	},
