@@ -1,17 +1,13 @@
 name: Publish to npm
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to publish (e.g., 0.2.0)"
-        required: true
-        type: string
+  push:
+    branches: [master]
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +20,20 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
-      - run: npm version ${{ inputs.version }} --no-git-tag-version
-      - run: npm publish --provenance --access public
+      - name: Check if version changed
+        id: version
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          PUBLISHED=$(npm view "$(node -p "require('./package.json').name")" version 2>/dev/null || echo "0.0.0")
+          if [ "$CURRENT" != "$PUBLISHED" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version $CURRENT is new (published: $PUBLISHED)"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Version $CURRENT is already published"
+          fi
+      - name: Publish to npm
+        if: steps.version.outputs.changed == 'true'
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

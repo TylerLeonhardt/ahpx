@@ -19,10 +19,14 @@
 	"bin": {
 		"ahpx": "./dist/bin.js"
 	},
-	"files": ["dist"],
+	"files": ["dist", "LICENSE"],
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/TylerLeonhardt/ahpx.git"
+	},
+	"homepage": "https://github.com/TylerLeonhardt/ahpx#readme",
+	"bugs": {
+		"url": "https://github.com/TylerLeonhardt/ahpx/issues"
 	},
 	"keywords": ["ahp", "agent-host-protocol", "cli", "agent", "ai", "websocket", "json-rpc"],
 	"engines": {

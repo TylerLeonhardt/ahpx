@@ -864,9 +864,12 @@ GitHub Actions automates quality enforcement and publishing.
 - Node.js matrix: 20, 22
 - Pipeline: typecheck → lint → test → build (sequential, fail-fast)
 
-**Publish workflow** (`.github/workflows/publish.yml`) — manual `workflow_dispatch`:
-- Publishes to npm with provenance (`--provenance --access public`)
-- Triggered manually for controlled releases
+**Publish workflow** (`.github/workflows/publish.yml`) — automatic on push to master:
+- Runs full quality gates: typecheck → lint → test → build
+- Compares `package.json` version against npm registry
+- Only publishes when version has changed (bumping version in package.json is the trigger)
+- Publishes with provenance (`--provenance --access public`) for supply chain security
+- Requires `NPM_TOKEN` secret in repo settings
 
 **Quality gates** — all five checks must pass before merge:
 1. `npm run typecheck` — `tsc --noEmit`
