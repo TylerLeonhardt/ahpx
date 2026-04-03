@@ -126,9 +126,17 @@ export class SessionStore {
 		await fs.mkdir(this.sessionsDir, { recursive: true, mode: 0o700 });
 	}
 
-	/** Path to a session record file. */
+	/** Path to a session record file. Validates ID to prevent path traversal. */
 	private filePath(id: string): string {
+		this.validateId(id);
 		return path.join(this.sessionsDir, `${id}.json`);
+	}
+
+	/** Validate that a session ID is safe for use in file paths (no traversal). */
+	private validateId(id: string): void {
+		if (!id || id.includes("/") || id.includes("\\") || id.includes("..") || id.includes("\0")) {
+			throw new Error(`Invalid session ID: "${id}". IDs must not contain path separators or traversal sequences.`);
+		}
 	}
 
 	/**
@@ -136,6 +144,7 @@ export class SessionStore {
 	 * Uses atomic writes (temp file + rename).
 	 */
 	async save(record: SessionRecord): Promise<void> {
+		this.validateId(record.id);
 		await this.ensureDir();
 		const tmp = path.join(this.sessionsDir, `.${record.id}.${randomUUID()}.tmp`);
 		await fs.writeFile(tmp, `${JSON.stringify(record, null, "\t")}\n`, { mode: 0o600, encoding: "utf-8" });
