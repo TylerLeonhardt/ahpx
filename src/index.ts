@@ -6,14 +6,14 @@
  *
  * @example
  * ```ts
- * import { AhpClient } from 'ahpx';
+ * import { AhpClient } from '@tylerl0706/ahpx';
  *
  * const client = new AhpClient({ initialSubscriptions: ['agenthost:/root'] });
  * const result = await client.connect('ws://localhost:8082');
  * console.log('Agents:', result.agents);
  * ```
  *
- * @module ahpx
+ * @module @tylerl0706/ahpx
  */
 
 // ── Core client ──────────────────────────────────────────────────────────

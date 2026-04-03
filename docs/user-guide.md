@@ -18,7 +18,7 @@ The [Agent Host Protocol (AHP)](https://github.com/anthropics/agent-host-protoco
 **ahpx** is the first full-featured AHP client. It ships as a single npm package that is both a **CLI for humans** and an **SDK for automation**:
 
 - **CLI** — connect to servers, manage sessions, prompt agents, watch activity, browse files, and check fleet health from your terminal
-- **Library** — `import { AhpClient } from 'ahpx'` for programmatic control of connections, sessions, prompts, event forwarding, and fleet routing
+- **Library** — `import { AhpClient } from '@tylerl0706/ahpx'` for programmatic control of connections, sessions, prompts, event forwarding, and fleet routing
 
 Built by George's engineering team as the dispatch backbone for an autonomous CTO bot, ahpx has shipped 12 phases of development — from basic protocol handling to production-grade fleet management, session persistence, and event streaming.
 
@@ -389,12 +389,12 @@ These flags apply to all commands:
 
 ## Library SDK Reference
 
-`import { AhpClient, SessionHandle, ConnectionPool } from 'ahpx'` — the same protocol engine that powers the CLI, available as a fully-typed TypeScript API.
+`import { AhpClient, SessionHandle, ConnectionPool } from '@tylerl0706/ahpx'` — the same protocol engine that powers the CLI, available as a fully-typed TypeScript API.
 
 ### Connect and List Agents
 
 ```typescript
-import { AhpClient } from 'ahpx';
+import { AhpClient } from '@tylerl0706/ahpx';
 
 const client = new AhpClient();
 const info = await client.connect('ws://localhost:8080');
@@ -413,7 +413,7 @@ await client.disconnect();
 ### Sessions and Prompts with SessionHandle
 
 ```typescript
-import { AhpClient, SessionHandle } from 'ahpx';
+import { AhpClient, SessionHandle } from '@tylerl0706/ahpx';
 
 const client = new AhpClient();
 await client.connect('ws://localhost:8080');
@@ -483,7 +483,7 @@ session2.dispose();
 ### ConnectionPool for URL-Keyed Reuse
 
 ```typescript
-import { ConnectionPool } from 'ahpx';
+import { ConnectionPool } from '@tylerl0706/ahpx';
 
 const pool = new ConnectionPool();
 
@@ -501,7 +501,7 @@ await pool.closeAll();
 ### Fleet Management
 
 ```typescript
-import { FleetManager, HealthChecker } from 'ahpx';
+import { FleetManager, HealthChecker } from '@tylerl0706/ahpx';
 
 // Health-check individual servers
 const checker = new HealthChecker();
@@ -534,7 +534,7 @@ import {
   WebhookForwarder,
   WebSocketForwarder,
   ForwardingFormatter,
-} from 'ahpx';
+} from '@tylerl0706/ahpx';
 
 // Webhook: batched HTTP POST with retry
 const webhook = new WebhookForwarder({
@@ -565,7 +565,7 @@ const formatter = new ForwardingFormatter({
 ### Session Persistence
 
 ```typescript
-import { SessionStore, SessionPersistence } from 'ahpx';
+import { SessionStore, SessionPersistence } from '@tylerl0706/ahpx';
 
 const store = new SessionStore();      // ~/.ahpx/sessions/
 const persistence = new SessionPersistence(store);
@@ -594,7 +594,7 @@ console.log(`Added: ${sync.added.length}, Removed: ${sync.removed.length}`);
 ### Authentication
 
 ```typescript
-import { AuthHandler } from 'ahpx';
+import { AuthHandler } from '@tylerl0706/ahpx';
 
 const auth = new AuthHandler({
   token: process.env.AHPX_TOKEN,  // Or from CLI flag, file, interactive
@@ -609,7 +609,7 @@ const auth = new AuthHandler({
 
 ### Full Export List
 
-Everything available from `import { ... } from 'ahpx'`:
+Everything available from `import { ... } from '@tylerl0706/ahpx'`:
 
 | Category | Exports |
 |----------|---------|

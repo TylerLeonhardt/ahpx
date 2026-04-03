@@ -60,7 +60,7 @@ programmatic consumers.
 
 ### Acceptance criteria
 
-- [ ] `import { AhpClient } from 'ahpx'` works with full type safety
+- [ ] `import { AhpClient } from '@tylerl0706/ahpx'` works with full type safety
 - [ ] `npx ahpx connect ws://...` still works (CLI preserved)
 - [ ] Library consumers can connect, create sessions, send prompts, and
       receive typed events without touching the CLI

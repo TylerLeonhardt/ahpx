@@ -1,5 +1,5 @@
 {
-	"name": "ahpx",
+	"name": "@tylerl0706/ahpx",
 	"version": "0.2.0",
 	"type": "module",
 	"description": "Agent Host Protocol client — use as a library or CLI to manage AHP server connections, sessions, and agent interactions",

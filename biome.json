@@ -28,6 +28,6 @@
 		}
 	},
 	"files": {
-		"ignore": ["dist/", "node_modules/", "src/protocol/"]
+		"ignore": ["dist/", "node_modules/", "src/protocol/", "coverage/"]
 	}
 }

@@ -3,7 +3,7 @@
 **Agent Host Protocol client** — CLI and Node.js library for managing AHP server connections, sessions, and agent interactions.
 
 [![CI](https://github.com/TylerLeonhardt/ahpx/actions/workflows/ci.yml/badge.svg)](https://github.com/TylerLeonhardt/ahpx/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/ahpx)](https://www.npmjs.com/package/ahpx)
+[![npm](https://img.shields.io/npm/v/@tylerl0706/ahpx)](https://www.npmjs.com/package/@tylerl0706/ahpx)
 
 ## What is ahpx?
 
@@ -23,7 +23,7 @@ ahpx is a client for the [Agent Host Protocol](https://github.com/anthropics/age
 ## Quick Start
 
 ```bash
-npm install -g ahpx
+npm install -g @tylerl0706/ahpx
 
 # Add a server
 ahpx server add local --url ws://localhost:8082 --default
@@ -115,13 +115,13 @@ Prompt options: `-s <server>`, `-n <session-name>`, `-f <file>`, `--cwd <dir>`, 
 ahpx exports a full TypeScript API. Install it as a dependency:
 
 ```bash
-npm install ahpx
+npm install @tylerl0706/ahpx
 ```
 
 ### Connect and list agents
 
 ```typescript
-import { AhpClient } from 'ahpx';
+import { AhpClient } from '@tylerl0706/ahpx';
 
 const client = new AhpClient({ initialSubscriptions: ['agenthost:/root'] });
 const result = await client.connect('ws://localhost:8082');
@@ -135,7 +135,7 @@ await client.disconnect();
 ### Create a session and send a prompt
 
 ```typescript
-import { AhpClient, ActionType } from 'ahpx';
+import { AhpClient, ActionType } from '@tylerl0706/ahpx';
 import { randomUUID } from 'node:crypto';
 
 const client = new AhpClient({ initialSubscriptions: ['agenthost:/root'] });
@@ -174,7 +174,7 @@ client.dispatchAction({
 ### Handle authentication
 
 ```typescript
-import { AhpClient, AuthHandler } from 'ahpx';
+import { AhpClient, AuthHandler } from '@tylerl0706/ahpx';
 
 const client = new AhpClient();
 const auth = new AuthHandler(client, { token: process.env.MY_TOKEN });
@@ -206,7 +206,7 @@ console.log('Active turn:', session?.activeTurn);
 ### Error handling
 
 ```typescript
-import { AhpClient, RpcError, RpcTimeoutError } from 'ahpx';
+import { AhpClient, RpcError, RpcTimeoutError } from '@tylerl0706/ahpx';
 
 const client = new AhpClient();
 

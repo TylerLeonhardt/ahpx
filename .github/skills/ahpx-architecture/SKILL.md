@@ -696,7 +696,7 @@ Event forwarding flags are available on both `exec` and `prompt` commands:
 Forwarders are standalone utilities exported from `ahpx`:
 
 ```typescript
-import { WebhookForwarder, WebSocketForwarder, ForwardingFormatter } from 'ahpx';
+import { WebhookForwarder, WebSocketForwarder, ForwardingFormatter } from '@tylerl0706/ahpx';
 
 // Option 1: Use ForwardingFormatter as a decorator
 const formatter = new ForwardingFormatter({
@@ -884,7 +884,7 @@ GitHub Actions automates quality enforcement and publishing.
 
 ahpx v0.1 (Phases 0–6) shipped the foundation: core AHP client, connection
 management, sessions, prompting, output formatting, observation, and George
-integration. Phase 7 added library mode (`import { AhpClient } from 'ahpx'`),
+integration. Phase 7 added library mode (`import { AhpClient } from '@tylerl0706/ahpx'`),
 Phase 8 added multi-session support with `SessionHandle` and `ConnectionPool`,
 Phase 9 added event forwarding (webhook + WebSocket), Phase 10 added fleet
 management (HealthChecker, FleetManager, server tags), and Phase 11 added robust
