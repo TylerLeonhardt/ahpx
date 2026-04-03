@@ -70,9 +70,13 @@ describe("AuthHandler", () => {
 
 			const authFile = path.join(tmpDir, "auth.json");
 			const stat = await fs.stat(authFile);
-			// Check that it's not world-readable (0600 = owner rw only)
-			const mode = stat.mode & 0o777;
-			expect(mode).toBe(0o600);
+			// Windows doesn't support Unix file permissions — verify the
+			// file was created, but only assert permission bits on Unix.
+			expect(stat.isFile()).toBe(true);
+			if (process.platform !== "win32") {
+				const mode = stat.mode & 0o777;
+				expect(mode).toBe(0o600);
+			}
 		});
 
 		it("overwrites existing tokens for same resource", async () => {
