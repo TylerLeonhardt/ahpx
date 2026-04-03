@@ -20,7 +20,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
@@ -35,6 +34,6 @@ jobs:
           git commit -m "chore: bump version to $(node -p 'require("./package.json").version')"
           git push
       - name: Publish to npm
+        # Authentication via OIDC trusted publishers — no NPM_TOKEN needed
+        # Configure at: npmjs.com → Package Settings → Trusted Publishers
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
