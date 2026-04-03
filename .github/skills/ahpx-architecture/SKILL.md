@@ -870,7 +870,8 @@ GitHub Actions automates quality enforcement and publishing.
 - Skips runs triggered by version-bump commits (`chore: bump version`) to prevent infinite loops
 - Serialized via `concurrency: publish-npm` to avoid race conditions on concurrent merges
 - Publishes with provenance (`--provenance --access public`) for supply chain security
-- Requires `NPM_TOKEN` secret and `contents: write` permission
+- Authenticates via OIDC trusted publishers (no `NPM_TOKEN` secret needed)
+- Requires `contents: write` and `id-token: write` permissions
 
 **Quality gates** — all five checks must pass before merge:
 1. `npm run typecheck` — `tsc --noEmit`
