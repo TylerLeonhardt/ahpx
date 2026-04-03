@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -24,7 +25,8 @@ import { describe, expect, it } from "vitest";
  */
 function runCli(...args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 	return new Promise((resolve) => {
-		const child: ChildProcess = spawn("node", ["dist/bin.js", ...args], {
+		const binPath = path.resolve("dist", "bin.js");
+		const child: ChildProcess = spawn(process.execPath, [binPath, ...args], {
 			stdio: ["ignore", "pipe", "pipe"],
 			env: { ...process.env, NO_COLOR: "1" },
 			timeout: 15_000,

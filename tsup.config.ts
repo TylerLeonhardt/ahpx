@@ -9,6 +9,7 @@ export default defineConfig({
 	target: "node20",
 	clean: true,
 	dts: true,
-	// Add shebang only to the CLI entry point (not the library)
-	onSuccess: "printf '%s\\n' '#!/usr/bin/env node' \"$(cat dist/bin.js)\" > dist/bin.js",
+	// Add shebang only to the CLI entry point (not the library).
+	// Uses a Node.js script instead of shell commands for cross-platform support.
+	onSuccess: "node scripts/postbuild.js",
 });
