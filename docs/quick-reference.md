@@ -5,7 +5,7 @@ One-page cheat sheet for the most common ahpx commands.
 ## Getting Started
 
 ```bash
-npm install -g ahpx
+npm install -g @tylerl0706/ahpx
 ahpx server add local --url ws://localhost:8082 --default
 ahpx "hello world"
 ```
