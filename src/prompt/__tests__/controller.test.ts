@@ -60,6 +60,7 @@ function createMockClient() {
 	const sessionStates = new Map<string, ISessionState>();
 
 	const client = Object.assign(emitter, {
+		clientId: "test-client-id",
 		dispatchAction(action: IStateAction) {
 			dispatched.push(action);
 		},
@@ -439,18 +440,43 @@ describe("TurnController", () => {
 		expect(result.state).toBe("cancelled");
 	});
 
-	it("skips toolCallReady when auto-confirmed by server", async () => {
-		const { client, dispatched, emitAction } = createMockClient();
+	it("skips confirmation for client-provided tool when auto-confirmed by server", async () => {
+		const { client, dispatched, emitAction, setSessionState } = createMockClient();
 		const cap = createCapture();
 		const renderer = new PromptRenderer(cap.out);
 		const handler = new PermissionHandler("approve-all", { output: cap.out });
+
+		// Set up session state with a client-provided tool (toolClientId matches client)
+		setSessionState(SESSION_URI, {
+			...makeSessionState(),
+			summary: { ...makeSessionState().summary, resource: SESSION_URI },
+			activeTurn: {
+				id: "placeholder",
+				userMessage: { text: "test" },
+				responseParts: [
+					{
+						kind: ResponsePartKind.ToolCall,
+						toolCall: {
+							toolCallId: "tc1",
+							toolName: "read_file",
+							displayName: "Read File",
+							status: ToolCallStatus.Running,
+							toolClientId: "test-client-id",
+							invocationMessage: "Read file.ts",
+							confirmed: ToolCallConfirmationReason.NotNeeded,
+						},
+					},
+				],
+				usage: undefined,
+			},
+		});
 
 		const controller = new TurnController(client, SESSION_URI, renderer, handler);
 		const resultPromise = controller.prompt("auto confirm");
 
 		const turnId = (dispatched[0] as { turnId: string }).turnId;
 
-		// Tool call ready with confirmed already set (auto-approved by server)
+		// Tool call ready with confirmed set — client-provided tool
 		emitAction({
 			type: ActionType.SessionToolCallReady,
 			session: SESSION_URI,
@@ -462,9 +488,205 @@ describe("TurnController", () => {
 
 		await new Promise((r) => setTimeout(r, 50));
 
-		// Should NOT have dispatched toolCallConfirmed since server already confirmed
+		// Should NOT have dispatched toolCallConfirmed — client tool skips entirely
 		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
 		expect(confirmAction).toBeUndefined();
+
+		// Should NOT have consulted permission handler (no auto-approved/denied output)
+		expect(cap.text()).not.toContain("[auto-approved]");
+		expect(cap.text()).not.toContain("[denied]");
+
+		emitAction({
+			type: ActionType.SessionTurnComplete,
+			session: SESSION_URI,
+			turnId,
+		});
+
+		await resultPromise;
+	});
+
+	it("respects deny-all for server-confirmed tools", async () => {
+		const { client, dispatched, emitAction, setSessionState } = createMockClient();
+		const cap = createCapture();
+		const renderer = new PromptRenderer(cap.out);
+		const handler = new PermissionHandler("deny-all", { output: cap.out });
+
+		// Set up session state with a server tool (no toolClientId)
+		setSessionState(SESSION_URI, {
+			...makeSessionState(),
+			summary: { ...makeSessionState().summary, resource: SESSION_URI },
+			activeTurn: {
+				id: "placeholder",
+				userMessage: { text: "test" },
+				responseParts: [
+					{
+						kind: ResponsePartKind.ToolCall,
+						toolCall: {
+							toolCallId: "tc1",
+							toolName: "server_shell",
+							displayName: "Server Shell",
+							status: ToolCallStatus.Running,
+							invocationMessage: "npm test",
+							confirmed: ToolCallConfirmationReason.NotNeeded,
+						},
+					},
+				],
+				usage: undefined,
+			},
+		});
+
+		const controller = new TurnController(client, SESSION_URI, renderer, handler);
+		const resultPromise = controller.prompt("run server tool");
+
+		const turnId = (dispatched[0] as { turnId: string }).turnId;
+
+		// Server tool auto-confirmed, but user has deny-all
+		emitAction({
+			type: ActionType.SessionToolCallReady,
+			session: SESSION_URI,
+			turnId,
+			toolCallId: "tc1",
+			invocationMessage: "npm test",
+			confirmed: ToolCallConfirmationReason.NotNeeded,
+		});
+
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Should have dispatched toolCallConfirmed with approved: false
+		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
+		expect(confirmAction).toBeDefined();
+		expect((confirmAction as { approved: boolean }).approved).toBe(false);
+
+		// Permission handler should have been consulted
+		expect(cap.text()).toContain("[denied]");
+
+		emitAction({
+			type: ActionType.SessionTurnComplete,
+			session: SESSION_URI,
+			turnId,
+		});
+
+		await resultPromise;
+	});
+
+	it("respects approve-all for server-confirmed tools without dispatching", async () => {
+		const { client, dispatched, emitAction, setSessionState } = createMockClient();
+		const cap = createCapture();
+		const renderer = new PromptRenderer(cap.out);
+		const handler = new PermissionHandler("approve-all", { output: cap.out });
+
+		// Set up session state with a server tool (no toolClientId)
+		setSessionState(SESSION_URI, {
+			...makeSessionState(),
+			summary: { ...makeSessionState().summary, resource: SESSION_URI },
+			activeTurn: {
+				id: "placeholder",
+				userMessage: { text: "test" },
+				responseParts: [
+					{
+						kind: ResponsePartKind.ToolCall,
+						toolCall: {
+							toolCallId: "tc1",
+							toolName: "server_read",
+							displayName: "Server Read",
+							status: ToolCallStatus.Running,
+							invocationMessage: "Read config.json",
+							confirmed: ToolCallConfirmationReason.NotNeeded,
+						},
+					},
+				],
+				usage: undefined,
+			},
+		});
+
+		const controller = new TurnController(client, SESSION_URI, renderer, handler);
+		const resultPromise = controller.prompt("run server tool");
+
+		const turnId = (dispatched[0] as { turnId: string }).turnId;
+
+		// Server tool auto-confirmed, user has approve-all
+		emitAction({
+			type: ActionType.SessionToolCallReady,
+			session: SESSION_URI,
+			turnId,
+			toolCallId: "tc1",
+			invocationMessage: "Read config.json",
+			confirmed: ToolCallConfirmationReason.NotNeeded,
+		});
+
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Should NOT have dispatched toolCallConfirmed — server already running, user approves
+		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
+		expect(confirmAction).toBeUndefined();
+
+		// Permission handler should have been consulted (auto-approved output)
+		expect(cap.text()).toContain("[auto-approved]");
+
+		// Renderer should have been notified (tool call ready output)
+		expect(cap.text()).toContain("Read config.json");
+
+		emitAction({
+			type: ActionType.SessionTurnComplete,
+			session: SESSION_URI,
+			turnId,
+		});
+
+		await resultPromise;
+	});
+
+	it("treats tool with non-matching toolClientId as server tool", async () => {
+		const { client, dispatched, emitAction, setSessionState } = createMockClient();
+		const cap = createCapture();
+		const renderer = new PromptRenderer(cap.out);
+		const handler = new PermissionHandler("deny-all", { output: cap.out });
+
+		// Set up session state with a tool owned by a different client
+		setSessionState(SESSION_URI, {
+			...makeSessionState(),
+			summary: { ...makeSessionState().summary, resource: SESSION_URI },
+			activeTurn: {
+				id: "placeholder",
+				userMessage: { text: "test" },
+				responseParts: [
+					{
+						kind: ResponsePartKind.ToolCall,
+						toolCall: {
+							toolCallId: "tc1",
+							toolName: "other_tool",
+							displayName: "Other Tool",
+							status: ToolCallStatus.Running,
+							toolClientId: "different-client-id",
+							invocationMessage: "Do something",
+							confirmed: ToolCallConfirmationReason.NotNeeded,
+						},
+					},
+				],
+				usage: undefined,
+			},
+		});
+
+		const controller = new TurnController(client, SESSION_URI, renderer, handler);
+		const resultPromise = controller.prompt("other client tool");
+
+		const turnId = (dispatched[0] as { turnId: string }).turnId;
+
+		// Auto-confirmed but toolClientId doesn't match → treated as server tool
+		emitAction({
+			type: ActionType.SessionToolCallReady,
+			session: SESSION_URI,
+			turnId,
+			toolCallId: "tc1",
+			invocationMessage: "Do something",
+			confirmed: ToolCallConfirmationReason.NotNeeded,
+		});
+
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Should have dispatched denied — non-matching toolClientId treated as server tool
+		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
+		expect(confirmAction).toBeDefined();
+		expect((confirmAction as { approved: boolean }).approved).toBe(false);
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
