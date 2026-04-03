@@ -141,35 +141,54 @@ export class TurnController {
 
 					case ActionType.SessionToolCallReady: {
 						const a = action as ISessionToolCallReadyAction;
-						// If already auto-confirmed by the server, no need to prompt
-						if (a.confirmed) {
-							break;
-						}
-						const callInfo: ToolCallInfo = {
-							toolCallId: a.toolCallId,
-							toolName: a.toolCallId, // toolName is on the start action
-							displayName: a.toolCallId,
-							invocationMessage: a.invocationMessage,
-							toolInput: a.toolInput,
-						};
+						const serverConfirmed = !!a.confirmed;
 
-						// Look up the actual tool name from state mirror
+						// Look up tool call from session state (for toolClientId and display info)
+						let toolClientId: string | undefined;
+						let stateName: string | undefined;
+						let stateDisplayName: string | undefined;
+
 						const session = this.client.state.getSession(this.sessionUri);
 						if (session?.activeTurn) {
 							for (const part of session.activeTurn.responseParts) {
 								if (part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === a.toolCallId) {
-									callInfo.toolName = part.toolCall.toolName;
-									callInfo.displayName = part.toolCall.displayName;
+									toolClientId = part.toolCall.toolClientId;
+									stateName = part.toolCall.toolName;
+									stateDisplayName = part.toolCall.displayName;
 									break;
 								}
 							}
 						}
+
+						if (serverConfirmed) {
+							// Client-provided tool: the owning client handles execution directly,
+							// so skip confirmation entirely (correct per AHP spec).
+							const isClientTool = toolClientId !== undefined && toolClientId === this.client.clientId;
+							if (isClientTool) {
+								break;
+							}
+							// Server tool: fall through to consult the user's permission mode.
+						}
+
+						const callInfo: ToolCallInfo = {
+							toolCallId: a.toolCallId,
+							toolName: stateName ?? a.toolCallId,
+							displayName: stateDisplayName ?? a.toolCallId,
+							invocationMessage: a.invocationMessage,
+							toolInput: a.toolInput,
+						};
 
 						this.renderer.onToolCallReady(a.toolCallId, callInfo);
 
 						// Handle confirmation asynchronously
 						this.permissionHandler.handleToolConfirmation(callInfo).then((approved) => {
 							if (this.cancelled) return;
+
+							if (serverConfirmed && approved) {
+								// Server already confirmed and user approves — nothing to dispatch.
+								return;
+							}
+
 							if (approved) {
 								this.client.dispatchAction({
 									type: ActionType.SessionToolCallConfirmed,
