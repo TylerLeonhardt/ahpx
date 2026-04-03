@@ -73,6 +73,14 @@ describe("SessionStore", () => {
 			expect(retrieved!.lastPromptAt).toBe("2024-01-15T11:00:00.000Z");
 		});
 
+		it("rejects session IDs with path traversal characters", async () => {
+			const traversalIds = ["../evil", "..\\evil", "foo/bar", "foo\\bar", "..", "id\0null"];
+			for (const id of traversalIds) {
+				await expect(store.save(makeSession({ id }))).rejects.toThrow("Invalid session ID");
+			}
+			await expect(store.get("../evil")).rejects.toThrow("Invalid session ID");
+		});
+
 		it("overwrites an existing record on save", async () => {
 			await store.save(makeSession({ title: "v1" }));
 			await store.save(makeSession({ title: "v2" }));
