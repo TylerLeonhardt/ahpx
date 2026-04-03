@@ -23,8 +23,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
-      - run: npm test
       - run: npm run build
+      - run: npm test
       - name: Bump patch version
         run: |
           git config user.name "github-actions[bot]"
