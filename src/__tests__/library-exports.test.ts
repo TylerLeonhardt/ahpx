@@ -205,6 +205,18 @@ describe("library exports", () => {
 		});
 	});
 
+	describe("URI utilities", () => {
+		it("exports ensureFileUri function", () => {
+			expect(ahpx.ensureFileUri).toBeDefined();
+			expect(typeof ahpx.ensureFileUri).toBe("function");
+		});
+
+		it("exports fileUriToDisplayPath function", () => {
+			expect(ahpx.fileUriToDisplayPath).toBeDefined();
+			expect(typeof ahpx.fileUriToDisplayPath).toBe("function");
+		});
+	});
+
 	describe("public API completeness", () => {
 		it("exports all expected classes", () => {
 			const expectedClasses = [

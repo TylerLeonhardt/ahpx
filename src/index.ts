@@ -87,6 +87,10 @@ export type { SessionRecord, SessionFilter, TurnSummary } from "./session/store.
 export { SessionPersistence } from "./session/persistence.js";
 export type { ResumeOutcome, SyncResult } from "./session/persistence.js";
 
+// ── URI utilities ───────────────────────────────────────────────────────
+
+export { ensureFileUri, fileUriToDisplayPath } from "./uri.js";
+
 // ── Protocol types ──────────────────────────────────────────────────────
 //
 // Re-export the subset of protocol types that library consumers encounter
