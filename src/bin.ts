@@ -50,6 +50,7 @@ import { ResponsePartKind } from "./protocol/state.js";
 import type { ITurn } from "./protocol/state.js";
 import { SessionPersistence, SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
 import type { SessionRecord } from "./session/index.js";
+import { ensureFileUri } from "./uri.js";
 import { SessionWatcher } from "./watch/index.js";
 
 const store = new ConnectionStore();
@@ -940,7 +941,7 @@ session
 
 						try {
 							// Create the session
-							await client.createSession(sessionUri, resolvedProvider, model, cwd);
+							await client.createSession(sessionUri, resolvedProvider, model, ensureFileUri(cwd));
 
 							// Subscribe to the session URI
 							await client.subscribe(sessionUri);
@@ -1754,7 +1755,7 @@ async function createTempSession(
 	}
 	const sessionId = randomUUID();
 	const sessionUri = `${provider}:/${sessionId}`;
-	await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, cwd);
+	await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd));
 	await client.subscribe(sessionUri);
 	await waitForReady(client, sessionUri);
 	return sessionUri;
@@ -1809,7 +1810,7 @@ async function resolveOrCreateSession(
 
 	const spinner = startSpinner(`Creating session on ${serverInfo.name}...`, spinnersEnabled(globalOpts));
 	try {
-		await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, cwd);
+		await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd));
 		await client.subscribe(sessionUri);
 
 		spinner.update("Waiting for session ready...");
@@ -2118,7 +2119,7 @@ program
 			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 
 			await withConnection({ server: opts.server, config: cfg }, async (client) => {
-				const result = await client.resourceList(directory ?? "");
+				const result = await client.resourceList(directory ? ensureFileUri(directory) : "");
 
 				outputResult(
 					globalOpts,
@@ -2164,7 +2165,7 @@ program
 			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 
 			await withConnection({ server: opts.server, config: cfg }, async (client) => {
-				const result = await client.resourceRead(uri);
+				const result = await client.resourceRead(ensureFileUri(uri));
 
 				const data =
 					result.encoding === "base64" ? Buffer.from(result.data, "base64") : Buffer.from(result.data, "utf-8");
