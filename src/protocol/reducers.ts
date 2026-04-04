@@ -241,17 +241,48 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
       return next;
     }
 
-    case ActionType.SessionDelta:
-      return updateResponsePart(state, action.turnId, action.partId, part => {
+    case ActionType.SessionDelta: {
+      const updated = updateResponsePart(state, action.turnId, action.partId, part => {
         if (part.kind === ResponsePartKind.Markdown) {
           return { ...part, content: part.content + action.content };
         }
         return part;
       });
+      // If the part doesn't exist yet (delta arrived before SessionResponsePart),
+      // create a new Markdown part with the delta content instead of dropping it
+      if (updated === state && state.activeTurn && state.activeTurn.id === action.turnId) {
+        return {
+          ...state,
+          activeTurn: {
+            ...state.activeTurn,
+            responseParts: [
+              ...state.activeTurn.responseParts,
+              { kind: ResponsePartKind.Markdown, id: action.partId, content: action.content },
+            ],
+          },
+        };
+      }
+      return updated;
+    }
 
-    case ActionType.SessionResponsePart:
+    case ActionType.SessionResponsePart: {
       if (!state.activeTurn || state.activeTurn.id !== action.turnId) {
         return state;
+      }
+      // Skip if a part with this ID already exists (e.g., auto-created by an earlier SessionDelta)
+      const newPartId = action.part.kind === ResponsePartKind.ToolCall
+        ? action.part.toolCall.toolCallId
+        : 'id' in action.part ? action.part.id : undefined;
+      if (newPartId !== undefined) {
+        const exists = state.activeTurn.responseParts.some(p => {
+          const id = p.kind === ResponsePartKind.ToolCall
+            ? p.toolCall.toolCallId
+            : 'id' in p ? p.id : undefined;
+          return id === newPartId;
+        });
+        if (exists) {
+          return state;
+        }
       }
       return {
         ...state,
@@ -260,6 +291,7 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
           responseParts: [...state.activeTurn.responseParts, action.part],
         },
       };
+    }
 
     case ActionType.SessionTurnComplete:
       return endTurn(state, action.turnId, TurnState.Complete, SessionStatus.Idle);

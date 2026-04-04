@@ -22,6 +22,7 @@ export class StateMirror {
 	private rootState: IRootState = { agents: [] };
 	private sessions = new Map<URI, ISessionState>();
 	private serverSeq = 0;
+	private pendingActions = new Map<URI, IActionEnvelope[]>();
 
 	/** Current root state (agents, active session count). */
 	get root(): IRootState {
@@ -45,6 +46,7 @@ export class StateMirror {
 
 	/**
 	 * Load a snapshot (from initialize, reconnect, or subscribe).
+	 * After registering a session, replays any actions that arrived before the snapshot.
 	 */
 	applySnapshot(snapshot: ISnapshot): void {
 		if (snapshot.fromSeq > this.serverSeq) {
@@ -57,6 +59,25 @@ export class StateMirror {
 		} else if ("summary" in snapshot.state) {
 			const sessionState = snapshot.state as ISessionState;
 			this.sessions.set(snapshot.resource, sessionState);
+
+			// Replay any actions that arrived before this snapshot
+			const buffered = this.pendingActions.get(snapshot.resource);
+			if (buffered) {
+				this.pendingActions.delete(snapshot.resource);
+				for (const env of buffered) {
+					// Only replay actions with serverSeq > snapshot.fromSeq
+					// (earlier actions are already reflected in the snapshot)
+					if (env.serverSeq > snapshot.fromSeq) {
+						const current = this.sessions.get(snapshot.resource);
+						if (current) {
+							this.sessions.set(
+								snapshot.resource,
+								sessionReducer(current, env.action as ISessionAction & { session?: URI }),
+							);
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -78,6 +99,14 @@ export class StateMirror {
 				const current = this.sessions.get(sessionUri);
 				if (current) {
 					this.sessions.set(sessionUri, sessionReducer(current, sessionAction));
+				} else {
+					// Session not yet registered — buffer for replay after applySnapshot
+					let buffer = this.pendingActions.get(sessionUri);
+					if (!buffer) {
+						buffer = [];
+						this.pendingActions.set(sessionUri, buffer);
+					}
+					buffer.push(envelope);
 				}
 			}
 		}
@@ -88,5 +117,6 @@ export class StateMirror {
 	 */
 	removeSession(uri: URI): void {
 		this.sessions.delete(uri);
+		this.pendingActions.delete(uri);
 	}
 }
