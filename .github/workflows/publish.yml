@@ -20,6 +20,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Upgrade npm for OIDC trusted publisher support
+        run: npm install -g npm@latest
+      - run: npm --version
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
