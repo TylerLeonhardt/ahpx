@@ -55,7 +55,7 @@ export interface IInitializeResult {
  *
  * @category Commands
  */
-export const enum ReconnectResultType {
+export enum ReconnectResultType {
   Replay = 'replay',
   Snapshot = 'snapshot',
 }
@@ -244,7 +244,7 @@ export interface IListSessionsResult {
  *
  * @category Commands
  */
-export const enum ContentEncoding {
+export enum ContentEncoding {
   Base64 = 'base64',
   Utf8 = 'utf-8',
 }

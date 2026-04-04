@@ -60,6 +60,7 @@ export {
   ToolCallCancellationReason,
   ToolResultContentType,
   PendingMessageKind,
+  CustomizationStatus,
 } from './state.js';
 
 // Action types
