@@ -1843,29 +1843,37 @@ async function resolveOrCreateSession(
 function waitForReady(client: AhpClient, sessionUri: string): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		const timeout = setTimeout(() => {
+			cleanup();
 			reject(new TimeoutError("Timed out waiting for session to be ready"));
 		}, 30_000);
 
-		client.on("action", (envelope) => {
+		const onAction = (envelope: { action: { type: string; session?: string } }) => {
 			const action = envelope.action;
 			if (action.type === ActionType.SessionReady && action.session === sessionUri) {
-				clearTimeout(timeout);
+				cleanup();
 				resolve();
 			} else if (action.type === ActionType.SessionCreationFailed && action.session === sessionUri) {
-				clearTimeout(timeout);
+				cleanup();
 				const sessionState = client.state.getSession(sessionUri);
 				const errMsg = sessionState?.creationError?.message ?? "Unknown error";
 				reject(new AhpxError(`Session creation failed: ${errMsg}`, ExitCode.Error));
 			}
-		});
+		};
+
+		const cleanup = () => {
+			clearTimeout(timeout);
+			client.removeListener("action", onAction);
+		};
+
+		client.on("action", onAction);
 
 		// Check if already ready from snapshot
 		const sessionState = client.state.getSession(sessionUri);
 		if (sessionState?.lifecycle === "ready") {
-			clearTimeout(timeout);
+			cleanup();
 			resolve();
 		} else if (sessionState?.lifecycle === "creationFailed") {
-			clearTimeout(timeout);
+			cleanup();
 			const errMsg = sessionState?.creationError?.message ?? "Unknown error";
 			reject(new AhpxError(`Session creation failed: ${errMsg}`, ExitCode.Error));
 		}

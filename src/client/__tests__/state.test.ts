@@ -143,6 +143,124 @@ describe("StateMirror", () => {
 			expect(session.summary.status).toBe(SessionStatus.Idle);
 		});
 
+		it("handles SessionDelta before SessionResponsePart by creating a new part", () => {
+			const mirror = new StateMirror();
+			mirror.applySnapshot({
+				resource: "copilot:/s1",
+				state: makeSessionState({ lifecycle: SessionLifecycle.Ready }),
+				fromSeq: 0,
+			});
+
+			// Start a turn
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionTurnStarted,
+						session: "copilot:/s1",
+						turnId: "t1",
+						userMessage: { text: "Hello" },
+					},
+					1,
+				),
+			);
+
+			// Delta arrives BEFORE the SessionResponsePart that creates it
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionDelta,
+						session: "copilot:/s1",
+						turnId: "t1",
+						partId: "part-1",
+						content: "First words",
+					},
+					2,
+				),
+			);
+
+			let session = mirror.getSession("copilot:/s1")!;
+			let mdPart = session.activeTurn!.responseParts.find(
+				(p) => p.kind === ResponsePartKind.Markdown && p.id === "part-1",
+			);
+			expect(mdPart).toBeDefined();
+			expect((mdPart as { content: string }).content).toBe("First words");
+
+			// Subsequent deltas should append to the auto-created part
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionDelta,
+						session: "copilot:/s1",
+						turnId: "t1",
+						partId: "part-1",
+						content: " more text",
+					},
+					3,
+				),
+			);
+
+			session = mirror.getSession("copilot:/s1")!;
+			mdPart = session.activeTurn!.responseParts.find((p) => p.kind === ResponsePartKind.Markdown && p.id === "part-1");
+			expect((mdPart as { content: string }).content).toBe("First words more text");
+		});
+
+		it("does not duplicate parts when SessionResponsePart arrives after delta-created part", () => {
+			const mirror = new StateMirror();
+			mirror.applySnapshot({
+				resource: "copilot:/s1",
+				state: makeSessionState({ lifecycle: SessionLifecycle.Ready }),
+				fromSeq: 0,
+			});
+
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionTurnStarted,
+						session: "copilot:/s1",
+						turnId: "t1",
+						userMessage: { text: "Hello" },
+					},
+					1,
+				),
+			);
+
+			// Delta arrives first, auto-creates the part
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionDelta,
+						session: "copilot:/s1",
+						turnId: "t1",
+						partId: "part-1",
+						content: "First words",
+					},
+					2,
+				),
+			);
+
+			// SessionResponsePart arrives late — should NOT create a duplicate
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionResponsePart,
+						session: "copilot:/s1",
+						turnId: "t1",
+						part: { kind: ResponsePartKind.Markdown, id: "part-1", content: "" },
+					},
+					3,
+				),
+			);
+
+			const session = mirror.getSession("copilot:/s1")!;
+			const parts = session.activeTurn!.responseParts.filter(
+				(p) => p.kind === ResponsePartKind.Markdown && p.id === "part-1",
+			);
+			// Should be exactly 1 part, not 2
+			expect(parts).toHaveLength(1);
+			// And it should retain the delta content, not be overwritten with empty
+			expect((parts[0] as { content: string }).content).toBe("First words");
+		});
+
 		it("handles SessionTurnStarted and SessionDelta", () => {
 			const mirror = new StateMirror();
 			mirror.applySnapshot({
@@ -1153,6 +1271,148 @@ describe("StateMirror", () => {
 				expect(session.steeringMessage).toBeDefined();
 				expect(session.queuedMessages).toHaveLength(1);
 			});
+		});
+	});
+
+	describe("action buffering", () => {
+		it("buffers actions for unknown sessions and replays them on applySnapshot", () => {
+			const mirror = new StateMirror();
+
+			// Actions arrive BEFORE the snapshot (race condition during subscribe)
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionReady,
+						session: "copilot:/s1",
+					},
+					2,
+				),
+			);
+
+			// Session should not exist yet
+			expect(mirror.getSession("copilot:/s1")).toBeUndefined();
+
+			// Now the snapshot arrives (subscribe response)
+			mirror.applySnapshot({
+				resource: "copilot:/s1",
+				state: makeSessionState({ lifecycle: SessionLifecycle.Creating }),
+				fromSeq: 1,
+			});
+
+			// The buffered SessionReady action should have been replayed
+			const session = mirror.getSession("copilot:/s1")!;
+			expect(session).toBeDefined();
+			expect(session.lifecycle).toBe(SessionLifecycle.Ready);
+		});
+
+		it("replays multiple buffered actions in order", () => {
+			const mirror = new StateMirror();
+
+			// Multiple actions arrive before snapshot
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionTurnStarted,
+						session: "copilot:/s1",
+						turnId: "t1",
+						userMessage: { text: "Hello" },
+					},
+					2,
+				),
+			);
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionResponsePart,
+						session: "copilot:/s1",
+						turnId: "t1",
+						part: { kind: ResponsePartKind.Markdown, id: "part-1", content: "" },
+					},
+					3,
+				),
+			);
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionDelta,
+						session: "copilot:/s1",
+						turnId: "t1",
+						partId: "part-1",
+						content: "Hello world",
+					},
+					4,
+				),
+			);
+
+			// Snapshot arrives with fromSeq=1 (all buffered actions are newer)
+			mirror.applySnapshot({
+				resource: "copilot:/s1",
+				state: makeSessionState({ lifecycle: SessionLifecycle.Ready }),
+				fromSeq: 1,
+			});
+
+			const session = mirror.getSession("copilot:/s1")!;
+			expect(session.activeTurn).toBeDefined();
+			expect(session.activeTurn!.id).toBe("t1");
+			const mdPart = session.activeTurn!.responseParts.find(
+				(p) => p.kind === ResponsePartKind.Markdown && p.id === "part-1",
+			);
+			expect(mdPart).toBeDefined();
+			expect((mdPart as { content: string }).content).toBe("Hello world");
+		});
+
+		it("skips buffered actions with serverSeq <= snapshot.fromSeq", () => {
+			const mirror = new StateMirror();
+
+			// Action arrives at seq=1
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionReady,
+						session: "copilot:/s1",
+					},
+					1,
+				),
+			);
+
+			// Snapshot arrives with fromSeq=2 (already includes the action)
+			mirror.applySnapshot({
+				resource: "copilot:/s1",
+				state: makeSessionState({ lifecycle: SessionLifecycle.Creating }),
+				fromSeq: 2,
+			});
+
+			// The SessionReady should NOT have been replayed (seq 1 <= fromSeq 2)
+			const session = mirror.getSession("copilot:/s1")!;
+			expect(session.lifecycle).toBe(SessionLifecycle.Creating);
+		});
+
+		it("clears the action buffer on removeSession", () => {
+			const mirror = new StateMirror();
+
+			// Buffer an action
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionReady,
+						session: "copilot:/s1",
+					},
+					2,
+				),
+			);
+
+			// Remove before snapshot arrives
+			mirror.removeSession("copilot:/s1");
+
+			// Now apply snapshot — the buffered action should be gone
+			mirror.applySnapshot({
+				resource: "copilot:/s1",
+				state: makeSessionState({ lifecycle: SessionLifecycle.Creating }),
+				fromSeq: 1,
+			});
+
+			const session = mirror.getSession("copilot:/s1")!;
+			expect(session.lifecycle).toBe(SessionLifecycle.Creating);
 		});
 	});
 
