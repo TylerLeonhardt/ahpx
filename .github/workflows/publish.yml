@@ -38,4 +38,4 @@ jobs:
       - name: Publish to npm
         # Authentication via OIDC trusted publishers — no NPM_TOKEN needed
         # Configure at: npmjs.com → Package Settings → Trusted Publishers
-        run: npm publish --provenance --access public
+        run: npm publish --access public
