@@ -1,14 +1,25 @@
 # Publishing
 
-ahpx is published to npm automatically when changes are pushed to `master`.
+ahpx is published to npm automatically when changes are merged to `master`.
 
 ## How it works
 
 The [publish workflow](.github/workflows/publish.yml) runs on every push to `master`:
 
-1. **Quality gates** — typecheck, lint, test, build must all pass
-2. **Version bump** — auto-increments the patch version and commits back to `master`
-3. **Publish** — publishes to npm with provenance attestation
+1. **Quality gates** — typecheck, lint, build, and test must all pass
+2. **Version bump** — auto-increments the patch version, formats with biome, and commits back to `master`
+3. **Publish** — publishes to npm via OIDC trusted publishers (`npm publish --access public`)
+
+### Pipeline details
+
+| Step | What it does |
+|------|-------------|
+| **Node 24** | Required for npm 11, which has native OIDC support for trusted publishers |
+| **`registry-url`** | Must be set in `setup-node` for OIDC token exchange to work |
+| **Quality gates** | `npm ci` → `typecheck` → `lint` → `build` → `test` (in that order) |
+| **Bump** | `npm version patch --no-git-tag-version`, then `biome check --write package.json` to fix formatting, then commit + push |
+| **Skip guard** | Commits containing `"chore: bump version"` skip the workflow to prevent infinite loops |
+| **Publish** | `npm publish --access public` — authenticated via OIDC, no `NPM_TOKEN` needed |
 
 ## Authentication: OIDC Trusted Publishers
 
@@ -32,8 +43,7 @@ Instead of storing an `NPM_TOKEN` secret, the GitHub Actions workflow authentica
 To configure trusted publishing for a new package:
 
 1. **Create the package on npm with a pending trusted publisher:**
-   - Go to [npmjs.com](https://www.npmjs.com) → **+ New Package** → **Create a provenance-enabled package**
-   - Or, if the package already exists: go to Package Settings → **Trusted Publishers**
+   - Go to [npmjs.com](https://www.npmjs.com) → Package Settings → **Trusted Publishers**
    - Add a trusted publisher with:
      - **Registry:** GitHub Actions
      - **Organization/Owner:** `TylerLeonhardt`
@@ -54,15 +64,63 @@ To configure trusted publishing for a new package:
 
 ## Provenance
 
-Every publish includes `--provenance`, which generates a [SLSA provenance attestation](https://slsa.dev/) linking the published package back to the exact source commit and build. This works alongside OIDC trusted publishers — both use the same `id-token: write` permission.
+Provenance attestation (`--provenance`) is **not currently enabled** because it requires a public GitHub repository. The `id-token: write` permission is already configured for OIDC authentication, which is the same permission provenance needs.
+
+**When the repo goes public**, re-add `--provenance` to the publish step:
+
+```yaml
+- name: Publish to npm
+  run: npm publish --access public --provenance
+```
+
+This will generate [SLSA provenance attestations](https://slsa.dev/) linking each published package to the exact source commit and build.
+
+## Skipped versions (0.2.1–0.2.6)
+
+Versions 0.2.1 through 0.2.6 were bumped but never successfully published to npm due to a series of pipeline fixes:
+
+| Version | Issue | Fix |
+|---------|-------|-----|
+| 0.2.1 | Build wasn't running before tests | Reordered steps: build before test |
+| 0.2.2 | npm 10 lacked native OIDC support | Upgraded to npm 11 |
+| 0.2.3 | npm 11 still wasn't available on Node 20 | Switched to Node 24 (ships npm 11) |
+| 0.2.4 | `setup-node` missing `registry-url` | Added `registry-url: https://registry.npmjs.org` |
+| 0.2.5 | `package.json` formatting mismatch after `npm version` | Added `biome check --write` after bump |
+| 0.2.6 | `--provenance` requires public repo | Removed `--provenance` flag |
+
+The first successful automated publish was **0.2.7**.
+
+## Troubleshooting
+
+### `npm publish` fails with 403 or OIDC error
+
+- Verify that `registry-url: https://registry.npmjs.org` is set in the `setup-node` step — without it, npm won't attempt OIDC token exchange
+- Ensure the trusted publisher is configured on npmjs.com with the correct repository owner, repo name, and workflow filename
+- Check that the workflow has `id-token: write` permission
+
+### `package.json` formatting causes lint failure
+
+`npm version patch` reformats `package.json` using npm's own style (2-space indent, trailing newline). If your project uses biome for formatting, the bump step must run `biome check --write package.json` before committing to avoid a lint diff on the next CI run.
+
+### `--provenance` fails with "not supported" error
+
+Provenance attestation requires a **public** GitHub repository. If the repo is private, remove `--provenance` from the publish command. Re-add it when the repo goes public.
+
+### Infinite publish loop
+
+If the workflow triggers itself on its own version-bump commit, it creates an infinite loop. The skip guard (`if: "!contains(github.event.head_commit.message, 'chore: bump version')"`) prevents this. Don't change the bump commit message format without updating the guard.
+
+### Stale checkout causes push failure
+
+If another commit lands on `master` between checkout and the bump push, `git push` will fail. The workflow uses `concurrency: { group: publish-npm, cancel-in-progress: false }` to serialize publishes, but fast successive merges can still race. Re-running the failed workflow is the simplest fix.
 
 ## Manual publishing
 
 If you need to publish manually (e.g., for a pre-release):
 
 ```bash
-npm run typecheck && npm run lint && npm test && npm run build
+npm run typecheck && npm run lint && npm run build && npm test
 npm publish --access public
 ```
 
-Note: Manual publishes won't include provenance attestation unless you have a valid OIDC token context.
+Note: Manual publishes won't include OIDC authentication or provenance. Run `npm login` first to authenticate with your npm account.
