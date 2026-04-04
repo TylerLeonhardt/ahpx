@@ -127,11 +127,18 @@ export type {
 
 // State enums
 export {
+	PolicyState,
 	SessionLifecycle,
 	SessionStatus,
-	ToolCallStatus,
-	PendingMessageKind,
+	TurnState,
+	AttachmentType,
 	ResponsePartKind,
+	ToolCallStatus,
+	ToolCallConfirmationReason,
+	ToolCallCancellationReason,
+	ToolResultContentType,
+	PendingMessageKind,
+	CustomizationStatus,
 } from "./protocol/index.js";
 
 // Action types
@@ -158,7 +165,10 @@ export type {
 	IResourceMoveResult,
 } from "./protocol/index.js";
 
-export { ContentEncoding } from "./protocol/index.js";
+export { ContentEncoding, ReconnectResultType } from "./protocol/index.js";
 
 // Notification types (emitted by AhpClient 'notification' event)
 export type { IProtocolNotification } from "./protocol/index.js";
+
+// Notification enums
+export { NotificationType, AuthRequiredReason } from "./protocol/index.js";

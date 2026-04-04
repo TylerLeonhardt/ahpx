@@ -29,7 +29,7 @@ import { ToolCallConfirmationReason, ToolCallCancellationReason, PendingMessageK
  *
  * @category Actions
  */
-export const enum ActionType {
+export enum ActionType {
   RootAgentsChanged = 'root/agentsChanged',
   RootActiveSessionsChanged = 'root/activeSessionsChanged',
   SessionReady = 'session/ready',

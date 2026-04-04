@@ -135,7 +135,7 @@ export interface IProtectedResourceMetadata {
  *
  * @category Root State
  */
-export const enum PolicyState {
+export enum PolicyState {
   Enabled = 'enabled',
   Disabled = 'disabled',
   Unconfigured = 'unconfigured',
@@ -211,7 +211,7 @@ export interface ISessionModelInfo {
  *
  * @category Pending Message Types
  */
-export const enum PendingMessageKind {
+export enum PendingMessageKind {
   /** Injected into the current turn at a convenient point */
   Steering = 'steering',
   /** Sent automatically as a new turn after the current turn finishes */
@@ -241,7 +241,7 @@ export interface IPendingMessage {
  *
  * @category Session State
  */
-export const enum SessionLifecycle {
+export enum SessionLifecycle {
   Creating = 'creating',
   Ready = 'ready',
   CreationFailed = 'creationFailed',
@@ -252,7 +252,7 @@ export const enum SessionLifecycle {
  *
  * @category Session State
  */
-export const enum SessionStatus {
+export enum SessionStatus {
   Idle = 'idle',
   InProgress = 'in-progress',
   Error = 'error',
@@ -341,7 +341,7 @@ export interface ISessionSummary {
  *
  * @category Turn Types
  */
-export const enum TurnState {
+export enum TurnState {
   Complete = 'complete',
   Cancelled = 'cancelled',
   Error = 'error',
@@ -352,7 +352,7 @@ export const enum TurnState {
  *
  * @category Turn Types
  */
-export const enum AttachmentType {
+export enum AttachmentType {
   File = 'file',
   Directory = 'directory',
   Selection = 'selection',
@@ -432,7 +432,7 @@ export interface IMessageAttachment {
  *
  * @category Response Parts
  */
-export const enum ResponsePartKind {
+export enum ResponsePartKind {
   Markdown = 'markdown',
   ContentRef = 'contentRef',
   ToolCall = 'toolCall',
@@ -515,7 +515,7 @@ export type IResponsePart = IMarkdownResponsePart | IResourceReponsePart | ITool
  *
  * @category Tool Call Types
  */
-export const enum ToolCallStatus {
+export enum ToolCallStatus {
   Streaming = 'streaming',
   PendingConfirmation = 'pending-confirmation',
   Running = 'running',
@@ -533,7 +533,7 @@ export const enum ToolCallStatus {
  *
  * @category Tool Call Types
  */
-export const enum ToolCallConfirmationReason {
+export enum ToolCallConfirmationReason {
   NotNeeded = 'not-needed',
   UserAction = 'user-action',
   Setting = 'setting',
@@ -544,7 +544,7 @@ export const enum ToolCallConfirmationReason {
  *
  * @category Tool Call Types
  */
-export const enum ToolCallCancellationReason {
+export enum ToolCallCancellationReason {
   Denied = 'denied',
   Skipped = 'skipped',
   ResultDenied = 'result-denied',
@@ -789,7 +789,7 @@ export interface IToolAnnotations {
  *
  * @category Tool Result Content
  */
-export const enum ToolResultContentType {
+export enum ToolResultContentType {
   Text = 'text',
   EmbeddedResource = 'embeddedResource',
   Resource = 'resource',
@@ -917,7 +917,7 @@ export interface ICustomizationRef {
  *
  * @category Customization Types
  */
-export const enum CustomizationStatus {
+export enum CustomizationStatus {
   /** Plugin is being loaded */
   Loading = 'loading',
   /** Plugin is fully operational */
