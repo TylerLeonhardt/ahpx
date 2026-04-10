@@ -143,7 +143,7 @@ describe("library exports", () => {
 		});
 
 		it("exports SessionStatus enum", () => {
-			expect(ahpx.SessionStatus.Idle).toBe("idle");
+			expect(ahpx.SessionStatus.Idle).toBe(1);
 		});
 
 		it("exports ToolCallStatus enum", () => {
@@ -249,6 +249,11 @@ describe("library exports", () => {
 				"ToolCallStatus",
 				"PendingMessageKind",
 				"ResponsePartKind",
+				"SessionInputAnswerState",
+				"SessionInputAnswerValueKind",
+				"SessionInputQuestionKind",
+				"SessionInputResponseKind",
+				"TerminalClaimKind",
 			];
 
 			for (const name of expectedEnums) {

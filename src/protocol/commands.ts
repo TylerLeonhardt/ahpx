@@ -6,7 +6,7 @@
  * They return a result or a JSON-RPC error.
  */
 
-import type { URI, ISnapshot, ISessionSummary, ITurn } from './state.js';
+import type { URI, ISnapshot, ISessionSummary, ITurn, ITerminalClaim } from './state.js';
 import type { IActionEnvelope, IStateAction } from './actions.js';
 
 // ─── initialize ──────────────────────────────────────────────────────────────
@@ -55,7 +55,7 @@ export interface IInitializeResult {
  *
  * @category Commands
  */
-export enum ReconnectResultType {
+export const enum ReconnectResultType {
   Replay = 'replay',
   Snapshot = 'snapshot',
 }
@@ -211,6 +211,55 @@ export interface IDisposeSessionParams {
   session: URI;
 }
 
+// ─── createTerminal ──────────────────────────────────────────────────────────
+
+/**
+ * Creates a new terminal on the server.
+ *
+ * After creation, the client should subscribe to the terminal URI to receive
+ * state updates. The server dispatches `root/terminalsChanged` to update the
+ * root terminal list.
+ *
+ * @category Commands
+ * @method createTerminal
+ * @direction Client → Server
+ * @messageType Request
+ * @version 1
+ */
+export interface ICreateTerminalParams {
+  /** Terminal URI (client-chosen) */
+  terminal: URI;
+  /** Initial owner of the terminal */
+  claim: ITerminalClaim;
+  /** Human-readable terminal name */
+  name?: string;
+  /** Initial working directory URI */
+  cwd?: URI;
+  /** Initial terminal width in columns */
+  cols?: number;
+  /** Initial terminal height in rows */
+  rows?: number;
+}
+
+// ─── disposeTerminal ─────────────────────────────────────────────────────────
+
+/**
+ * Disposes a terminal and kills its process if still running.
+ *
+ * The server dispatches `root/terminalsChanged` to remove the terminal from
+ * the root terminal list.
+ *
+ * @category Commands
+ * @method disposeTerminal
+ * @direction Client → Server
+ * @messageType Request
+ * @version 1
+ */
+export interface IDisposeTerminalParams {
+  /** Terminal URI to dispose */
+  terminal: URI;
+}
+
 // ─── listSessions ────────────────────────────────────────────────────────────
 
 /**
@@ -244,7 +293,7 @@ export interface IListSessionsResult {
  *
  * @category Commands
  */
-export enum ContentEncoding {
+export const enum ContentEncoding {
   Base64 = 'base64',
   Utf8 = 'utf-8',
 }

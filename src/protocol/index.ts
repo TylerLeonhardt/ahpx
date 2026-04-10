@@ -14,9 +14,11 @@ export type {
   IRootState,
   IAgentInfo,
   IProtectedResourceMetadata,
+  IProjectInfo,
   ISessionModelInfo,
   ISessionState,
   ISessionSummary,
+  ISessionFileDiff,
   ITurn,
   IActiveTurn,
   IUserMessage,
@@ -41,11 +43,35 @@ export type {
   IToolResultResourceContent,
   IToolResultContent,
   IToolResultFileEditContent,
+  IToolResultTerminalContent,
+  IToolResultSubagentContent,
   ISessionActiveClient,
   IPendingMessage,
+  ISessionInputAnswer,
+  ISessionInputAnswerValue,
+  ISessionInputTextAnswerValue,
+  ISessionInputNumberAnswerValue,
+  ISessionInputBooleanAnswerValue,
+  ISessionInputSelectedAnswerValue,
+  ISessionInputSelectedManyAnswerValue,
+  ISessionInputAnswered,
+  ISessionInputSkipped,
+  ISessionInputOption,
+  ISessionInputQuestion,
+  ISessionInputTextQuestion,
+  ISessionInputNumberQuestion,
+  ISessionInputBooleanQuestion,
+  ISessionInputSingleSelectQuestion,
+  ISessionInputMultiSelectQuestion,
+  ISessionInputRequest,
   IUsageInfo,
   IErrorInfo,
   ISnapshot,
+  ITerminalInfo,
+  ITerminalClientClaim,
+  ITerminalSessionClaim,
+  ITerminalClaim,
+  ITerminalState,
 } from './state.js';
 
 export {
@@ -60,7 +86,11 @@ export {
   ToolCallCancellationReason,
   ToolResultContentType,
   PendingMessageKind,
-  CustomizationStatus,
+  SessionInputAnswerState,
+  SessionInputAnswerValueKind,
+  SessionInputQuestionKind,
+  SessionInputResponseKind,
+  TerminalClaimKind,
 } from './state.js';
 
 // Action types
@@ -82,6 +112,7 @@ export type {
   ISessionToolCallConfirmedAction,
   ISessionToolCallCompleteAction,
   ISessionToolCallResultConfirmedAction,
+  ISessionToolCallContentChangedAction,
   ISessionTurnCompleteAction,
   ISessionTurnCancelledAction,
   ISessionErrorAction,
@@ -95,8 +126,23 @@ export type {
   ISessionPendingMessageSetAction,
   ISessionPendingMessageRemovedAction,
   ISessionQueuedMessagesReorderedAction,
+  ISessionInputAnswerChangedAction,
+  ISessionInputCompletedAction,
+  ISessionInputRequestedAction,
   ISessionTruncatedAction,
+  ISessionIsReadChangedAction,
+  ISessionIsDoneChangedAction,
+  ISessionDiffsChangedAction,
   IStateAction,
+  IRootTerminalsChangedAction,
+  ITerminalDataAction,
+  ITerminalInputAction,
+  ITerminalResizedAction,
+  ITerminalClaimedAction,
+  ITerminalTitleChangedAction,
+  ITerminalCwdChangedAction,
+  ITerminalExitedAction,
+  ITerminalClearedAction,
 } from './actions.js';
 
 export { ActionType } from './actions.js';
@@ -107,6 +153,9 @@ export type {
   ISessionAction,
   IClientSessionAction,
   IServerSessionAction,
+  ITerminalAction,
+  IClientTerminalAction,
+  IServerTerminalAction,
 } from './action-origin.generated.js';
 
 export { IS_CLIENT_DISPATCHABLE } from './action-origin.generated.js';
@@ -115,6 +164,7 @@ export { IS_CLIENT_DISPATCHABLE } from './action-origin.generated.js';
 export {
   rootReducer,
   sessionReducer,
+  terminalReducer,
   isClientDispatchable,
 } from './reducers.js';
 
@@ -131,6 +181,8 @@ export type {
   ICreateSessionParams,
   ISessionForkSource,
   IDisposeSessionParams,
+  ICreateTerminalParams,
+  IDisposeTerminalParams,
   IListSessionsParams,
   IListSessionsResult,
   IResourceReadParams,
@@ -160,6 +212,7 @@ export { ReconnectResultType, ContentEncoding } from './commands.js';
 export type {
   ISessionAddedNotification,
   ISessionRemovedNotification,
+  ISessionSummaryChangedNotification,
   IAuthRequiredNotification,
   IProtocolNotification,
 } from './notifications.js';

@@ -6,59 +6,73 @@ Records when ahpx was last synchronized with the [Agent Host Protocol](https://g
 
 | Field | Value |
 |-------|-------|
-| **Spec Commit** | `bb780aef8e735f78e80c5a86350442e0fbb66462` |
+| **Spec Commit** | `1f722585c64b18e3e9e02fc6e2f1f7e3bf4eb0be` |
 | **Spec Repo** | `microsoft/agent-host-protocol` |
-| **Synced On** | 2026-04-02 |
-| **ahpx Commit** | *(see PR branch `ahp-spec-sync-bb780ae`)* |
+| **Synced On** | 2026-04-10 |
+| **ahpx Commit** | *(see PR branch `ahp-spec-sync-1f72258`)* |
 
 ## What Was Implemented
 
 ### Breaking Changes Applied
 
-- **State restructuring**: `IActiveTurn.streamingText`, `toolCalls` (Record), `pendingPermissions` (Record), and `reasoning` fields removed. All content now lives in `responseParts[]` as `IMarkdownResponsePart`, `IToolCallResponsePart`, and `IReasoningResponsePart`.
-- **ITurn restructured**: `responseText` and `toolCalls` removed; content derives from `responseParts[]`.
-- **Permissions removed**: `PermissionKind`, `IPermissionRequest`, `session/permissionRequest`, `session/permissionResolved` all deleted from protocol types and all application code.
-- **Commands renamed**: `fetchContent` → `resourceRead`, `browseDirectory` → `resourceList`.
-- **IContentRef split**: Plain `IContentRef` interface + `IResourceReponsePart extends IContentRef` for response parts.
-- **Tool result types renamed**: `IToolResultBinaryContent` → `IToolResultEmbeddedResourceContent`, `ToolResultContentType.Binary` → `ToolResultContentType.EmbeddedResource`.
-- **Content result field renamed**: `mimeType` → `contentType` in resource read results.
-- **Response part IDs**: `IMarkdownResponsePart` and `IReasoningResponsePart` now have required `id` fields.
-- **Action partId**: `session/delta` and `session/reasoning` actions now require `partId` to target specific response parts.
+- **SessionStatus enum → bitwise flags**: Changed from string enum (`'idle'`, `'in-progress'`, `'error'`) to numeric bitwise enum (`Idle = 1`, `Error = 2`, `InProgress = 8`, `InputNeeded = 24`). All application code updated to use enum values instead of string literals.
+- **CustomizationStatus → const enum**: No longer re-exportable as a runtime value; removed from library exports (still available as compile-time type).
+- **SessionDelta no-op for nonexistent partId**: `SessionDelta` targeting a `partId` that doesn't exist in `responseParts` is now a no-op. Parts must be created first by `SessionResponsePart`. Tests updated to match.
 
 ### Additive Features Added
 
-- **New resource commands**: `resourceWrite`, `resourceCopy`, `resourceDelete`, `resourceMove` on `AhpClient`.
-- **New actions**: `session/pendingMessageSet`, `session/pendingMessageRemoved`, `session/queuedMessagesReordered`, `session/customizationsChanged`, `session/customizationToggled`, `session/truncated`.
-- **New state fields**: `ISessionState.workingDirectory`, `steeringMessage`, `queuedMessages`, `customizations`; `ISessionSummary.workingDirectory`; `ISessionActiveClient.customizations`; `IAgentInfo.customizations`.
-- **New types**: `Icon`, `ICustomizationRef`, `ISessionCustomization`, `IPendingMessage`, `PendingMessageKind`, `CustomizationStatus`.
-- **New error codes**: `NotFound` (-32008), `PermissionDenied` (-32009), `AlreadyExists` (-32010).
-- **Session forking**: `ICreateSessionParams.fork` with `ISessionForkSource`.
-- **Title now client-dispatchable**: `session/titleChanged` can be dispatched by clients.
-- **Tool call re-confirmation**: `toolCallReady` can be dispatched for running tools (mid-execution permission checks).
-- **Confirmation title**: `IToolCallPendingConfirmationState.confirmationTitle` and `IToolCallReadyAction.confirmationTitle`.
-- **Queued messages**: `ISessionTurnStartedAction.queuedMessageId` for auto-started turns.
-- **Cache tokens**: `IUsageInfo.cacheReadTokens`.
-- **File edit content**: `ToolResultContentType.Resource`, `ToolResultContentType.FileEdit` with `IToolResultResourceContent` and `IToolResultFileEditContent`.
+- **Terminal support**: Full terminal lifecycle management.
+  - New types: `ITerminalInfo`, `ITerminalState`, `ITerminalClaim` (discriminated union: `ITerminalClientClaim`, `ITerminalSessionClaim`), `TerminalClaimKind` enum.
+  - New actions (8): `terminal/data`, `terminal/input`, `terminal/resized`, `terminal/claimed`, `terminal/titleChanged`, `terminal/cwdChanged`, `terminal/exited`, `terminal/cleared`.
+  - New action union types: `ITerminalAction`, `IClientTerminalAction`, `IServerTerminalAction`.
+  - New commands: `createTerminal`, `disposeTerminal` on `AhpClient`.
+  - New reducer: `terminalReducer()` for terminal-scoped state.
+  - `IRootState.terminals` field for server-known terminals.
+  - `ISnapshot.state` widened to include `ITerminalState`.
+  - `StateMirror` updated with terminal state tracking, snapshot handling, and action routing.
+
+- **Session input / elicitation**: Structured input collection from the user during turns.
+  - New types: `ISessionInputRequest`, `ISessionInputQuestion` (6 question kinds: text, number, integer, boolean, single-select, multi-select), `ISessionInputAnswer`, `ISessionInputOption`, `ISessionInputAnswerValue` (5 value kinds).
+  - New enums: `SessionInputQuestionKind`, `SessionInputAnswerValueKind`, `SessionInputAnswerState`, `SessionInputResponseKind`.
+  - New actions: `session/inputRequested`, `session/inputAnswerChanged` (client-dispatchable), `session/inputCompleted` (client-dispatchable).
+  - `ISessionState.inputRequests` field.
+  - `SessionStatus.InputNeeded` bitwise flag for pending input.
+
+- **Session metadata enhancements**:
+  - `ISessionSummary.isRead`, `isDone`, `diffs`, `project` fields.
+  - New types: `ISessionFileDiff`, `IProjectInfo`.
+  - New actions: `session/isReadChanged` (client-dispatchable), `session/isDoneChanged` (client-dispatchable), `session/diffsChanged`.
+  - New notification: `ISessionSummaryChangedNotification` (`notify/sessionSummaryChanged`).
+
+- **Tool call content updates**: Live partial content during tool execution.
+  - New action: `session/toolCallContentChanged`.
+  - `IToolCallRunningState.content` field.
+
+- **New tool result content types**:
+  - `IToolResultTerminalContent` (`ToolResultContentType.Terminal`).
+  - `IToolResultSubagentContent` (`ToolResultContentType.Subagent`).
+
+- **Reducer improvements**:
+  - New helpers: `summaryStatus()`, `refreshSummaryStatus()`, `hasPendingToolCallConfirmation()`.
+  - Existing session actions wrapped with `refreshSummaryStatus()` for correct status derivation.
+  - `isClientDispatchable()` now accepts `ITerminalAction` and returns `IClientTerminalAction`.
 
 ### Application Code Updated
 
-- `AhpClient`: `fetchContent()` → `resourceRead()`, `browseDirectory()` → `resourceList()`, plus new resource commands.
-- `TurnController`: Updated to use `responseParts` for tool call lookups; removed permission request/resolved handling.
-- `OutputFormatter` interface: `onPermissionRequest()` removed from interface and all implementations.
-- `PermissionHandler`: `handlePermission()` method removed (was for `IPermissionRequest`); `handleToolConfirmation()` retained.
-- `SessionWatcher`: `showCurrentState()` walks `responseParts` instead of `streamingText`/`toolCalls`/`reasoning`; tool call lookups updated.
-- `bin.ts`: Helper functions `turnResponseText()` and `turnToolCallCount()` derive values from `responseParts`.
-- Library exports: Updated to new type names, added new exports.
-- All 486 tests updated and passing.
+- `StateMirror`: Added terminal state storage, snapshot handling, and action routing via `terminalReducer`.
+- `AhpClient`: Added `createTerminal()` and `disposeTerminal()` command methods.
+- `bin.ts`: Updated session status display to use `SessionStatus` enum values (handles `Idle`, `InProgress`, `InputNeeded`, `Error`).
+- `src/index.ts`: Exported all new types, enums, actions, commands, notifications, and `terminalReducer`.
+- All 626 tests updated and passing.
 
 ## Intentionally Not Implemented
 
 | Feature | Reason |
 |---------|--------|
-| `session/pendingMessageSet` CLI command | Additive — no existing CLI workflow uses steering/queued messages yet. Can be added as a future `ahpx message` command. |
-| `session/truncated` CLI command | Additive — session truncation is a power-user feature. Can be added as `ahpx session truncate`. |
-| `session/customizationToggled` CLI command | Additive — customization management UX needs design. |
-| Session forking CLI command | Additive — `ahpx session fork` can be added when use case is clearer. |
-| `resourceWrite/Copy/Delete/Move` CLI commands | Client API methods are exposed; CLI commands can be added when there's a use case beyond `browse` and `content`. |
+| Terminal CLI commands (`ahpx terminal create/attach/list`) | Additive — terminal UX needs design. Client API methods are exposed; CLI can be added when use case is clearer. |
+| Session input/elicitation interactive CLI | Additive — requires significant interactive prompt UX (multi-question forms, select menus). `TurnController` and `OutputFormatter` can be extended when this is prioritized. |
+| Session diff display (`ahpx session diffs`) | Additive — can be added as part of `session info` or a dedicated command. |
+| `isRead`/`isDone` CLI commands | Additive — `dispatchAction` can already set these via client-dispatchable actions. CLI surface can be added when needed. |
+| `SessionSummaryChangedNotification` CLI handling | Additive — notification is emitted on the `notification` event for library consumers. CLI integration can be added for real-time session list updates. |
 
-These are all additive features that don't affect correctness. The protocol types, reducers, and client API support them — only CLI surface area is deferred.
+These are all additive features that don't affect correctness. The protocol types, reducers, client API, and library exports support them — only CLI surface area and turn controller integration are deferred.

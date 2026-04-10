@@ -46,7 +46,7 @@ import { PermissionHandler } from "./permissions/index.js";
 import type { PermissionMode } from "./permissions/index.js";
 import { TurnController } from "./prompt/index.js";
 import { ActionType } from "./protocol/actions.js";
-import { ResponsePartKind } from "./protocol/state.js";
+import { ResponsePartKind, SessionStatus } from "./protocol/state.js";
 import type { ITurn } from "./protocol/state.js";
 import { SessionPersistence, SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
 import type { SessionRecord } from "./session/index.js";
@@ -1519,11 +1519,13 @@ session
 
 							for (const s of result.items) {
 								const status =
-									s.status === "in-progress"
-										? pc.yellow("● in-progress")
-										: s.status === "error"
-											? pc.red("● error")
-											: pc.green("● idle");
+									s.status === SessionStatus.Error
+										? pc.red("● error")
+										: s.status === SessionStatus.InputNeeded
+											? pc.yellow("● input-needed")
+											: s.status === SessionStatus.InProgress
+												? pc.yellow("● in-progress")
+												: pc.green("● idle");
 
 								console.log(`  ${pc.bold(pc.cyan(s.resource))}`);
 								console.log(`    ${pc.bold("Provider:")} ${s.provider}`);

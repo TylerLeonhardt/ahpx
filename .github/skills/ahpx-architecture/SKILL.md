@@ -11,7 +11,7 @@ ahpx is a CLI client for the Agent Host Protocol. It connects to AHP servers via
 WebSocket, speaks JSON-RPC 2.0, and manages AI agent sessions with streaming
 responses, tool calls, and permissions.
 
-**485 tests across 28 test files.** ~9,800 lines of TypeScript — ~6,700 lines of application code plus ~3,100
+**626 tests across 32 test files.** ~10,500 lines of TypeScript — ~7,000 lines of application code plus ~3,500
 lines of vendored AHP protocol type definitions.
 
 ## Directory structure
@@ -191,14 +191,18 @@ class StateMirror {
   get seq(): number
   getSession(uri: URI): ISessionState | undefined
   get sessionUris(): URI[]
+  getTerminal(uri: URI): ITerminalState | undefined
+  get terminalUris(): URI[]
   applySnapshot(snapshot: ISnapshot): void
   applyAction(envelope: IActionEnvelope): void
   removeSession(uri: URI): void
+  removeTerminal(uri: URI): void
 }
 ```
 
-Routes actions: root actions (`root/agentsChanged`, `root/activeSessionsChanged`)
-go through `rootReducer`; all others through `sessionReducer`.
+Routes actions: root actions (`root/agentsChanged`, `root/activeSessionsChanged`,
+`root/terminalsChanged`) go through `rootReducer`; terminal actions (`terminal/*`)
+go through `terminalReducer`; all others through `sessionReducer`.
 
 ### Session handle (`client/session-handle.ts`)
 
@@ -561,21 +565,26 @@ Error class hierarchy: `AhpxError` → `UsageError`, `TimeoutError`,
 ## Vendored protocol types (`src/protocol/`)
 
 The protocol types are vendored from the
-[agent-host-protocol](https://github.com/anthropics/agent-host-protocol)
+[agent-host-protocol](https://github.com/microsoft/agent-host-protocol)
 repository. These are the source of truth for the AHP type system.
 
 Key files:
-- `state.ts` — `IRootState`, `ISessionState`, `IActiveTurn`, `ITurn`,
-  `IToolCallState` (discriminated union with 6 statuses)
-- `actions.ts` — `ActionType` enum (25 members), all action interfaces
+- `state.ts` — `IRootState`, `ISessionState`, `ITerminalState`, `IActiveTurn`,
+  `ITurn`, `IToolCallState` (discriminated union with 6 statuses),
+  `ISessionInputRequest` and related input/elicitation types
+- `actions.ts` — `ActionType` enum (38 members: 2 root, 20 session, 8 terminal,
+  plus input/metadata actions), all action interfaces
 - `commands.ts` — `ICommandMap` mapping method names to param/result types
-- `reducers.ts` — `rootReducer()` and `sessionReducer()` pure functions
+  (16 commands including `createTerminal`/`disposeTerminal`)
+- `reducers.ts` — `rootReducer()`, `sessionReducer()`, and `terminalReducer()`
+  pure functions
 - `messages.ts` — JSON-RPC message types
+- `notifications.ts` — `SessionSummaryChanged` notification for live sync
 - `errors.ts` — `ErrorCode` enum (standard + AHP-specific)
 - `action-origin.generated.ts` — which actions are client-dispatchable
 
 When updating protocol types, copy from the upstream `types/` directory and
-ensure the vendored files stay in sync.
+ensure the vendored files stay in sync. See `AHP_SPEC_SYNC.md` for sync history.
 
 ## Logging (`logger.ts`)
 

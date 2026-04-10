@@ -27,7 +27,7 @@ import type {
 	ISubscribeResult,
 } from "../protocol/commands.js";
 import type { IProtocolNotification } from "../protocol/notifications.js";
-import type { URI } from "../protocol/state.js";
+import type { ITerminalClaim, URI } from "../protocol/state.js";
 import { PROTOCOL_VERSION } from "../protocol/version/registry.js";
 import { ProtocolLayer, type ProtocolLayerOptions } from "./protocol.js";
 import { SessionHandle } from "./session-handle.js";
@@ -268,6 +268,34 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		this._state.removeSession(sessionUri);
 		// Remove tracked handle if one exists (may not if using low-level API)
 		this._sessions.delete(sessionUri);
+		return result;
+	}
+
+	/**
+	 * Create a new terminal on the server.
+	 */
+	async createTerminal(
+		terminalUri: string,
+		claim: ITerminalClaim,
+		options?: { name?: string; cwd?: string; cols?: number; rows?: number },
+	): Promise<null> {
+		this.ensureConnected();
+		return this.protocol!.request("createTerminal", {
+			terminal: terminalUri,
+			claim,
+			...options,
+		});
+	}
+
+	/**
+	 * Dispose a terminal and kill its process if still running.
+	 */
+	async disposeTerminal(terminalUri: string): Promise<null> {
+		this.ensureConnected();
+		const result = await this.protocol!.request("disposeTerminal", {
+			terminal: terminalUri,
+		});
+		this._state.removeTerminal(terminalUri);
 		return result;
 	}
 
