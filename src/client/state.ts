@@ -5,14 +5,21 @@
  * kept in sync by applying action envelopes from the server.
  */
 
-import type { IRootAction, ISessionAction } from "../protocol/action-origin.generated.js";
+import type { IRootAction, ISessionAction, ITerminalAction } from "../protocol/action-origin.generated.js";
 import type { IActionEnvelope } from "../protocol/actions.js";
 import { ActionType } from "../protocol/actions.js";
-import { rootReducer, sessionReducer } from "../protocol/reducers.js";
-import type { IRootState, ISessionState, ISnapshot, URI } from "../protocol/state.js";
+import { rootReducer, sessionReducer, terminalReducer } from "../protocol/reducers.js";
+import type { IRootState, ISessionState, ISnapshot, ITerminalState, URI } from "../protocol/state.js";
 
 /** Root actions operate on the root state tree. */
-const ROOT_ACTION_TYPES = new Set<string>([ActionType.RootAgentsChanged, ActionType.RootActiveSessionsChanged]);
+const ROOT_ACTION_TYPES = new Set<string>([
+	ActionType.RootAgentsChanged,
+	ActionType.RootActiveSessionsChanged,
+	ActionType.RootTerminalsChanged,
+]);
+
+/** Terminal actions have type starting with this prefix. */
+const TERMINAL_ACTION_PREFIX = "terminal/";
 
 /**
  * Client-side state mirror that tracks root and session states
@@ -21,6 +28,7 @@ const ROOT_ACTION_TYPES = new Set<string>([ActionType.RootAgentsChanged, ActionT
 export class StateMirror {
 	private rootState: IRootState = { agents: [] };
 	private sessions = new Map<URI, ISessionState>();
+	private terminals = new Map<URI, ITerminalState>();
 	private serverSeq = 0;
 	private pendingActions = new Map<URI, IActionEnvelope[]>();
 
@@ -42,6 +50,22 @@ export class StateMirror {
 	/** All tracked session URIs. */
 	get sessionUris(): URI[] {
 		return [...this.sessions.keys()];
+	}
+
+	/** Get a terminal state by URI. */
+	getTerminal(uri: URI): ITerminalState | undefined {
+		return this.terminals.get(uri);
+	}
+
+	/** All tracked terminal URIs. */
+	get terminalUris(): URI[] {
+		return [...this.terminals.keys()];
+	}
+
+	/** Remove a terminal from tracking. */
+	removeTerminal(uri: URI): void {
+		this.terminals.delete(uri);
+		this.pendingActions.delete(uri);
 	}
 
 	/**
@@ -78,6 +102,26 @@ export class StateMirror {
 					}
 				}
 			}
+		} else if ("claim" in snapshot.state) {
+			const terminalState = snapshot.state as ITerminalState;
+			this.terminals.set(snapshot.resource, terminalState);
+
+			// Replay any buffered terminal actions
+			const buffered = this.pendingActions.get(snapshot.resource);
+			if (buffered) {
+				this.pendingActions.delete(snapshot.resource);
+				for (const env of buffered) {
+					if (env.serverSeq > snapshot.fromSeq) {
+						const current = this.terminals.get(snapshot.resource);
+						if (current) {
+							this.terminals.set(
+								snapshot.resource,
+								terminalReducer(current, env.action as ITerminalAction & { terminal?: URI }),
+							);
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -91,6 +135,23 @@ export class StateMirror {
 
 		if (ROOT_ACTION_TYPES.has(action.type)) {
 			this.rootState = rootReducer(this.rootState, action as IRootAction);
+		} else if (action.type.startsWith(TERMINAL_ACTION_PREFIX)) {
+			const terminalAction = action as ITerminalAction & { terminal?: URI };
+			const terminalUri = terminalAction.terminal;
+			if (terminalUri) {
+				const current = this.terminals.get(terminalUri);
+				if (current) {
+					this.terminals.set(terminalUri, terminalReducer(current, terminalAction));
+				} else {
+					// Terminal not yet registered — buffer for replay after applySnapshot
+					let buffer = this.pendingActions.get(terminalUri);
+					if (!buffer) {
+						buffer = [];
+						this.pendingActions.set(terminalUri, buffer);
+					}
+					buffer.push(envelope);
+				}
+			}
 		} else {
 			// Session action — find the session by URI
 			const sessionAction = action as ISessionAction & { session?: URI };

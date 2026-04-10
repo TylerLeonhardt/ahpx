@@ -143,7 +143,7 @@ describe("StateMirror", () => {
 			expect(session.summary.status).toBe(SessionStatus.Idle);
 		});
 
-		it("handles SessionDelta before SessionResponsePart by creating a new part", () => {
+		it("treats SessionDelta targeting a nonexistent partId as a no-op", () => {
 			const mirror = new StateMirror();
 			mirror.applySnapshot({
 				resource: "copilot:/s1",
@@ -164,7 +164,7 @@ describe("StateMirror", () => {
 				),
 			);
 
-			// Delta arrives BEFORE the SessionResponsePart that creates it
+			// Delta arrives BEFORE the SessionResponsePart — should be a no-op
 			mirror.applyAction(
 				envelope(
 					{
@@ -178,33 +178,12 @@ describe("StateMirror", () => {
 				),
 			);
 
-			let session = mirror.getSession("copilot:/s1")!;
-			let mdPart = session.activeTurn!.responseParts.find(
-				(p) => p.kind === ResponsePartKind.Markdown && p.id === "part-1",
-			);
-			expect(mdPart).toBeDefined();
-			expect((mdPart as { content: string }).content).toBe("First words");
-
-			// Subsequent deltas should append to the auto-created part
-			mirror.applyAction(
-				envelope(
-					{
-						type: ActionType.SessionDelta,
-						session: "copilot:/s1",
-						turnId: "t1",
-						partId: "part-1",
-						content: " more text",
-					},
-					3,
-				),
-			);
-
-			session = mirror.getSession("copilot:/s1")!;
-			mdPart = session.activeTurn!.responseParts.find((p) => p.kind === ResponsePartKind.Markdown && p.id === "part-1");
-			expect((mdPart as { content: string }).content).toBe("First words more text");
+			const session = mirror.getSession("copilot:/s1")!;
+			// No part should be created — delta targeting nonexistent partId is a no-op
+			expect(session.activeTurn!.responseParts).toHaveLength(0);
 		});
 
-		it("does not duplicate parts when SessionResponsePart arrives after delta-created part", () => {
+		it("creates part via SessionResponsePart then appends via delta", () => {
 			const mirror = new StateMirror();
 			mirror.applySnapshot({
 				resource: "copilot:/s1",
@@ -224,21 +203,7 @@ describe("StateMirror", () => {
 				),
 			);
 
-			// Delta arrives first, auto-creates the part
-			mirror.applyAction(
-				envelope(
-					{
-						type: ActionType.SessionDelta,
-						session: "copilot:/s1",
-						turnId: "t1",
-						partId: "part-1",
-						content: "First words",
-					},
-					2,
-				),
-			);
-
-			// SessionResponsePart arrives late — should NOT create a duplicate
+			// SessionResponsePart creates the part first
 			mirror.applyAction(
 				envelope(
 					{
@@ -247,18 +212,33 @@ describe("StateMirror", () => {
 						turnId: "t1",
 						part: { kind: ResponsePartKind.Markdown, id: "part-1", content: "" },
 					},
+					2,
+				),
+			);
+
+			let session = mirror.getSession("copilot:/s1")!;
+			expect(session.activeTurn!.responseParts).toHaveLength(1);
+
+			// Now delta appends to the existing part
+			mirror.applyAction(
+				envelope(
+					{
+						type: ActionType.SessionDelta,
+						session: "copilot:/s1",
+						turnId: "t1",
+						partId: "part-1",
+						content: "Hello world",
+					},
 					3,
 				),
 			);
 
-			const session = mirror.getSession("copilot:/s1")!;
-			const parts = session.activeTurn!.responseParts.filter(
+			session = mirror.getSession("copilot:/s1")!;
+			const mdPart = session.activeTurn!.responseParts.find(
 				(p) => p.kind === ResponsePartKind.Markdown && p.id === "part-1",
 			);
-			// Should be exactly 1 part, not 2
-			expect(parts).toHaveLength(1);
-			// And it should retain the delta content, not be overwritten with empty
-			expect((parts[0] as { content: string }).content).toBe("First words");
+			expect(mdPart).toBeDefined();
+			expect((mdPart as { content: string }).content).toBe("Hello world");
 		});
 
 		it("handles SessionTurnStarted and SessionDelta", () => {

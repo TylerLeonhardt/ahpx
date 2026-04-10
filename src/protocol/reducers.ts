@@ -1,13 +1,13 @@
 /**
- * Reducer Functions — Pure state reducers for AHP root and session state.
+ * Reducer Functions — Pure state reducers for AHP root, session, and terminal state.
  *
  * @module reducers
  */
 
 import { ActionType } from './actions.js';
-import type { IRootState, ISessionState, IToolCallState, IResponsePart, IToolCallResponsePart, ITurn, IPendingMessage } from './state.js';
+import type { IRootState, ISessionInputRequest, ISessionState, ITerminalState, IToolCallState, IResponsePart, IToolCallResponsePart, ITurn, IPendingMessage } from './state.js';
 import { SessionLifecycle, SessionStatus, TurnState, ToolCallStatus, ToolCallConfirmationReason, ToolCallCancellationReason, ResponsePartKind, PendingMessageKind } from './state.js';
-import type { IRootAction, ISessionAction, IClientSessionAction } from './action-origin.generated.js';
+import type { IRootAction, ISessionAction, IClientSessionAction, ITerminalAction, IClientTerminalAction } from './action-origin.generated.js';
 import { IS_CLIENT_DISPATCHABLE } from './action-origin.generated.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -36,6 +36,45 @@ function tcBase(tc: IToolCallState) {
   };
 }
 
+/** Returns `true` if the active turn has any tool call awaiting user confirmation. */
+function hasPendingToolCallConfirmation(state: ISessionState): boolean {
+  if (!state.activeTurn) {
+    return false;
+  }
+  return state.activeTurn.responseParts.some(part =>
+    part.kind === ResponsePartKind.ToolCall
+    && (part.toolCall.status === ToolCallStatus.PendingConfirmation
+      || part.toolCall.status === ToolCallStatus.PendingResultConfirmation),
+  );
+}
+
+/** Derives the summary status from live session work. */
+function summaryStatus(state: ISessionState, terminalStatus?: SessionStatus.Error): SessionStatus {
+  if (terminalStatus) {
+    return terminalStatus;
+  }
+  if ((state.inputRequests?.length ?? 0) > 0 || hasPendingToolCallConfirmation(state)) {
+    return SessionStatus.InputNeeded;
+  }
+  if (state.activeTurn) {
+    return SessionStatus.InProgress;
+  }
+  return SessionStatus.Idle;
+}
+
+/**
+ * Returns a state with `summary.status` recomputed. Use this after reducers
+ * that change data which feeds into {@link summaryStatus} (e.g. tool call
+ * lifecycle transitions that may enter or leave a pending-confirmation state).
+ */
+function refreshSummaryStatus(state: ISessionState): ISessionState {
+  const status = summaryStatus(state);
+  if (status === state.summary.status) {
+    return state;
+  }
+  return { ...state, summary: { ...state.summary, status } };
+}
+
 /**
  * Ends the active turn, finalizing it into a completed turn record.
  *
@@ -46,7 +85,7 @@ function endTurn(
   state: ISessionState,
   turnId: string,
   turnState: TurnState,
-  summaryStatus: SessionStatus,
+  terminalStatus?: SessionStatus.Error,
   error?: { errorType: string; message: string; stack?: string },
 ): ISessionState {
   if (!state.activeTurn || state.activeTurn.id !== turnId) {
@@ -84,12 +123,31 @@ function endTurn(
     error,
   };
 
-  return {
+  const next: ISessionState = {
     ...state,
     turns: [...state.turns, turn],
     activeTurn: undefined,
-    summary: { ...state.summary, status: summaryStatus, modifiedAt: Date.now() },
+    summary: { ...state.summary, modifiedAt: Date.now() },
   };
+  delete next.inputRequests;
+  return {
+    ...next,
+    summary: { ...next.summary, status: summaryStatus(next, terminalStatus) },
+  };
+}
+
+function upsertInputRequest(state: ISessionState, request: ISessionInputRequest): ISessionState {
+  const existing = state.inputRequests ?? [];
+  const idx = existing.findIndex(r => r.id === request.id);
+  const inputRequests = [...existing];
+  if (idx >= 0) {
+    const answers = request.answers ?? inputRequests[idx].answers;
+    inputRequests[idx] = { ...request, answers };
+  } else {
+    inputRequests.push(request);
+  }
+  const next = { ...state, inputRequests };
+  return { ...next, summary: { ...next.summary, status: summaryStatus(next), modifiedAt: Date.now(), isRead: false } };
 }
 
 /**
@@ -184,6 +242,9 @@ export function rootReducer(state: IRootState, action: IRootAction, log?: (msg: 
     case ActionType.RootActiveSessionsChanged:
       return { ...state, activeSessions: action.activeSessions };
 
+    case ActionType.RootTerminalsChanged:
+      return { ...state, terminals: action.terminals };
+
     default:
       softAssertNever(action, log);
       return state;
@@ -218,13 +279,16 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
     case ActionType.SessionTurnStarted: {
       let next: ISessionState = {
         ...state,
-        summary: { ...state.summary, status: SessionStatus.InProgress, modifiedAt: Date.now() },
         activeTurn: {
           id: action.turnId,
           userMessage: action.userMessage,
           responseParts: [],
           usage: undefined,
         },
+      };
+      next = {
+        ...next,
+        summary: { ...next.summary, status: summaryStatus(next), modifiedAt: Date.now(), isRead: false },
       };
 
       // If this turn was auto-started from a pending message, remove it
@@ -241,48 +305,17 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
       return next;
     }
 
-    case ActionType.SessionDelta: {
-      const updated = updateResponsePart(state, action.turnId, action.partId, part => {
+    case ActionType.SessionDelta:
+      return updateResponsePart(state, action.turnId, action.partId, part => {
         if (part.kind === ResponsePartKind.Markdown) {
           return { ...part, content: part.content + action.content };
         }
         return part;
       });
-      // If the part doesn't exist yet (delta arrived before SessionResponsePart),
-      // create a new Markdown part with the delta content instead of dropping it
-      if (updated === state && state.activeTurn && state.activeTurn.id === action.turnId) {
-        return {
-          ...state,
-          activeTurn: {
-            ...state.activeTurn,
-            responseParts: [
-              ...state.activeTurn.responseParts,
-              { kind: ResponsePartKind.Markdown, id: action.partId, content: action.content },
-            ],
-          },
-        };
-      }
-      return updated;
-    }
 
-    case ActionType.SessionResponsePart: {
+    case ActionType.SessionResponsePart:
       if (!state.activeTurn || state.activeTurn.id !== action.turnId) {
         return state;
-      }
-      // Skip if a part with this ID already exists (e.g., auto-created by an earlier SessionDelta)
-      const newPartId = action.part.kind === ResponsePartKind.ToolCall
-        ? action.part.toolCall.toolCallId
-        : 'id' in action.part ? action.part.id : undefined;
-      if (newPartId !== undefined) {
-        const exists = state.activeTurn.responseParts.some(p => {
-          const id = p.kind === ResponsePartKind.ToolCall
-            ? p.toolCall.toolCallId
-            : 'id' in p ? p.id : undefined;
-          return id === newPartId;
-        });
-        if (exists) {
-          return state;
-        }
       }
       return {
         ...state,
@@ -291,13 +324,12 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
           responseParts: [...state.activeTurn.responseParts, action.part],
         },
       };
-    }
 
     case ActionType.SessionTurnComplete:
-      return endTurn(state, action.turnId, TurnState.Complete, SessionStatus.Idle);
+      return endTurn(state, action.turnId, TurnState.Complete);
 
     case ActionType.SessionTurnCancelled:
-      return endTurn(state, action.turnId, TurnState.Cancelled, SessionStatus.Idle);
+      return endTurn(state, action.turnId, TurnState.Cancelled);
 
     case ActionType.SessionError:
       return endTurn(state, action.turnId, TurnState.Error, SessionStatus.Error, action.error);
@@ -342,7 +374,7 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
       });
 
     case ActionType.SessionToolCallReady:
-      return updateToolCallInParts(state, action.turnId, action.toolCallId, tc => {
+      return refreshSummaryStatus(updateToolCallInParts(state, action.turnId, action.toolCallId, tc => {
         if (tc.status !== ToolCallStatus.Streaming && tc.status !== ToolCallStatus.Running) {
           return tc;
         }
@@ -363,10 +395,10 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
           toolInput: action.toolInput,
           confirmationTitle: action.confirmationTitle,
         };
-      });
+      }));
 
     case ActionType.SessionToolCallConfirmed:
-      return updateToolCallInParts(state, action.turnId, action.toolCallId, tc => {
+      return refreshSummaryStatus(updateToolCallInParts(state, action.turnId, action.toolCallId, tc => {
         if (tc.status !== ToolCallStatus.PendingConfirmation) {
           return tc;
         }
@@ -389,10 +421,10 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
           reasonMessage: action.reasonMessage,
           userSuggestion: action.userSuggestion,
         };
-      });
+      }));
 
     case ActionType.SessionToolCallComplete:
-      return updateToolCallInParts(state, action.turnId, action.toolCallId, tc => {
+      return refreshSummaryStatus(updateToolCallInParts(state, action.turnId, action.toolCallId, tc => {
         if (tc.status !== ToolCallStatus.Running && tc.status !== ToolCallStatus.PendingConfirmation) {
           return tc;
         }
@@ -418,10 +450,10 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
           confirmed,
           ...action.result,
         };
-      });
+      }));
 
     case ActionType.SessionToolCallResultConfirmed:
-      return updateToolCallInParts(state, action.turnId, action.toolCallId, tc => {
+      return refreshSummaryStatus(updateToolCallInParts(state, action.turnId, action.toolCallId, tc => {
         if (tc.status !== ToolCallStatus.PendingResultConfirmation) {
           return tc;
         }
@@ -446,6 +478,17 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
           invocationMessage: tc.invocationMessage,
           toolInput: tc.toolInput,
           reason: ToolCallCancellationReason.ResultDenied,
+        };
+      }));
+
+    case ActionType.SessionToolCallContentChanged:
+      return updateToolCallInParts(state, action.turnId, action.toolCallId, tc => {
+        if (tc.status !== ToolCallStatus.Running) {
+          return tc;
+        }
+        return {
+          ...tc,
+          content: action.content,
         };
       });
 
@@ -478,6 +521,24 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
       return {
         ...state,
         summary: { ...state.summary, model: action.model, modifiedAt: Date.now() },
+      };
+
+    case ActionType.SessionIsReadChanged:
+      return {
+        ...state,
+        summary: { ...state.summary, isRead: action.isRead },
+      };
+
+    case ActionType.SessionIsDoneChanged:
+      return {
+        ...state,
+        summary: { ...state.summary, isDone: action.isDone },
+      };
+
+    case ActionType.SessionDiffsChanged:
+      return {
+        ...state,
+        summary: { ...state.summary, diffs: action.diffs },
       };
 
     case ActionType.SessionServerToolsChanged:
@@ -530,11 +591,66 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
         }
         turns = state.turns.slice(0, idx + 1);
       }
-      return {
+      const next: ISessionState = {
         ...state,
         turns,
         activeTurn: undefined,
-        summary: { ...state.summary, status: SessionStatus.Idle, modifiedAt: Date.now() },
+        summary: { ...state.summary, modifiedAt: Date.now() },
+      };
+      delete next.inputRequests;
+      return {
+        ...next,
+        summary: { ...next.summary, status: summaryStatus(next) },
+      };
+    }
+
+    // ── Session Input Requests ─────────────────────────────────────────────
+
+    case ActionType.SessionInputRequested:
+      return upsertInputRequest(state, action.request);
+
+    case ActionType.SessionInputAnswerChanged: {
+      const existing = state.inputRequests;
+      const idx = existing?.findIndex(request => request.id === action.requestId) ?? -1;
+      if (!existing || idx < 0) {
+        return state;
+      }
+      const request = existing[idx];
+      const answers = { ...(request.answers ?? {}) };
+      if (action.answer === undefined) {
+        delete answers[action.questionId];
+      } else {
+        answers[action.questionId] = action.answer;
+      }
+      const updated = [...existing];
+      updated[idx] = {
+        ...request,
+        answers: Object.keys(answers).length > 0 ? answers : undefined,
+      };
+      return {
+        ...state,
+        inputRequests: updated,
+        summary: { ...state.summary, modifiedAt: Date.now() },
+      };
+    }
+
+    case ActionType.SessionInputCompleted: {
+      const existing = state.inputRequests;
+      if (!existing?.some(request => request.id === action.requestId)) {
+        return state;
+      }
+      const inputRequests = existing.filter(request => request.id !== action.requestId);
+      const next: ISessionState = {
+        ...state,
+      };
+      if (inputRequests.length > 0) {
+        next.inputRequests = inputRequests;
+      } else {
+        delete next.inputRequests;
+      }
+      return {
+        ...next,
+        summary: { ...next.summary, status: summaryStatus(next), modifiedAt: Date.now() },
       };
     }
 
@@ -603,14 +719,53 @@ export function sessionReducer(state: ISessionState, action: ISessionAction, log
   }
 }
 
+// ─── Terminal Reducer ────────────────────────────────────────────────────────
+
+/**
+ * Pure reducer for terminal state. Handles all {@link ITerminalAction} variants.
+ */
+export function terminalReducer(state: ITerminalState, action: ITerminalAction, log?: (msg: string) => void): ITerminalState {
+  switch (action.type) {
+    case ActionType.TerminalData:
+      return { ...state, content: state.content + action.data };
+
+    case ActionType.TerminalInput:
+      // Side-effect-only: the server forwards to the pty.
+      // No state change in the reducer.
+      return state;
+
+    case ActionType.TerminalResized:
+      return { ...state, cols: action.cols, rows: action.rows };
+
+    case ActionType.TerminalClaimed:
+      return { ...state, claim: action.claim };
+
+    case ActionType.TerminalTitleChanged:
+      return { ...state, title: action.title };
+
+    case ActionType.TerminalCwdChanged:
+      return { ...state, cwd: action.cwd };
+
+    case ActionType.TerminalExited:
+      return { ...state, exitCode: action.exitCode };
+
+    case ActionType.TerminalCleared:
+      return { ...state, content: '' };
+
+    default:
+      softAssertNever(action, log);
+      return state;
+  }
+}
+
 // ─── Dispatch Validation ─────────────────────────────────────────────────────
 
 /**
- * Type guard that checks whether an action may be dispatched by a client.
+ * Type guard that checks whether a session action may be dispatched by a client.
  *
  * Servers SHOULD call this to validate incoming `dispatchAction` requests
  * and reject any action the client is not allowed to originate.
  */
-export function isClientDispatchable(action: ISessionAction): action is IClientSessionAction {
+export function isClientDispatchable(action: ISessionAction | ITerminalAction): action is IClientSessionAction | IClientTerminalAction {
   return IS_CLIENT_DISPATCHABLE[action.type];
 }

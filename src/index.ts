@@ -117,6 +117,27 @@ export type {
 	IMarkdownResponsePart,
 	IToolCallResponsePart,
 	IReasoningResponsePart,
+	IProjectInfo,
+	ISessionFileDiff,
+	ITerminalInfo,
+	ITerminalClientClaim,
+	ITerminalSessionClaim,
+	ITerminalClaim,
+	ITerminalState,
+	ISessionInputRequest,
+	ISessionInputQuestion,
+	ISessionInputTextQuestion,
+	ISessionInputNumberQuestion,
+	ISessionInputBooleanQuestion,
+	ISessionInputSingleSelectQuestion,
+	ISessionInputMultiSelectQuestion,
+	ISessionInputOption,
+	ISessionInputAnswer,
+	ISessionInputAnswered,
+	ISessionInputSkipped,
+	ISessionInputAnswerValue,
+	IToolResultTerminalContent,
+	IToolResultSubagentContent,
 } from "./protocol/index.js";
 
 export type {
@@ -138,12 +159,39 @@ export {
 	ToolCallCancellationReason,
 	ToolResultContentType,
 	PendingMessageKind,
-	CustomizationStatus,
+	SessionInputAnswerState,
+	SessionInputAnswerValueKind,
+	SessionInputQuestionKind,
+	SessionInputResponseKind,
+	TerminalClaimKind,
 } from "./protocol/index.js";
 
 // Action types
 export type { IActionEnvelope, IStateAction } from "./protocol/index.js";
 export { ActionType } from "./protocol/index.js";
+
+// Action interfaces
+export type {
+	ISessionToolCallContentChangedAction,
+	ISessionInputRequestedAction,
+	ISessionInputAnswerChangedAction,
+	ISessionInputCompletedAction,
+	ISessionIsReadChangedAction,
+	ISessionIsDoneChangedAction,
+	ISessionDiffsChangedAction,
+	IRootTerminalsChangedAction,
+	ITerminalAction,
+	IClientTerminalAction,
+	IServerTerminalAction,
+	ITerminalDataAction,
+	ITerminalInputAction,
+	ITerminalResizedAction,
+	ITerminalClaimedAction,
+	ITerminalTitleChangedAction,
+	ITerminalCwdChangedAction,
+	ITerminalExitedAction,
+	ITerminalClearedAction,
+} from "./protocol/index.js";
 
 // Command result types (returned from AhpClient methods)
 export type {
@@ -163,12 +211,17 @@ export type {
 	IResourceDeleteResult,
 	IResourceMoveParams,
 	IResourceMoveResult,
+	ICreateTerminalParams,
+	IDisposeTerminalParams,
 } from "./protocol/index.js";
 
 export { ContentEncoding, ReconnectResultType } from "./protocol/index.js";
 
 // Notification types (emitted by AhpClient 'notification' event)
-export type { IProtocolNotification } from "./protocol/index.js";
+export type { IProtocolNotification, ISessionSummaryChangedNotification } from "./protocol/index.js";
 
 // Notification enums
 export { NotificationType, AuthRequiredReason } from "./protocol/index.js";
+
+// Reducers
+export { terminalReducer } from "./protocol/index.js";
