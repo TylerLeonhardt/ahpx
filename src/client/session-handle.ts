@@ -284,9 +284,14 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 				});
 			};
 
+			const onError = (err: Error) => {
+				finish("error", err.message);
+			};
+
 			const cleanup = () => {
 				if (timer !== undefined) clearTimeout(timer);
 				this.removeListener("action", onAction);
+				this.removeListener("error", onError);
 				this._activeTurnId = undefined;
 			};
 
@@ -308,8 +313,9 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 				}, options.timeout);
 			}
 
-			// Listen for session-scoped actions
+			// Listen for session-scoped actions and connection errors
 			this.on("action", onAction);
+			this.on("error", onError);
 
 			// Dispatch turn start
 			this.client.dispatchAction({

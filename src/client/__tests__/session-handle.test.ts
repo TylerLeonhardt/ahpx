@@ -609,6 +609,142 @@ describe("SessionHandle", () => {
 				vi.useRealTimers();
 			}
 		});
+
+		it("resolves with error state on disconnect mid-turn", async () => {
+			const { client, emitAction, dispatched, emitDisconnected, setSessionState } = createMockClient();
+			setSessionState(SESSION_URI, makeSessionState());
+			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
+			// Prevent unhandled error from _onDisconnect propagating
+			handle.on("error", () => {});
+
+			const promptPromise = handle.sendPrompt("Hello");
+			const turnId = (dispatched[0] as { turnId: string }).turnId;
+
+			// Simulate partial response before disconnect
+			emitAction(
+				envelope({
+					type: ActionType.SessionDelta,
+					session: SESSION_URI,
+					turnId,
+					partId: "part-1",
+					content: "partial ",
+				}),
+			);
+
+			// Simulate WebSocket disconnect
+			emitDisconnected(1006, "Connection reset");
+
+			const result = await promptPromise;
+			expect(result.state).toBe("error");
+			expect(result.error).toContain("Connection lost");
+			expect(result.turnId).toBe(turnId);
+		});
+
+		it("preserves accumulated text on disconnect", async () => {
+			const { client, emitAction, dispatched, emitDisconnected, setSessionState } = createMockClient();
+			setSessionState(SESSION_URI, makeSessionState());
+			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
+			handle.on("error", () => {});
+
+			const promptPromise = handle.sendPrompt("Hello");
+			const turnId = (dispatched[0] as { turnId: string }).turnId;
+
+			// Accumulate several deltas
+			emitAction(
+				envelope({
+					type: ActionType.SessionDelta,
+					session: SESSION_URI,
+					turnId,
+					partId: "part-1",
+					content: "Hello, ",
+				}),
+			);
+			emitAction(
+				envelope({
+					type: ActionType.SessionDelta,
+					session: SESSION_URI,
+					turnId,
+					partId: "part-1",
+					content: "I am working on ",
+				}),
+			);
+			emitAction(
+				envelope({
+					type: ActionType.SessionDelta,
+					session: SESSION_URI,
+					turnId,
+					partId: "part-1",
+					content: "your request",
+				}),
+			);
+
+			// Disconnect mid-stream
+			emitDisconnected(1006, "Connection lost");
+
+			const result = await promptPromise;
+			expect(result.responseText).toBe("Hello, I am working on your request");
+			expect(result.state).toBe("error");
+		});
+
+		it("cleans up listeners after disconnect", async () => {
+			const { client, emitDisconnected, setSessionState } = createMockClient();
+			setSessionState(SESSION_URI, makeSessionState());
+			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
+			handle.on("error", () => {});
+
+			const actionListenersBefore = handle.listenerCount("action");
+			const errorListenersBefore = handle.listenerCount("error");
+
+			const promptPromise = handle.sendPrompt("Hello");
+
+			// sendPrompt adds one action listener and one error listener
+			expect(handle.listenerCount("action")).toBe(actionListenersBefore + 1);
+			expect(handle.listenerCount("error")).toBe(errorListenersBefore + 1);
+
+			// Disconnect triggers cleanup
+			emitDisconnected(1006, "gone");
+
+			await promptPromise;
+
+			// Listeners should be back to pre-sendPrompt counts
+			expect(handle.listenerCount("action")).toBe(actionListenersBefore);
+			expect(handle.listenerCount("error")).toBe(errorListenersBefore);
+		});
+
+		it("normal completion still works (no regression from error listener)", async () => {
+			const { client, dispatched, emitAction, setSessionState } = createMockClient();
+			setSessionState(SESSION_URI, makeSessionState());
+			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
+
+			const promptPromise = handle.sendPrompt("Hello");
+			const turnId = (dispatched[0] as { turnId: string }).turnId;
+
+			emitAction(
+				envelope({
+					type: ActionType.SessionDelta,
+					session: SESSION_URI,
+					turnId,
+					partId: "part-1",
+					content: "All done!",
+				}),
+			);
+			emitAction(
+				envelope({
+					type: ActionType.SessionTurnComplete,
+					session: SESSION_URI,
+					turnId,
+				}),
+			);
+
+			const result = await promptPromise;
+			expect(result.state).toBe("complete");
+			expect(result.responseText).toBe("All done!");
+			expect(result.error).toBeUndefined();
+
+			// Error listener should be cleaned up
+			// Only the base error handler from the test remains
+			expect(handle.listenerCount("error")).toBe(0);
+		});
 	});
 
 	describe("cancelTurn", () => {
