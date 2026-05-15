@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ActionType } from "../../protocol/actions.js";
-import type { IActionEnvelope } from "../../protocol/actions.js";
+import type { ActionEnvelope } from "../../protocol/actions.js";
 import {
 	PendingMessageKind,
 	ResponsePartKind,
@@ -9,10 +9,10 @@ import {
 	ToolCallStatus,
 	TurnState,
 } from "../../protocol/state.js";
-import type { ISessionState, ISnapshot } from "../../protocol/state.js";
+import type { SessionState, Snapshot } from "../../protocol/state.js";
 import { StateMirror } from "../state.js";
 
-function makeSessionState(overrides: Partial<ISessionState> = {}): ISessionState {
+function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 	return {
 		summary: {
 			resource: "copilot:/test-session",
@@ -28,7 +28,7 @@ function makeSessionState(overrides: Partial<ISessionState> = {}): ISessionState
 	};
 }
 
-function envelope(action: IActionEnvelope["action"], seq: number): IActionEnvelope {
+function envelope(action: ActionEnvelope["action"], seq: number): ActionEnvelope {
 	return { action, serverSeq: seq, origin: undefined };
 }
 
@@ -36,7 +36,7 @@ describe("StateMirror", () => {
 	describe("snapshots", () => {
 		it("applies a root snapshot", () => {
 			const mirror = new StateMirror();
-			const snapshot: ISnapshot = {
+			const snapshot: Snapshot = {
 				resource: "agenthost:/root",
 				state: {
 					agents: [
@@ -63,7 +63,7 @@ describe("StateMirror", () => {
 		it("applies a session snapshot", () => {
 			const mirror = new StateMirror();
 			const state = makeSessionState();
-			const snapshot: ISnapshot = {
+			const snapshot: Snapshot = {
 				resource: "copilot:/test-session",
 				state,
 				fromSeq: 3,

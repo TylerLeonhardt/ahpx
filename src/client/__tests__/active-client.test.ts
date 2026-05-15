@@ -1,16 +1,16 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 import type { AhpClient } from "../../client/index.js";
-import type { IStateAction } from "../../protocol/actions.js";
+import type { StateAction } from "../../protocol/actions.js";
 import { ActionType } from "../../protocol/actions.js";
-import type { ISessionActiveClient, ISessionState, IToolDefinition } from "../../protocol/state.js";
+import type { SessionActiveClient, SessionState, ToolDefinition } from "../../protocol/state.js";
 import { SessionLifecycle, SessionStatus } from "../../protocol/state.js";
 import { ActiveClientManager } from "../active-client.js";
 
 const SESSION_URI = "copilot:/test-session";
 const CLIENT_ID = "test-client-123";
 
-function makeSessionState(overrides: Partial<ISessionState> = {}): ISessionState {
+function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 	return {
 		summary: {
 			resource: SESSION_URI,
@@ -28,11 +28,11 @@ function makeSessionState(overrides: Partial<ISessionState> = {}): ISessionState
 
 function createMockClient() {
 	const emitter = new EventEmitter();
-	const dispatched: IStateAction[] = [];
-	const sessionStates = new Map<string, ISessionState>();
+	const dispatched: StateAction[] = [];
+	const sessionStates = new Map<string, SessionState>();
 
 	const client = Object.assign(emitter, {
-		dispatchAction(action: IStateAction) {
+		dispatchAction(action: StateAction) {
 			dispatched.push(action);
 		},
 		state: {
@@ -45,7 +45,7 @@ function createMockClient() {
 	return {
 		client,
 		dispatched,
-		setSessionState(uri: string, state: ISessionState) {
+		setSessionState(uri: string, state: SessionState) {
 			sessionStates.set(uri, state);
 		},
 	};
@@ -61,7 +61,7 @@ describe("ActiveClientManager", () => {
 		expect(dispatched).toHaveLength(1);
 		expect(dispatched[0].type).toBe(ActionType.SessionActiveClientChanged);
 
-		const action = dispatched[0] as { activeClient: ISessionActiveClient };
+		const action = dispatched[0] as { activeClient: SessionActiveClient };
 		expect(action.activeClient.clientId).toBe(CLIENT_ID);
 		expect(action.activeClient.displayName).toBe("ahpx CLI");
 		expect(action.activeClient.tools).toEqual([]);
@@ -76,7 +76,7 @@ describe("ActiveClientManager", () => {
 
 		expect(dispatched).toHaveLength(2);
 
-		const releaseAction = dispatched[1] as { activeClient: ISessionActiveClient | null };
+		const releaseAction = dispatched[1] as { activeClient: SessionActiveClient | null };
 		expect(releaseAction.activeClient).toBeNull();
 	});
 
@@ -111,7 +111,7 @@ describe("ActiveClientManager", () => {
 		const { client, dispatched } = createMockClient();
 		const manager = new ActiveClientManager(client, CLIENT_ID);
 
-		const tools: IToolDefinition[] = [
+		const tools: ToolDefinition[] = [
 			{ name: "readFile", title: "Read File", description: "Read a file from disk" },
 			{ name: "writeFile", title: "Write File", description: "Write a file to disk" },
 		];
@@ -120,7 +120,7 @@ describe("ActiveClientManager", () => {
 
 		expect(dispatched).toHaveLength(1);
 		expect(dispatched[0].type).toBe(ActionType.SessionActiveClientToolsChanged);
-		expect((dispatched[0] as { tools: IToolDefinition[] }).tools).toEqual(tools);
+		expect((dispatched[0] as { tools: ToolDefinition[] }).tools).toEqual(tools);
 	});
 
 	it("completes a tool call with result", () => {
@@ -158,11 +158,11 @@ describe("ActiveClientManager", () => {
 		const { client, dispatched } = createMockClient();
 		const manager = new ActiveClientManager(client, CLIENT_ID);
 
-		const tools: IToolDefinition[] = [{ name: "shell", title: "Shell", description: "Run shell commands" }];
+		const tools: ToolDefinition[] = [{ name: "shell", title: "Shell", description: "Run shell commands" }];
 
 		await manager.claimActiveClient(SESSION_URI, "ahpx CLI", tools);
 
-		const action = dispatched[0] as { activeClient: ISessionActiveClient };
+		const action = dispatched[0] as { activeClient: SessionActiveClient };
 		expect(action.activeClient.tools).toEqual(tools);
 	});
 });

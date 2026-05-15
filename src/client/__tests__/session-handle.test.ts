@@ -1,9 +1,9 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import type { AhpClient } from "../../client/index.js";
-import type { IActionEnvelope, IStateAction } from "../../protocol/actions.js";
+import type { ActionEnvelope, StateAction } from "../../protocol/actions.js";
 import { ActionType } from "../../protocol/actions.js";
-import type { IActiveTurn, ISessionState, ITurn } from "../../protocol/state.js";
+import type { ActiveTurn, SessionState, Turn } from "../../protocol/state.js";
 import { ResponsePartKind, SessionLifecycle, SessionStatus, TurnState } from "../../protocol/state.js";
 import { SessionHandle } from "../session-handle.js";
 
@@ -12,7 +12,7 @@ const OTHER_SESSION_URI = "copilot:/other-session";
 const PROVIDER = "copilot";
 const MODEL = "gpt-4";
 
-function makeSessionState(overrides: Partial<ISessionState> = {}): ISessionState {
+function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 	return {
 		summary: {
 			resource: SESSION_URI,
@@ -28,21 +28,21 @@ function makeSessionState(overrides: Partial<ISessionState> = {}): ISessionState
 	};
 }
 
-function envelope(action: IActionEnvelope["action"], seq = 1): IActionEnvelope {
+function envelope(action: ActionEnvelope["action"], seq = 1): ActionEnvelope {
 	return { action, serverSeq: seq, origin: undefined };
 }
 
 function createMockClient() {
 	const emitter = new EventEmitter();
-	const dispatched: IStateAction[] = [];
-	const sessionStates = new Map<string, ISessionState>();
+	const dispatched: StateAction[] = [];
+	const sessionStates = new Map<string, SessionState>();
 	let connected = true;
 
 	const client = Object.assign(emitter, {
 		get connected() {
 			return connected;
 		},
-		dispatchAction(action: IStateAction) {
+		dispatchAction(action: StateAction) {
 			dispatched.push(action);
 		},
 		state: {
@@ -56,13 +56,13 @@ function createMockClient() {
 	return {
 		client,
 		dispatched,
-		setSessionState(uri: string, state: ISessionState) {
+		setSessionState(uri: string, state: SessionState) {
 			sessionStates.set(uri, state);
 		},
 		setConnected(value: boolean) {
 			connected = value;
 		},
-		emitAction(env: IActionEnvelope) {
+		emitAction(env: ActionEnvelope) {
 			emitter.emit("action", env);
 		},
 		emitDisconnected(code: number, reason: string) {
@@ -101,7 +101,7 @@ describe("SessionHandle", () => {
 			const { client, setSessionState } = createMockClient();
 			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
 
-			const activeTurn: IActiveTurn = {
+			const activeTurn: ActiveTurn = {
 				id: "turn-1",
 				userMessage: { text: "Hello" },
 				responseParts: [],
@@ -157,7 +157,7 @@ describe("SessionHandle", () => {
 			const { client, setSessionState, emitAction } = createMockClient();
 			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
 
-			const completedTurn: ITurn = {
+			const completedTurn: Turn = {
 				id: "turn-1",
 				userMessage: { text: "Hello" },
 				responseParts: [{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" }],
@@ -254,10 +254,10 @@ describe("SessionHandle", () => {
 			expect(handler2).toHaveBeenCalledOnce();
 
 			// Verify no cross-talk
-			const env1 = handler1.mock.calls[0][0] as IActionEnvelope;
+			const env1 = handler1.mock.calls[0][0] as ActionEnvelope;
 			expect((env1.action as { content: string }).content).toBe("for session 1");
 
-			const env2 = handler2.mock.calls[0][0] as IActionEnvelope;
+			const env2 = handler2.mock.calls[0][0] as ActionEnvelope;
 			expect((env2.action as { content: string }).content).toBe("for session 2");
 		});
 	});
@@ -782,12 +782,12 @@ describe("SessionHandle", () => {
 
 			handle.dispatchAction({
 				type: ActionType.SessionModelChanged,
-				model: "claude-3",
+				model: { id: "claude-3" },
 			});
 
 			expect(dispatched).toHaveLength(1);
 			expect((dispatched[0] as { session: string }).session).toBe(SESSION_URI);
-			expect((dispatched[0] as { model: string }).model).toBe("claude-3");
+			expect((dispatched[0] as unknown as { model: { id: string } }).model).toEqual({ id: "claude-3" });
 		});
 
 		it("throws if disposed", async () => {
@@ -797,7 +797,9 @@ describe("SessionHandle", () => {
 			setConnected(false);
 			await handle.dispose();
 
-			expect(() => handle.dispatchAction({ type: ActionType.SessionModelChanged, model: "x" })).toThrow("disposed");
+			expect(() => handle.dispatchAction({ type: ActionType.SessionModelChanged, model: { id: "x" } })).toThrow(
+				"disposed",
+			);
 		});
 	});
 

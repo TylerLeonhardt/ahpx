@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { OutputFormatter } from "../../output/format.js";
 import type { ToolCallInfo } from "../../output/renderer.js";
-import type { IErrorInfo, IToolCallResult, IUsageInfo } from "../../protocol/state.js";
+import type { ErrorInfo, ToolCallResult, UsageInfo } from "../../protocol/state.js";
 import type { AhpxEvent, EventForwarder } from "../forwarder.js";
 import { ForwardingFormatter, type ForwardingFormatterOptions } from "../forwarding-formatter.js";
 
@@ -64,18 +64,18 @@ const sampleToolCallInfo: ToolCallInfo = {
 	toolInput: '{"path":"file.txt"}',
 };
 
-const sampleToolCallResult: IToolCallResult = {
+const sampleToolCallResult: ToolCallResult = {
 	success: true,
 	pastTenseMessage: "Read file.txt",
 };
 
-const sampleUsage: IUsageInfo = {
+const sampleUsage: UsageInfo = {
 	inputTokens: 100,
 	outputTokens: 50,
 	model: "gpt-4",
 };
 
-const sampleError: IErrorInfo = {
+const sampleError: ErrorInfo = {
 	errorType: "runtime",
 	message: "Something went wrong",
 };

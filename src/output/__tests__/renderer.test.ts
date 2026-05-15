@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ToolResultContentType } from "../../protocol/state.js";
-import type { IToolCallResult, IUsageInfo } from "../../protocol/state.js";
+import type { ToolCallResult, UsageInfo } from "../../protocol/state.js";
 import { PromptRenderer } from "../renderer.js";
 import type { ToolCallInfo, WritableOutput } from "../renderer.js";
 
@@ -118,7 +118,7 @@ describe("PromptRenderer", () => {
 		it("shows completed tool with green prefix for success", () => {
 			const cap = createCapture();
 			const r = new PromptRenderer(cap.out);
-			const result: IToolCallResult = {
+			const result: ToolCallResult = {
 				success: true,
 				pastTenseMessage: "Ran npm test",
 			};
@@ -132,7 +132,7 @@ describe("PromptRenderer", () => {
 		it("shows tool text content", () => {
 			const cap = createCapture();
 			const r = new PromptRenderer(cap.out);
-			const result: IToolCallResult = {
+			const result: ToolCallResult = {
 				success: true,
 				pastTenseMessage: "Ran test",
 				content: [{ type: ToolResultContentType.Text, text: "✓ all passed" }],
@@ -144,7 +144,7 @@ describe("PromptRenderer", () => {
 		it("shows red prefix for failed tool", () => {
 			const cap = createCapture();
 			const r = new PromptRenderer(cap.out);
-			const result: IToolCallResult = {
+			const result: ToolCallResult = {
 				success: false,
 				pastTenseMessage: "npm test failed",
 			};
@@ -169,7 +169,7 @@ describe("PromptRenderer", () => {
 		it("shows token counts and model", () => {
 			const cap = createCapture();
 			const r = new PromptRenderer(cap.out);
-			const usage: IUsageInfo = {
+			const usage: UsageInfo = {
 				inputTokens: 1234,
 				outputTokens: 567,
 				model: "gpt-4o",
@@ -185,7 +185,7 @@ describe("PromptRenderer", () => {
 		it("handles missing model", () => {
 			const cap = createCapture();
 			const r = new PromptRenderer(cap.out);
-			const usage: IUsageInfo = { inputTokens: 100, outputTokens: 50 };
+			const usage: UsageInfo = { inputTokens: 100, outputTokens: 50 };
 			r.onUsage(usage);
 			const text = cap.text();
 			expect(text).toContain("100 in");

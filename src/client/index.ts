@@ -8,26 +8,26 @@
 
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { IActionEnvelope, IStateAction } from "../protocol/actions.js";
+import type { ActionEnvelope, StateAction } from "../protocol/actions.js";
 import type {
 	ContentEncoding,
-	IFetchTurnsResult,
-	IInitializeResult,
-	IListSessionsResult,
-	IResourceCopyParams,
-	IResourceCopyResult,
-	IResourceDeleteParams,
-	IResourceDeleteResult,
-	IResourceListResult,
-	IResourceMoveParams,
-	IResourceMoveResult,
-	IResourceReadResult,
-	IResourceWriteParams,
-	IResourceWriteResult,
-	ISubscribeResult,
+	FetchTurnsResult,
+	InitializeResult,
+	ListSessionsResult,
+	ResourceCopyParams,
+	ResourceCopyResult,
+	ResourceDeleteParams,
+	ResourceDeleteResult,
+	ResourceListResult,
+	ResourceMoveParams,
+	ResourceMoveResult,
+	ResourceReadResult,
+	ResourceWriteParams,
+	ResourceWriteResult,
+	SubscribeResult,
 } from "../protocol/commands.js";
-import type { IProtocolNotification } from "../protocol/notifications.js";
-import type { ITerminalClaim, URI } from "../protocol/state.js";
+import type { ProtocolNotification } from "../protocol/notifications.js";
+import type { TerminalClaim, URI } from "../protocol/state.js";
 import { PROTOCOL_VERSION } from "../protocol/version/registry.js";
 import { ProtocolLayer, type ProtocolLayerOptions } from "./protocol.js";
 import { SessionHandle } from "./session-handle.js";
@@ -42,9 +42,9 @@ export interface AhpClientOptions extends TransportOptions, ProtocolLayerOptions
 }
 
 export interface AhpClientEvents {
-	action: [envelope: IActionEnvelope];
-	notification: [notification: IProtocolNotification];
-	connected: [result: IInitializeResult];
+	action: [envelope: ActionEnvelope];
+	notification: [notification: ProtocolNotification];
+	connected: [result: InitializeResult];
 	disconnected: [code: number, reason: string];
 	error: [error: Error];
 }
@@ -111,7 +111,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Connect to an AHP server and perform the initialization handshake.
 	 */
-	async connect(url: string): Promise<IInitializeResult> {
+	async connect(url: string): Promise<InitializeResult> {
 		const transport = new Transport();
 		const protocol = new ProtocolLayer(transport, this.options);
 
@@ -143,7 +143,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 
 		// Send initialize
 		const result = await protocol.request("initialize", {
-			protocolVersion: PROTOCOL_VERSION,
+			protocolVersions: [PROTOCOL_VERSION],
 			clientId: this._clientId,
 			initialSubscriptions: this.options.initialSubscriptions ?? ["agenthost:/root"],
 		});
@@ -252,7 +252,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		return this.protocol!.request("createSession", {
 			session: sessionUri,
 			provider,
-			model,
+			model: model ? { id: model } : undefined,
 			workingDirectory,
 		});
 	}
@@ -276,7 +276,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async createTerminal(
 		terminalUri: string,
-		claim: ITerminalClaim,
+		claim: TerminalClaim,
 		options?: { name?: string; cwd?: string; cols?: number; rows?: number },
 	): Promise<null> {
 		this.ensureConnected();
@@ -302,7 +302,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * List all sessions on the server.
 	 */
-	async listSessions(): Promise<IListSessionsResult> {
+	async listSessions(): Promise<ListSessionsResult> {
 		this.ensureConnected();
 		return this.protocol!.request("listSessions", {});
 	}
@@ -310,7 +310,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Subscribe to a state resource URI.
 	 */
-	async subscribe(resourceUri: URI): Promise<ISubscribeResult> {
+	async subscribe(resourceUri: URI): Promise<SubscribeResult> {
 		this.ensureConnected();
 		const result = await this.protocol!.request("subscribe", {
 			resource: resourceUri,
@@ -330,7 +330,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Fetch historical turns for a session.
 	 */
-	async fetchTurns(sessionUri: URI, before?: string, limit?: number): Promise<IFetchTurnsResult> {
+	async fetchTurns(sessionUri: URI, before?: string, limit?: number): Promise<FetchTurnsResult> {
 		this.ensureConnected();
 		return this.protocol!.request("fetchTurns", {
 			session: sessionUri,
@@ -342,7 +342,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Read content by URI (files, tool outputs, etc.).
 	 */
-	async resourceRead(uri: string, encoding?: ContentEncoding): Promise<IResourceReadResult> {
+	async resourceRead(uri: string, encoding?: ContentEncoding): Promise<ResourceReadResult> {
 		this.ensureConnected();
 		return this.protocol!.request("resourceRead", { uri, ...(encoding ? { encoding } : {}) });
 	}
@@ -350,7 +350,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Write content to a file on the server's filesystem.
 	 */
-	async resourceWrite(params: IResourceWriteParams): Promise<IResourceWriteResult> {
+	async resourceWrite(params: ResourceWriteParams): Promise<ResourceWriteResult> {
 		this.ensureConnected();
 		return this.protocol!.request("resourceWrite", params);
 	}
@@ -358,7 +358,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * List directory entries on the server's filesystem.
 	 */
-	async resourceList(uri: URI): Promise<IResourceListResult> {
+	async resourceList(uri: URI): Promise<ResourceListResult> {
 		this.ensureConnected();
 		return this.protocol!.request("resourceList", { uri });
 	}
@@ -366,7 +366,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Copy a resource from one URI to another.
 	 */
-	async resourceCopy(params: IResourceCopyParams): Promise<IResourceCopyResult> {
+	async resourceCopy(params: ResourceCopyParams): Promise<ResourceCopyResult> {
 		this.ensureConnected();
 		return this.protocol!.request("resourceCopy", params);
 	}
@@ -374,7 +374,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Delete a resource at a URI.
 	 */
-	async resourceDelete(params: IResourceDeleteParams): Promise<IResourceDeleteResult> {
+	async resourceDelete(params: ResourceDeleteParams): Promise<ResourceDeleteResult> {
 		this.ensureConnected();
 		return this.protocol!.request("resourceDelete", params);
 	}
@@ -382,7 +382,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Move (rename) a resource from one URI to another.
 	 */
-	async resourceMove(params: IResourceMoveParams): Promise<IResourceMoveResult> {
+	async resourceMove(params: ResourceMoveParams): Promise<ResourceMoveResult> {
 		this.ensureConnected();
 		return this.protocol!.request("resourceMove", params);
 	}
@@ -390,7 +390,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Dispatch a client-originated action to the server.
 	 */
-	dispatchAction(action: IStateAction): void {
+	dispatchAction(action: StateAction): void {
 		this.ensureConnected();
 		this._clientSeq++;
 		this.protocol!.notify("dispatchAction", {

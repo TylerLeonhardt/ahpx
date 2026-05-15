@@ -14,7 +14,7 @@ import { createLogger } from "../logger.js";
 import type { OutputFormatter } from "../output/format.js";
 import type { JsonEventType } from "../output/json-formatter.js";
 import type { ToolCallInfo } from "../output/renderer.js";
-import type { IErrorInfo, IToolCallResult, IUsageInfo } from "../protocol/state.js";
+import type { ErrorInfo, ToolCallResult, UsageInfo } from "../protocol/state.js";
 import type { AhpxEvent, EventForwarder } from "./forwarder.js";
 
 const log = createLogger("forwarding-formatter");
@@ -76,7 +76,7 @@ export class ForwardingFormatter implements OutputFormatter {
 		});
 	}
 
-	onToolCallComplete(id: string, result: IToolCallResult): void {
+	onToolCallComplete(id: string, result: ToolCallResult): void {
 		this.inner.onToolCallComplete(id, result);
 		this.emit("tool_call_complete", { toolCallId: id, result });
 	}
@@ -86,7 +86,7 @@ export class ForwardingFormatter implements OutputFormatter {
 		this.emit("tool_call_cancelled", { toolCallId: id, reason });
 	}
 
-	onUsage(usage: IUsageInfo): void {
+	onUsage(usage: UsageInfo): void {
 		this.inner.onUsage(usage);
 		this.emit("usage", { usage });
 	}
@@ -96,7 +96,7 @@ export class ForwardingFormatter implements OutputFormatter {
 		this.emit("turn_complete", { responseText });
 	}
 
-	onTurnError(error: IErrorInfo): void {
+	onTurnError(error: ErrorInfo): void {
 		this.inner.onTurnError(error);
 		this.emit("turn_error", { error });
 	}

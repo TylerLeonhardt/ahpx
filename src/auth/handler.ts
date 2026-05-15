@@ -17,7 +17,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AhpClient } from "../client/index.js";
 import { createLogger } from "../logger.js";
-import type { IProtectedResourceMetadata } from "../protocol/state.js";
+import type { ProtectedResourceMetadata } from "../protocol/state.js";
 
 const log = createLogger("auth");
 
@@ -65,7 +65,7 @@ export class AuthHandler {
 	 * Handle an authRequired notification — find a token and authenticate.
 	 * Returns true if authentication succeeded, false otherwise.
 	 */
-	async handleAuthRequired(resource: IProtectedResourceMetadata): Promise<boolean> {
+	async handleAuthRequired(resource: ProtectedResourceMetadata): Promise<boolean> {
 		const resourceUri = resource.resource;
 
 		// 1. Check explicit token (--token flag)
@@ -168,7 +168,7 @@ export class AuthHandler {
 	/**
 	 * Prompt the user for a token interactively.
 	 */
-	private promptForToken(resource: IProtectedResourceMetadata): Promise<string | undefined> {
+	private promptForToken(resource: ProtectedResourceMetadata): Promise<string | undefined> {
 		const name = resource.resource_name ?? resource.resource;
 		return new Promise<string | undefined>((resolve) => {
 			const readline = require("node:readline") as typeof import("node:readline");

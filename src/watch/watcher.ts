@@ -10,20 +10,20 @@ import pc from "picocolors";
 import type { AhpClient } from "../client/index.js";
 import type { OutputFormatter } from "../output/format.js";
 import type { ToolCallInfo } from "../output/renderer.js";
-import type { IActionEnvelope } from "../protocol/actions.js";
+import type { ActionEnvelope } from "../protocol/actions.js";
 import { ActionType } from "../protocol/actions.js";
 import type {
-	ISessionDeltaAction,
-	ISessionErrorAction,
-	ISessionReasoningAction,
-	ISessionTitleChangedAction,
-	ISessionToolCallCompleteAction,
-	ISessionToolCallDeltaAction,
-	ISessionToolCallReadyAction,
-	ISessionToolCallStartAction,
-	ISessionUsageAction,
+	SessionDeltaAction,
+	SessionErrorAction,
+	SessionReasoningAction,
+	SessionTitleChangedAction,
+	SessionToolCallCompleteAction,
+	SessionToolCallDeltaAction,
+	SessionToolCallReadyAction,
+	SessionToolCallStartAction,
+	SessionUsageAction,
 } from "../protocol/actions.js";
-import type { ISessionState, URI } from "../protocol/state.js";
+import type { SessionState, URI } from "../protocol/state.js";
 import { ResponsePartKind, ToolCallStatus } from "../protocol/state.js";
 
 /** Writable stream interface for status output. */
@@ -40,7 +40,7 @@ export interface SessionWatcherOptions {
  * Watches an existing AHP session, streaming all activity to a formatter.
  */
 export class SessionWatcher {
-	private onAction: ((envelope: IActionEnvelope) => void) | undefined;
+	private onAction: ((envelope: ActionEnvelope) => void) | undefined;
 	private onDisconnect: (() => void) | undefined;
 	private stopped = false;
 	private resolveWatch: (() => void) | undefined;
@@ -70,7 +70,7 @@ export class SessionWatcher {
 		const finished = new Promise<void>((resolve) => {
 			this.resolveWatch = resolve;
 
-			this.onAction = (envelope: IActionEnvelope) => {
+			this.onAction = (envelope: ActionEnvelope) => {
 				if (this.stopped) return;
 				this.handleAction(envelope);
 			};
@@ -114,7 +114,7 @@ export class SessionWatcher {
 	/**
 	 * Show the current in-progress state when joining mid-turn.
 	 */
-	private showCurrentState(state: ISessionState): void {
+	private showCurrentState(state: SessionState): void {
 		const turn = state.activeTurn;
 		if (!turn) return;
 
@@ -162,7 +162,7 @@ export class SessionWatcher {
 	/**
 	 * Route an incoming action to the formatter.
 	 */
-	private handleAction(envelope: IActionEnvelope): void {
+	private handleAction(envelope: ActionEnvelope): void {
 		const action = envelope.action;
 		// Only handle actions for our session
 		if (!("session" in action) || (action as { session: URI }).session !== this.sessionUri) {
@@ -171,13 +171,13 @@ export class SessionWatcher {
 
 		switch (action.type) {
 			case ActionType.SessionDelta: {
-				const a = action as ISessionDeltaAction;
+				const a = action as SessionDeltaAction;
 				this.formatter.onDelta(a.content);
 				break;
 			}
 
 			case ActionType.SessionReasoning: {
-				const a = action as ISessionReasoningAction;
+				const a = action as SessionReasoningAction;
 				this.formatter.onReasoning(a.content);
 				break;
 			}
@@ -190,19 +190,19 @@ export class SessionWatcher {
 			}
 
 			case ActionType.SessionToolCallStart: {
-				const a = action as ISessionToolCallStartAction;
+				const a = action as SessionToolCallStartAction;
 				this.formatter.onToolCallStart(a.toolCallId, a.displayName);
 				break;
 			}
 
 			case ActionType.SessionToolCallDelta: {
-				const a = action as ISessionToolCallDeltaAction;
+				const a = action as SessionToolCallDeltaAction;
 				this.formatter.onToolCallDelta(a.toolCallId, a.content);
 				break;
 			}
 
 			case ActionType.SessionToolCallReady: {
-				const a = action as ISessionToolCallReadyAction;
+				const a = action as SessionToolCallReadyAction;
 				const info: ToolCallInfo = {
 					toolCallId: a.toolCallId,
 					toolName: a.toolCallId,
@@ -228,19 +228,19 @@ export class SessionWatcher {
 			}
 
 			case ActionType.SessionToolCallComplete: {
-				const a = action as ISessionToolCallCompleteAction;
+				const a = action as SessionToolCallCompleteAction;
 				this.formatter.onToolCallComplete(a.toolCallId, a.result);
 				break;
 			}
 
 			case ActionType.SessionUsage: {
-				const a = action as ISessionUsageAction;
+				const a = action as SessionUsageAction;
 				this.formatter.onUsage(a.usage);
 				break;
 			}
 
 			case ActionType.SessionTitleChanged: {
-				const a = action as ISessionTitleChangedAction;
+				const a = action as SessionTitleChangedAction;
 				this.formatter.onTitleChanged(a.title);
 				break;
 			}
@@ -262,7 +262,7 @@ export class SessionWatcher {
 			}
 
 			case ActionType.SessionError: {
-				const a = action as ISessionErrorAction;
+				const a = action as SessionErrorAction;
 				this.formatter.onTurnError(a.error);
 				break;
 			}
@@ -281,7 +281,7 @@ export class SessionWatcher {
 	/**
 	 * Get a label describing who started the turn (if from another client).
 	 */
-	private getOriginLabel(envelope: IActionEnvelope): string {
+	private getOriginLabel(envelope: ActionEnvelope): string {
 		if (envelope.origin) {
 			return ` (from ${envelope.origin.clientId})`;
 		}

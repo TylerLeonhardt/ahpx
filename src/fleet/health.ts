@@ -6,14 +6,14 @@
  */
 
 import { AhpClient } from "../client/index.js";
-import type { IInitializeResult } from "../protocol/commands.js";
+import type { InitializeResult } from "../protocol/commands.js";
 
 export interface ServerHealth {
 	name: string;
 	url: string;
 	status: "healthy" | "degraded" | "unreachable";
 	latencyMs: number;
-	protocolVersion?: number;
+	protocolVersion?: string;
 	agents: { provider: string; models: string[] }[];
 	activeSessions: number;
 	checkedAt: string; // ISO 8601
@@ -35,7 +35,7 @@ export class HealthChecker {
 		});
 
 		try {
-			const result: IInitializeResult = await client.connect(url);
+			const result: InitializeResult = await client.connect(url);
 
 			if (options?.token) {
 				await client.authenticate(url, options.token);

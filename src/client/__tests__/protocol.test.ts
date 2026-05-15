@@ -43,7 +43,7 @@ describe("ProtocolLayer", () => {
 	describe("request/response", () => {
 		it("sends a JSON-RPC request and resolves on success response", async () => {
 			const promise = protocol.request("initialize", {
-				protocolVersion: 1,
+				protocolVersions: ["0.1.0"],
 				clientId: "test-client",
 			});
 
@@ -74,7 +74,7 @@ describe("ProtocolLayer", () => {
 			const promise = protocol.request("createSession", {
 				session: "copilot:/test-session",
 				provider: "copilot",
-				model: "gpt-4o",
+				model: { id: "gpt-4o" },
 				workingDirectory: "/tmp/my-project",
 			});
 
@@ -128,7 +128,7 @@ describe("ProtocolLayer", () => {
 			const promise = protocol.request(
 				"initialize",
 				{
-					protocolVersion: 1,
+					protocolVersions: ["0.1.0"],
 					clientId: "test-client",
 				},
 				100,

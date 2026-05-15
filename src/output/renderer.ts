@@ -6,7 +6,7 @@
  */
 
 import pc from "picocolors";
-import type { IErrorInfo, IToolCallResult, IUsageInfo, StringOrMarkdown } from "../protocol/state.js";
+import type { ErrorInfo, StringOrMarkdown, ToolCallResult, UsageInfo } from "../protocol/state.js";
 import type { OutputFormatter } from "./format.js";
 
 /** Minimal info about a tool call ready for display. */
@@ -80,7 +80,7 @@ export class PromptRenderer implements OutputFormatter {
 	}
 
 	/** Tool call completed with result. */
-	onToolCallComplete(_id: string, result: IToolCallResult): void {
+	onToolCallComplete(_id: string, result: ToolCallResult): void {
 		const msg = textOf(result.pastTenseMessage);
 		const color = result.success ? pc.green : pc.red;
 		this.out.write(`${color("[tool]")} ${msg} ${pc.dim("(completed)")}\n`);
@@ -104,7 +104,7 @@ export class PromptRenderer implements OutputFormatter {
 	}
 
 	/** Token usage report. */
-	onUsage(usage: IUsageInfo): void {
+	onUsage(usage: UsageInfo): void {
 		const parts: string[] = [];
 		if (usage.inputTokens != null) {
 			parts.push(`${usage.inputTokens.toLocaleString()} in`);
@@ -126,7 +126,7 @@ export class PromptRenderer implements OutputFormatter {
 	}
 
 	/** Turn ended with an error. */
-	onTurnError(error: IErrorInfo): void {
+	onTurnError(error: ErrorInfo): void {
 		this.closeReasoningIfNeeded();
 		this.ensureNewline();
 		this.out.write(`\n${pc.red("[error]")} ${error.message}\n`);

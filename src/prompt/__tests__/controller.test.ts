@@ -4,9 +4,9 @@ import type { AhpClient } from "../../client/index.js";
 import { PromptRenderer } from "../../output/renderer.js";
 import type { WritableOutput } from "../../output/renderer.js";
 import { PermissionHandler } from "../../permissions/handler.js";
-import type { IActionEnvelope, IStateAction } from "../../protocol/actions.js";
+import type { ActionEnvelope, StateAction } from "../../protocol/actions.js";
 import { ActionType } from "../../protocol/actions.js";
-import type { ISessionState } from "../../protocol/state.js";
+import type { SessionState } from "../../protocol/state.js";
 import {
 	ResponsePartKind,
 	SessionLifecycle,
@@ -30,7 +30,7 @@ function createCapture(): { out: WritableOutput; text: () => string } {
 }
 
 /** Create a minimal session state for the state mirror. */
-function makeSessionState(): ISessionState {
+function makeSessionState(): SessionState {
 	return {
 		summary: {
 			resource: "copilot:/test",
@@ -53,15 +53,15 @@ function makeSessionState(): ISessionState {
  */
 function createMockClient() {
 	const emitter = new EventEmitter();
-	const dispatched: IStateAction[] = [];
+	const dispatched: StateAction[] = [];
 	let seq = 0;
 
 	// Minimal state mock
-	const sessionStates = new Map<string, ISessionState>();
+	const sessionStates = new Map<string, SessionState>();
 
 	const client = Object.assign(emitter, {
 		clientId: "test-client-id",
-		dispatchAction(action: IStateAction) {
+		dispatchAction(action: StateAction) {
 			dispatched.push(action);
 		},
 		state: {
@@ -75,9 +75,9 @@ function createMockClient() {
 		client,
 		dispatched,
 		/** Simulate an action envelope arriving from the server. */
-		emitAction(action: IStateAction) {
+		emitAction(action: StateAction) {
 			seq++;
-			const envelope: IActionEnvelope = {
+			const envelope: ActionEnvelope = {
 				action,
 				serverSeq: seq,
 				origin: undefined,
@@ -85,7 +85,7 @@ function createMockClient() {
 			emitter.emit("action", envelope);
 		},
 		/** Set a session state for lookups. */
-		setSessionState(uri: string, state: ISessionState) {
+		setSessionState(uri: string, state: SessionState) {
 			sessionStates.set(uri, state);
 		},
 	};

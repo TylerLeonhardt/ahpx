@@ -6,7 +6,7 @@
  * to stderr.
  */
 
-import type { IErrorInfo, IToolCallResult, IUsageInfo } from "../protocol/state.js";
+import type { ErrorInfo, ToolCallResult, UsageInfo } from "../protocol/state.js";
 import type { OutputFormatter, WritableOutput } from "./format.js";
 import type { ToolCallInfo } from "./renderer.js";
 
@@ -39,7 +39,7 @@ export class QuietFormatter implements OutputFormatter {
 		// Silent
 	}
 
-	onToolCallComplete(_id: string, _result: IToolCallResult): void {
+	onToolCallComplete(_id: string, _result: ToolCallResult): void {
 		// Silent
 	}
 
@@ -47,7 +47,7 @@ export class QuietFormatter implements OutputFormatter {
 		// Silent
 	}
 
-	onUsage(_usage: IUsageInfo): void {
+	onUsage(_usage: UsageInfo): void {
 		// Silent
 	}
 
@@ -57,7 +57,7 @@ export class QuietFormatter implements OutputFormatter {
 		}
 	}
 
-	onTurnError(error: IErrorInfo): void {
+	onTurnError(error: ErrorInfo): void {
 		this.err.write(`${error.message}\n`);
 	}
 

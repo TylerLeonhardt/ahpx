@@ -6,9 +6,9 @@
  */
 
 import { EventEmitter } from "node:events";
-import type { IActionEnvelope } from "../protocol/actions.js";
-import type { ICommandMap, IJsonRpcErrorResponse } from "../protocol/messages.js";
-import type { IProtocolNotification } from "../protocol/notifications.js";
+import type { ActionEnvelope } from "../protocol/actions.js";
+import type { CommandMap, JsonRpcErrorResponse } from "../protocol/messages.js";
+import type { ProtocolNotification } from "../protocol/notifications.js";
 import type { Transport } from "./transport.js";
 
 /** Error thrown when a JSON-RPC request receives an error response. */
@@ -40,8 +40,8 @@ export interface ProtocolLayerOptions {
 }
 
 export interface ProtocolLayerEvents {
-	action: [envelope: IActionEnvelope];
-	notification: [notification: IProtocolNotification];
+	action: [envelope: ActionEnvelope];
+	notification: [notification: ProtocolNotification];
 }
 
 interface PendingRequest {
@@ -74,15 +74,15 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 	/**
 	 * Send a typed JSON-RPC request and await the response.
 	 */
-	async request<M extends keyof ICommandMap>(
+	async request<M extends keyof CommandMap>(
 		method: M,
-		params: ICommandMap[M]["params"],
+		params: CommandMap[M]["params"],
 		timeoutMs?: number,
-	): Promise<ICommandMap[M]["result"]> {
+	): Promise<CommandMap[M]["result"]> {
 		const id = this.nextId++;
 		const timeout = timeoutMs ?? this.requestTimeout;
 
-		return new Promise<ICommandMap[M]["result"]>((resolve, reject) => {
+		return new Promise<CommandMap[M]["result"]>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
 				reject(new RpcTimeoutError(method, timeout));
@@ -139,7 +139,7 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 			clearTimeout(pending.timer);
 
 			if ("error" in msg) {
-				const errPayload = (msg as unknown as IJsonRpcErrorResponse).error;
+				const errPayload = (msg as unknown as JsonRpcErrorResponse).error;
 				pending.reject(new RpcError(errPayload.code, errPayload.message, errPayload.data));
 			} else if ("result" in msg) {
 				pending.resolve(msg.result);
@@ -150,9 +150,9 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 		// Notification (has `method` but no `id`)
 		if ("method" in msg && typeof msg.method === "string") {
 			if (msg.method === "action") {
-				this.emit("action", msg.params as IActionEnvelope);
+				this.emit("action", msg.params as ActionEnvelope);
 			} else if (msg.method === "notification") {
-				const params = msg.params as { notification: IProtocolNotification };
+				const params = msg.params as { notification: ProtocolNotification };
 				this.emit("notification", params.notification);
 			}
 		}

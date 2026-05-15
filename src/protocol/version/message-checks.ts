@@ -10,9 +10,10 @@
  */
 
 import type {
-  ICommandMap,
-  IClientNotificationMap,
-  IServerNotificationMap,
+  CommandMap,
+  ClientNotificationMap,
+  ServerNotificationMap,
+  ServerCommandMap,
 } from '../messages.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -24,6 +25,7 @@ type _Exact<A, B> = [A] extends [B] ? [B] extends [A] ? true : never : never;
 /** All methods annotated `@messageType Request` in commands.ts. */
 type _ExpectedCommands =
   | 'initialize'
+  | 'ping'
   | 'reconnect'
   | 'subscribe'
   | 'createSession'
@@ -37,8 +39,12 @@ type _ExpectedCommands =
   | 'resourceCopy'
   | 'resourceDelete'
   | 'resourceMove'
+  | 'resourceRequest'
   | 'fetchTurns'
-  | 'authenticate';
+  | 'authenticate'
+  | 'resolveSessionConfig'
+  | 'sessionConfigCompletions'
+  | 'completions';
 
 /** All methods annotated `@messageType Notification` (client → server) in commands.ts. */
 type _ExpectedClientNotifications =
@@ -50,11 +56,17 @@ type _ExpectedServerNotifications =
   | 'action'
   | 'notification';
 
+/** All server → client request methods. */
+type _ExpectedServerCommands =
+  | 'resourceRequest';
+
 // ─── Assertions ──────────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-type _CheckCommandMapKeys = _Exact<keyof ICommandMap, _ExpectedCommands>;
+type _CheckCommandMapKeys = _Exact<keyof CommandMap, _ExpectedCommands>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-type _CheckClientNotificationMapKeys = _Exact<keyof IClientNotificationMap, _ExpectedClientNotifications>;
+type _CheckClientNotificationMapKeys = _Exact<keyof ClientNotificationMap, _ExpectedClientNotifications>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-type _CheckServerNotificationMapKeys = _Exact<keyof IServerNotificationMap, _ExpectedServerNotifications>;
+type _CheckServerNotificationMapKeys = _Exact<keyof ServerNotificationMap, _ExpectedServerNotifications>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckServerCommandMapKeys = _Exact<keyof ServerCommandMap, _ExpectedServerCommands>;

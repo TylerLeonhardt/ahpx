@@ -5,11 +5,11 @@
  * kept in sync by applying action envelopes from the server.
  */
 
-import type { IRootAction, ISessionAction, ITerminalAction } from "../protocol/action-origin.generated.js";
-import type { IActionEnvelope } from "../protocol/actions.js";
+import type { RootAction, SessionAction, TerminalAction } from "../protocol/action-origin.generated.js";
+import type { ActionEnvelope } from "../protocol/actions.js";
 import { ActionType } from "../protocol/actions.js";
 import { rootReducer, sessionReducer, terminalReducer } from "../protocol/reducers.js";
-import type { IRootState, ISessionState, ISnapshot, ITerminalState, URI } from "../protocol/state.js";
+import type { RootState, SessionState, Snapshot, TerminalState, URI } from "../protocol/state.js";
 
 /** Root actions operate on the root state tree. */
 const ROOT_ACTION_TYPES = new Set<string>([
@@ -26,14 +26,14 @@ const TERMINAL_ACTION_PREFIX = "terminal/";
  * by applying incoming action envelopes through the protocol reducers.
  */
 export class StateMirror {
-	private rootState: IRootState = { agents: [] };
-	private sessions = new Map<URI, ISessionState>();
-	private terminals = new Map<URI, ITerminalState>();
+	private rootState: RootState = { agents: [] };
+	private sessions = new Map<URI, SessionState>();
+	private terminals = new Map<URI, TerminalState>();
 	private serverSeq = 0;
-	private pendingActions = new Map<URI, IActionEnvelope[]>();
+	private pendingActions = new Map<URI, ActionEnvelope[]>();
 
 	/** Current root state (agents, active session count). */
-	get root(): IRootState {
+	get root(): RootState {
 		return this.rootState;
 	}
 
@@ -43,7 +43,7 @@ export class StateMirror {
 	}
 
 	/** Get a session state by URI. */
-	getSession(uri: URI): ISessionState | undefined {
+	getSession(uri: URI): SessionState | undefined {
 		return this.sessions.get(uri);
 	}
 
@@ -53,7 +53,7 @@ export class StateMirror {
 	}
 
 	/** Get a terminal state by URI. */
-	getTerminal(uri: URI): ITerminalState | undefined {
+	getTerminal(uri: URI): TerminalState | undefined {
 		return this.terminals.get(uri);
 	}
 
@@ -72,16 +72,16 @@ export class StateMirror {
 	 * Load a snapshot (from initialize, reconnect, or subscribe).
 	 * After registering a session, replays any actions that arrived before the snapshot.
 	 */
-	applySnapshot(snapshot: ISnapshot): void {
+	applySnapshot(snapshot: Snapshot): void {
 		if (snapshot.fromSeq > this.serverSeq) {
 			this.serverSeq = snapshot.fromSeq;
 		}
 
 		// Determine if it's root or session state
 		if ("agents" in snapshot.state) {
-			this.rootState = snapshot.state as IRootState;
+			this.rootState = snapshot.state as RootState;
 		} else if ("summary" in snapshot.state) {
-			const sessionState = snapshot.state as ISessionState;
+			const sessionState = snapshot.state as SessionState;
 			this.sessions.set(snapshot.resource, sessionState);
 
 			// Replay any actions that arrived before this snapshot
@@ -96,14 +96,14 @@ export class StateMirror {
 						if (current) {
 							this.sessions.set(
 								snapshot.resource,
-								sessionReducer(current, env.action as ISessionAction & { session?: URI }),
+								sessionReducer(current, env.action as SessionAction & { session?: URI }),
 							);
 						}
 					}
 				}
 			}
 		} else if ("claim" in snapshot.state) {
-			const terminalState = snapshot.state as ITerminalState;
+			const terminalState = snapshot.state as TerminalState;
 			this.terminals.set(snapshot.resource, terminalState);
 
 			// Replay any buffered terminal actions
@@ -116,7 +116,7 @@ export class StateMirror {
 						if (current) {
 							this.terminals.set(
 								snapshot.resource,
-								terminalReducer(current, env.action as ITerminalAction & { terminal?: URI }),
+								terminalReducer(current, env.action as TerminalAction & { terminal?: URI }),
 							);
 						}
 					}
@@ -128,15 +128,15 @@ export class StateMirror {
 	/**
 	 * Apply an incoming action envelope from the server.
 	 */
-	applyAction(envelope: IActionEnvelope): void {
+	applyAction(envelope: ActionEnvelope): void {
 		this.serverSeq = envelope.serverSeq;
 
 		const action = envelope.action;
 
 		if (ROOT_ACTION_TYPES.has(action.type)) {
-			this.rootState = rootReducer(this.rootState, action as IRootAction);
+			this.rootState = rootReducer(this.rootState, action as RootAction);
 		} else if (action.type.startsWith(TERMINAL_ACTION_PREFIX)) {
-			const terminalAction = action as ITerminalAction & { terminal?: URI };
+			const terminalAction = action as TerminalAction & { terminal?: URI };
 			const terminalUri = terminalAction.terminal;
 			if (terminalUri) {
 				const current = this.terminals.get(terminalUri);
@@ -154,7 +154,7 @@ export class StateMirror {
 			}
 		} else {
 			// Session action — find the session by URI
-			const sessionAction = action as ISessionAction & { session?: URI };
+			const sessionAction = action as SessionAction & { session?: URI };
 			const sessionUri = sessionAction.session;
 			if (sessionUri) {
 				const current = this.sessions.get(sessionUri);
