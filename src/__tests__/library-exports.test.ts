@@ -320,7 +320,7 @@ describe("library exports", () => {
 		it("exports protocol state types", () => {
 			// These type assertions prove the types are importable.
 			// They won't exist at runtime — the test passing means compilation succeeded.
-			const _rootState: ahpx.IRootState = { agents: [] };
+			const _rootState: ahpx.RootState = { agents: [] };
 			expect(_rootState.agents).toEqual([]);
 
 			const _uri: ahpx.URI = "agenthost:/root";
@@ -328,7 +328,7 @@ describe("library exports", () => {
 		});
 
 		it("exports action types", () => {
-			const envelope: ahpx.IActionEnvelope = {
+			const envelope: ahpx.ActionEnvelope = {
 				serverSeq: 1,
 				action: {
 					type: ahpx.ActionType.SessionDelta,

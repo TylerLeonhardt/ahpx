@@ -9,22 +9,26 @@
 import type {
   URI,
   StringOrMarkdown,
-  IAgentInfo,
-  IErrorInfo,
-  IUserMessage,
-  IResponsePart,
-  IToolCallResult,
-  IToolResultContent,
-  IToolDefinition,
-  ISessionActiveClient,
-  IUsageInfo,
-  ISessionCustomization,
-  ISessionFileDiff,
-  ISessionInputAnswer,
-  ISessionInputRequest,
-  ITerminalInfo,
-  ITerminalClaim,
+  AgentInfo,
+  ErrorInfo,
+  ModelSelection,
+  UserMessage,
+  ResponsePart,
+  ToolCallResult,
+  ToolResultContent,
+  ToolDefinition,
+  SessionActiveClient,
+  UsageInfo,
+  SessionCustomization,
+  CustomizationRef,
+  FileEdit,
+  SessionInputAnswer,
+  SessionInputRequest,
+  TerminalInfo,
+  TerminalClaim,
   SessionInputResponseKind,
+  ConfirmationOption,
+  CustomizationStatus,
 } from './state.js';
 
 import { ToolCallConfirmationReason, ToolCallCancellationReason, PendingMessageKind } from './state.js';
@@ -69,11 +73,16 @@ export const enum ActionType {
   SessionInputCompleted = 'session/inputCompleted',
   SessionCustomizationsChanged = 'session/customizationsChanged',
   SessionCustomizationToggled = 'session/customizationToggled',
+  SessionCustomizationUpdated = 'session/customizationUpdated',
   SessionTruncated = 'session/truncated',
   SessionIsReadChanged = 'session/isReadChanged',
-  SessionIsDoneChanged = 'session/isDoneChanged',
+  SessionIsArchivedChanged = 'session/isArchivedChanged',
+  SessionActivityChanged = 'session/activityChanged',
   SessionDiffsChanged = 'session/diffsChanged',
+  SessionConfigChanged = 'session/configChanged',
+  SessionMetaChanged = 'session/metaChanged',
   RootTerminalsChanged = 'root/terminalsChanged',
+  RootConfigChanged = 'root/configChanged',
   TerminalData = 'terminal/data',
   TerminalInput = 'terminal/input',
   TerminalResized = 'terminal/resized',
@@ -82,6 +91,9 @@ export const enum ActionType {
   TerminalCwdChanged = 'terminal/cwdChanged',
   TerminalExited = 'terminal/exited',
   TerminalCleared = 'terminal/cleared',
+  TerminalCommandDetectionAvailable = 'terminal/commandDetectionAvailable',
+  TerminalCommandExecuted = 'terminal/commandExecuted',
+  TerminalCommandFinished = 'terminal/commandFinished',
 }
 
 // ─── Action Envelope ─────────────────────────────────────────────────────────
@@ -89,7 +101,7 @@ export const enum ActionType {
 /**
  * Identifies the client that originally dispatched an action.
  */
-export interface IActionOrigin {
+export interface ActionOrigin {
   clientId: string;
   clientSeq: number;
 }
@@ -97,10 +109,10 @@ export interface IActionOrigin {
 /**
  * Every action is wrapped in an `ActionEnvelope`.
  */
-export interface IActionEnvelope {
-  readonly action: IStateAction;
+export interface ActionEnvelope {
+  readonly action: StateAction;
   readonly serverSeq: number;
-  readonly origin: IActionOrigin | undefined;
+  readonly origin: ActionOrigin | undefined;
   readonly rejectionReason?: string;
 }
 
@@ -112,7 +124,7 @@ export interface IActionEnvelope {
  *
  * @category Session Actions
  */
-interface IToolCallActionBase {
+interface ToolCallActionBase {
   /** Session URI */
   session: URI;
   /** Turn identifier */
@@ -136,10 +148,10 @@ interface IToolCallActionBase {
  * @category Root Actions
  * @version 1
  */
-export interface IRootAgentsChangedAction {
+export interface RootAgentsChangedAction {
   type: ActionType.RootAgentsChanged;
   /** Updated agent list */
-  agents: IAgentInfo[];
+  agents: AgentInfo[];
 }
 
 /**
@@ -148,7 +160,7 @@ export interface IRootAgentsChangedAction {
  * @category Root Actions
  * @version 1
  */
-export interface IRootActiveSessionsChangedAction {
+export interface RootActiveSessionsChangedAction {
   type: ActionType.RootActiveSessionsChanged;
   /** Current count of active sessions */
   activeSessions: number;
@@ -163,10 +175,28 @@ export interface IRootActiveSessionsChangedAction {
  * @category Root Actions
  * @version 1
  */
-export interface IRootTerminalsChangedAction {
+export interface RootTerminalsChangedAction {
   type: ActionType.RootTerminalsChanged;
   /** Updated terminal list (full replacement) */
-  terminals: ITerminalInfo[];
+  terminals: TerminalInfo[];
+}
+
+/**
+ * Fired when agent-host configuration values change.
+ *
+ * By default, the reducer merges the new values into `state.config.values`.
+ * Set `replace` to `true` to replace all values instead of merging.
+ *
+ * @category Root Actions
+ * @version 1
+ * @clientDispatchable
+ */
+export interface RootConfigChangedAction {
+  type: ActionType.RootConfigChanged;
+  /** Updated config values */
+  config: Record<string, unknown>;
+  /** When `true`, replaces all config values instead of merging */
+  replace?: boolean;
 }
 
 // ─── Session Actions ─────────────────────────────────────────────────────────
@@ -177,7 +207,7 @@ export interface IRootTerminalsChangedAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionReadyAction {
+export interface SessionReadyAction {
   type: ActionType.SessionReady;
   /** Session URI */
   session: URI;
@@ -189,12 +219,12 @@ export interface ISessionReadyAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionCreationFailedAction {
+export interface SessionCreationFailedAction {
   type: ActionType.SessionCreationFailed;
   /** Session URI */
   session: URI;
   /** Error details */
-  error: IErrorInfo;
+  error: ErrorInfo;
 }
 
 /**
@@ -204,14 +234,14 @@ export interface ISessionCreationFailedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionTurnStartedAction {
+export interface SessionTurnStartedAction {
   type: ActionType.SessionTurnStarted;
   /** Session URI */
   session: URI;
   /** Turn identifier */
   turnId: string;
   /** User's message */
-  userMessage: IUserMessage;
+  userMessage: UserMessage;
   /** If this turn was auto-started from a queued message, the ID of that message */
   queuedMessageId?: string;
 }
@@ -225,7 +255,7 @@ export interface ISessionTurnStartedAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionDeltaAction {
+export interface SessionDeltaAction {
   type: ActionType.SessionDelta;
   /** Session URI */
   session: URI;
@@ -243,14 +273,14 @@ export interface ISessionDeltaAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionResponsePartAction {
+export interface SessionResponsePartAction {
   type: ActionType.SessionResponsePart;
   /** Session URI */
   session: URI;
   /** Turn identifier */
   turnId: string;
   /** Response part (markdown or content ref) */
-  part: IResponsePart;
+  part: ResponsePart;
 }
 
 /**
@@ -263,7 +293,7 @@ export interface ISessionResponsePartAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionToolCallStartAction extends IToolCallActionBase {
+export interface SessionToolCallStartAction extends ToolCallActionBase {
   type: ActionType.SessionToolCallStart;
   /** Internal tool name (for debugging/logging) */
   toolName: string;
@@ -282,7 +312,7 @@ export interface ISessionToolCallStartAction extends IToolCallActionBase {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionToolCallDeltaAction extends IToolCallActionBase {
+export interface SessionToolCallDeltaAction extends ToolCallActionBase {
   type: ActionType.SessionToolCallDelta;
   /** Partial parameter content to append */
   content: string;
@@ -308,7 +338,7 @@ export interface ISessionToolCallDeltaAction extends IToolCallActionBase {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionToolCallReadyAction extends IToolCallActionBase {
+export interface SessionToolCallReadyAction extends ToolCallActionBase {
   type: ActionType.SessionToolCallReady;
   /** Message describing what the tool will do or what confirmation is needed */
   invocationMessage: StringOrMarkdown;
@@ -316,8 +346,19 @@ export interface ISessionToolCallReadyAction extends IToolCallActionBase {
   toolInput?: string;
   /** Short title for the confirmation prompt (e.g. `"Run in terminal"`, `"Write file"`) */
   confirmationTitle?: StringOrMarkdown;
+  /** File edits that this tool call will perform, for preview before confirmation */
+  edits?: { items: FileEdit[] };
+  /** Whether the agent host allows the client to edit the tool's input parameters before confirming */
+  editable?: boolean;
   /** If set, the tool was auto-confirmed and transitions directly to `running` */
   confirmed?: ToolCallConfirmationReason;
+  /**
+   * Options the server offers for this confirmation. When present, the client
+   * SHOULD render these instead of a plain approve/deny UI. Each option
+   * belongs to a {@link ConfirmationOptionGroup} so the client can still
+   * categorise the choices.
+   */
+  options?: ConfirmationOption[];
 }
 
 /**
@@ -327,12 +368,16 @@ export interface ISessionToolCallReadyAction extends IToolCallActionBase {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionToolCallApprovedAction extends IToolCallActionBase {
+export interface SessionToolCallApprovedAction extends ToolCallActionBase {
   type: ActionType.SessionToolCallConfirmed;
   /** The tool call was approved */
   approved: true;
   /** How the tool was confirmed */
   confirmed: ToolCallConfirmationReason;
+  /** Edited tool input parameters, if the client modified them before confirming */
+  editedToolInput?: string;
+  /** ID of the selected confirmation option, if the server provided options */
+  selectedOptionId?: string;
 }
 
 /**
@@ -345,16 +390,18 @@ export interface ISessionToolCallApprovedAction extends IToolCallActionBase {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionToolCallDeniedAction extends IToolCallActionBase {
+export interface SessionToolCallDeniedAction extends ToolCallActionBase {
   type: ActionType.SessionToolCallConfirmed;
   /** The tool call was denied */
   approved: false;
   /** Why the tool was cancelled */
   reason: ToolCallCancellationReason.Denied | ToolCallCancellationReason.Skipped;
   /** What the user suggested doing instead */
-  userSuggestion?: IUserMessage;
+  userSuggestion?: UserMessage;
   /** Optional explanation for the denial */
   reasonMessage?: StringOrMarkdown;
+  /** ID of the selected confirmation option, if the server provided options */
+  selectedOptionId?: string;
 }
 
 /**
@@ -364,9 +411,9 @@ export interface ISessionToolCallDeniedAction extends IToolCallActionBase {
  * @version 1
  * @clientDispatchable
  */
-export type ISessionToolCallConfirmedAction =
-  | ISessionToolCallApprovedAction
-  | ISessionToolCallDeniedAction;
+export type SessionToolCallConfirmedAction =
+  | SessionToolCallApprovedAction
+  | SessionToolCallDeniedAction;
 
 /**
  * Tool execution finished. Transitions to `completed` or `pending-result-confirmation`
@@ -384,10 +431,10 @@ export type ISessionToolCallConfirmedAction =
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionToolCallCompleteAction extends IToolCallActionBase {
+export interface SessionToolCallCompleteAction extends ToolCallActionBase {
   type: ActionType.SessionToolCallComplete;
   /** Execution result */
-  result: IToolCallResult;
+  result: ToolCallResult;
   /** If true, the result requires client approval before finalizing */
   requiresResultConfirmation?: boolean;
 }
@@ -401,7 +448,7 @@ export interface ISessionToolCallCompleteAction extends IToolCallActionBase {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionToolCallResultConfirmedAction extends IToolCallActionBase {
+export interface SessionToolCallResultConfirmedAction extends ToolCallActionBase {
   type: ActionType.SessionToolCallResultConfirmed;
   /** Whether the result was approved */
   approved: boolean;
@@ -414,13 +461,19 @@ export interface ISessionToolCallResultConfirmedAction extends IToolCallActionBa
  * use this to display live feedback (e.g. a terminal reference) before the
  * tool completes.
  *
+ * For client-provided tools (where `toolClientId` is set on the tool call state),
+ * the owning client dispatches this action to stream intermediate content while
+ * executing. The server SHOULD reject this action if the dispatching client does
+ * not match `toolClientId`.
+ *
  * @category Session Actions
  * @version 1
+ * @clientDispatchable
  */
-export interface ISessionToolCallContentChangedAction extends IToolCallActionBase {
+export interface SessionToolCallContentChangedAction extends ToolCallActionBase {
   type: ActionType.SessionToolCallContentChanged;
   /** The current partial content for the running tool call */
-  content: IToolResultContent[];
+  content: ToolResultContent[];
 }
 
 /**
@@ -429,7 +482,7 @@ export interface ISessionToolCallContentChangedAction extends IToolCallActionBas
  * @category Session Actions
  * @version 1
  */
-export interface ISessionTurnCompleteAction {
+export interface SessionTurnCompleteAction {
   type: ActionType.SessionTurnComplete;
   /** Session URI */
   session: URI;
@@ -444,7 +497,7 @@ export interface ISessionTurnCompleteAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionTurnCancelledAction {
+export interface SessionTurnCancelledAction {
   type: ActionType.SessionTurnCancelled;
   /** Session URI */
   session: URI;
@@ -458,14 +511,14 @@ export interface ISessionTurnCancelledAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionErrorAction {
+export interface SessionErrorAction {
   type: ActionType.SessionError;
   /** Session URI */
   session: URI;
   /** Turn identifier */
   turnId: string;
   /** Error details */
-  error: IErrorInfo;
+  error: ErrorInfo;
 }
 
 /**
@@ -476,7 +529,7 @@ export interface ISessionErrorAction {
  * @clientDispatchable
  * @version 1
  */
-export interface ISessionTitleChangedAction {
+export interface SessionTitleChangedAction {
   type: ActionType.SessionTitleChanged;
   /** Session URI */
   session: URI;
@@ -490,14 +543,14 @@ export interface ISessionTitleChangedAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionUsageAction {
+export interface SessionUsageAction {
   type: ActionType.SessionUsage;
   /** Session URI */
   session: URI;
   /** Turn identifier */
   turnId: string;
   /** Token usage data */
-  usage: IUsageInfo;
+  usage: UsageInfo;
 }
 
 /**
@@ -509,7 +562,7 @@ export interface ISessionUsageAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionReasoningAction {
+export interface SessionReasoningAction {
   type: ActionType.SessionReasoning;
   /** Session URI */
   session: URI;
@@ -528,12 +581,12 @@ export interface ISessionReasoningAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionModelChangedAction {
+export interface SessionModelChangedAction {
   type: ActionType.SessionModelChanged;
   /** Session URI */
   session: URI;
-  /** New model ID */
-  model: string;
+  /** New model selection */
+  model: ModelSelection;
 }
 
 /**
@@ -546,7 +599,7 @@ export interface ISessionModelChangedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionIsReadChangedAction {
+export interface SessionIsReadChangedAction {
   type: ActionType.SessionIsReadChanged;
   /** Session URI */
   session: URI;
@@ -555,21 +608,38 @@ export interface ISessionIsReadChangedAction {
 }
 
 /**
- * The done state of the session changed.
+ * The archived state of the session changed.
  *
- * Dispatched by a client to mark a session as done (e.g. the task is
- * complete) or to reopen it.
+ * Dispatched by a client to archive a session (e.g. the task is
+ * complete) or to unarchive it.
  *
  * @category Session Actions
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionIsDoneChangedAction {
-  type: ActionType.SessionIsDoneChanged;
+export interface SessionIsArchivedChangedAction {
+  type: ActionType.SessionIsArchivedChanged;
   /** Session URI */
   session: URI;
-  /** Whether the session is done */
-  isDone: boolean;
+  /** Whether the session is archived */
+  isArchived: boolean;
+}
+
+/**
+ * The activity description of the session changed.
+ *
+ * Dispatched by the server to indicate what the session is currently doing
+ * (e.g. running a tool, thinking). Clear activity by setting it to `undefined`.
+ *
+ * @category Session Actions
+ * @version 1
+ */
+export interface SessionActivityChangedAction {
+  type: ActionType.SessionActivityChanged;
+  /** Session URI */
+  session: URI;
+  /** Human-readable description of current activity, or `undefined` to clear */
+  activity: string | undefined;
 }
 
 /**
@@ -581,12 +651,12 @@ export interface ISessionIsDoneChangedAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionDiffsChangedAction {
+export interface SessionDiffsChangedAction {
   type: ActionType.SessionDiffsChanged;
   /** Session URI */
   session: URI;
   /** Updated file diffs for the session */
-  diffs: ISessionFileDiff[];
+  diffs: FileEdit[];
 }
 
 /**
@@ -597,18 +667,18 @@ export interface ISessionDiffsChangedAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionServerToolsChangedAction {
+export interface SessionServerToolsChangedAction {
   type: ActionType.SessionServerToolsChanged;
   /** Session URI */
   session: URI;
   /** Updated server tools list (full replacement) */
-  tools: IToolDefinition[];
+  tools: ToolDefinition[];
 }
 
 /**
  * The active client for this session has changed.
  *
- * A client dispatches this action with its own `ISessionActiveClient` to claim
+ * A client dispatches this action with its own `SessionActiveClient` to claim
  * the active role, or with `null` to release it. The server SHOULD reject if
  * another client is already active. The server SHOULD automatically dispatch
  * this action with `activeClient: null` when the active client disconnects.
@@ -617,12 +687,12 @@ export interface ISessionServerToolsChangedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionActiveClientChangedAction {
+export interface SessionActiveClientChangedAction {
   type: ActionType.SessionActiveClientChanged;
   /** Session URI */
   session: URI;
   /** The new active client, or `null` to unset */
-  activeClient: ISessionActiveClient | null;
+  activeClient: SessionActiveClient | null;
 }
 
 /**
@@ -636,12 +706,12 @@ export interface ISessionActiveClientChangedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionActiveClientToolsChangedAction {
+export interface SessionActiveClientToolsChangedAction {
   type: ActionType.SessionActiveClientToolsChanged;
   /** Session URI */
   session: URI;
   /** Updated client tools list (full replacement) */
-  tools: IToolDefinition[];
+  tools: ToolDefinition[];
 }
 
 // ─── Customization Actions ───────────────────────────────────────────────────
@@ -655,12 +725,12 @@ export interface ISessionActiveClientToolsChangedAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionCustomizationsChangedAction {
+export interface SessionCustomizationsChangedAction {
   type: ActionType.SessionCustomizationsChanged;
   /** Session URI */
   session: URI;
   /** Updated customization list (full replacement) */
-  customizations: ISessionCustomization[];
+  customizations: SessionCustomization[];
 }
 
 /**
@@ -673,7 +743,7 @@ export interface ISessionCustomizationsChangedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionCustomizationToggledAction {
+export interface SessionCustomizationToggledAction {
   type: ActionType.SessionCustomizationToggled;
   /** Session URI */
   session: URI;
@@ -681,6 +751,76 @@ export interface ISessionCustomizationToggledAction {
   uri: URI;
   /** Whether to enable or disable the customization */
   enabled: boolean;
+}
+
+/**
+ * Upserts mutable fields on a single customization.
+ *
+ * Dispatched by the server to update one or more fields on a customization,
+ * or to add a new customization to the session, without republishing the
+ * entire `customizations` list. The reducer locates the existing entry by
+ * `customization.uri`:
+ *
+ * - If an entry exists, each provided field is assigned; absent (or
+ *   `undefined`) fields are left unchanged. The stored `customization`
+ *   ref is replaced with the one in the action.
+ * - If no entry exists, a new {@link SessionCustomization} is appended
+ *   using the provided fields; `enabled` defaults to `false` when absent.
+ *
+ * @category Session Actions
+ * @version 1
+ */
+export interface SessionCustomizationUpdatedAction {
+  type: ActionType.SessionCustomizationUpdated;
+  /** Session URI */
+  session: URI;
+  /** The customization to update or insert (matched by `customization.uri`) */
+  customization: CustomizationRef;
+  /** New enabled state (defaults to `false` on insert) */
+  enabled?: boolean;
+  /** New loading status */
+  status?: CustomizationStatus;
+  /** New human-readable status detail */
+  statusMessage?: string;
+}
+
+// ─── Config Actions ──────────────────────────────────────────────────────────
+
+/**
+ * Client changed a mutable config value mid-session.
+ *
+ * Only properties with `sessionMutable: true` in the config schema may be
+ * changed. The server validates and broadcasts the action; the reducer merges
+ * the new values into `state.config.values`.
+ *
+ * @category Session Actions
+ * @version 1
+ * @clientDispatchable
+ */
+export interface SessionConfigChangedAction {
+  type: ActionType.SessionConfigChanged;
+  /** Session URI */
+  session: URI;
+  /** Updated config values */
+  config: Record<string, unknown>;
+  /** When `true`, replaces all config values instead of merging */
+  replace?: boolean;
+}
+
+/**
+ * The session's `_meta` side-channel changed. Replaces `state._meta`
+ * entirely (full-replacement semantics). Producers SHOULD merge any
+ * keys they wish to preserve into the new value before dispatching.
+ *
+ * @category Session Actions
+ * @version 1
+ */
+export interface SessionMetaChangedAction {
+  type: ActionType.SessionMetaChanged;
+  /** Session URI */
+  session: URI;
+  /** New `_meta` payload, or `undefined` to clear it */
+  _meta: Record<string, unknown> | undefined;
 }
 
 // ─── Truncation ──────────────────────────────────────────────────────────────
@@ -700,7 +840,7 @@ export interface ISessionCustomizationToggledAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionTruncatedAction {
+export interface SessionTruncatedAction {
   type: ActionType.SessionTruncated;
   /** Session URI */
   session: URI;
@@ -723,7 +863,7 @@ export interface ISessionTruncatedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionPendingMessageSetAction {
+export interface SessionPendingMessageSetAction {
   type: ActionType.SessionPendingMessageSet;
   /** Session URI */
   session: URI;
@@ -732,7 +872,7 @@ export interface ISessionPendingMessageSetAction {
   /** Unique identifier for this pending message */
   id: string;
   /** The message content */
-  userMessage: IUserMessage;
+  userMessage: UserMessage;
 }
 
 /**
@@ -746,7 +886,7 @@ export interface ISessionPendingMessageSetAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionPendingMessageRemovedAction {
+export interface SessionPendingMessageRemovedAction {
   type: ActionType.SessionPendingMessageRemoved;
   /** Session URI */
   session: URI;
@@ -769,7 +909,7 @@ export interface ISessionPendingMessageRemovedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionQueuedMessagesReorderedAction {
+export interface SessionQueuedMessagesReorderedAction {
   type: ActionType.SessionQueuedMessagesReordered;
   /** Session URI */
   session: URI;
@@ -789,12 +929,12 @@ export interface ISessionQueuedMessagesReorderedAction {
  * @category Session Actions
  * @version 1
  */
-export interface ISessionInputRequestedAction {
+export interface SessionInputRequestedAction {
   type: ActionType.SessionInputRequested;
   /** Session URI */
   session: URI;
   /** Input request to create or replace */
-  request: ISessionInputRequest;
+  request: SessionInputRequest;
 }
 
 /**
@@ -806,7 +946,7 @@ export interface ISessionInputRequestedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionInputAnswerChangedAction {
+export interface SessionInputAnswerChangedAction {
   type: ActionType.SessionInputAnswerChanged;
   /** Session URI */
   session: URI;
@@ -815,7 +955,7 @@ export interface ISessionInputAnswerChangedAction {
   /** Question identifier within the input request */
   questionId: string;
   /** Updated answer, or `undefined` to clear an answer draft */
-  answer?: ISessionInputAnswer;
+  answer?: SessionInputAnswer;
 }
 
 /**
@@ -828,7 +968,7 @@ export interface ISessionInputAnswerChangedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ISessionInputCompletedAction {
+export interface SessionInputCompletedAction {
   type: ActionType.SessionInputCompleted;
   /** Session URI */
   session: URI;
@@ -837,7 +977,7 @@ export interface ISessionInputCompletedAction {
   /** Completion outcome */
   response: SessionInputResponseKind;
   /** Optional final answer replacement, keyed by question ID */
-  answers?: Record<string, ISessionInputAnswer>;
+  answers?: Record<string, SessionInputAnswer>;
 }
 
 // ─── Terminal Actions ────────────────────────────────────────────────────────
@@ -857,7 +997,7 @@ export interface ISessionInputCompletedAction {
  * @category Terminal Actions
  * @version 1
  */
-export interface ITerminalDataAction {
+export interface TerminalDataAction {
   type: ActionType.TerminalData;
   /** Terminal URI */
   terminal: URI;
@@ -878,7 +1018,7 @@ export interface ITerminalDataAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ITerminalInputAction {
+export interface TerminalInputAction {
   type: ActionType.TerminalInput;
   /** Terminal URI */
   terminal: URI;
@@ -896,7 +1036,7 @@ export interface ITerminalInputAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ITerminalResizedAction {
+export interface TerminalResizedAction {
   type: ActionType.TerminalResized;
   /** Terminal URI */
   terminal: URI;
@@ -916,12 +1056,12 @@ export interface ITerminalResizedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ITerminalClaimedAction {
+export interface TerminalClaimedAction {
   type: ActionType.TerminalClaimed;
   /** Terminal URI */
   terminal: URI;
   /** The new claim */
-  claim: ITerminalClaim;
+  claim: TerminalClaim;
 }
 
 /**
@@ -934,7 +1074,7 @@ export interface ITerminalClaimedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ITerminalTitleChangedAction {
+export interface TerminalTitleChangedAction {
   type: ActionType.TerminalTitleChanged;
   /** Terminal URI */
   terminal: URI;
@@ -948,7 +1088,7 @@ export interface ITerminalTitleChangedAction {
  * @category Terminal Actions
  * @version 1
  */
-export interface ITerminalCwdChangedAction {
+export interface TerminalCwdChangedAction {
   type: ActionType.TerminalCwdChanged;
   /** Terminal URI */
   terminal: URI;
@@ -962,7 +1102,7 @@ export interface ITerminalCwdChangedAction {
  * @category Terminal Actions
  * @version 1
  */
-export interface ITerminalExitedAction {
+export interface TerminalExitedAction {
   type: ActionType.TerminalExited;
   /** Terminal URI */
   terminal: URI;
@@ -977,10 +1117,78 @@ export interface ITerminalExitedAction {
  * @version 1
  * @clientDispatchable
  */
-export interface ITerminalClearedAction {
+export interface TerminalClearedAction {
   type: ActionType.TerminalCleared;
   /** Terminal URI */
   terminal: URI;
+}
+
+/**
+ * Shell integration has loaded and the terminal now supports command
+ * detection. The server dispatches this when shell integration becomes
+ * available (which may happen asynchronously after the terminal is created).
+ *
+ * Clients MUST NOT assume command detection is available until this action
+ * (or `terminal/commandExecuted`) has been received.
+ *
+ * @category Terminal Actions
+ * @version 1
+ */
+export interface TerminalCommandDetectionAvailableAction {
+  type: ActionType.TerminalCommandDetectionAvailable;
+  /** Terminal URI */
+  terminal: URI;
+}
+
+/**
+ * A command has been submitted to the shell and is now executing.
+ * All subsequent `terminal/data` actions (until the matching
+ * `terminal/commandFinished`) constitute this command's output.
+ *
+ * @category Terminal Actions
+ * @version 1
+ */
+export interface TerminalCommandExecutedAction {
+  type: ActionType.TerminalCommandExecuted;
+  /** Terminal URI */
+  terminal: URI;
+  /**
+   * Stable identifier for this command, scoped to the terminal URI.
+   * Allows correlating `commandExecuted` → `commandFinished` pairs.
+   */
+  commandId: string;
+  /** The command line text that was submitted */
+  commandLine: string;
+  /**
+   * Unix timestamp (ms) of when the command started executing, as measured
+   * on the server.
+   */
+  timestamp: number;
+}
+
+/**
+ * A command has finished executing.
+ *
+ * The sequence of `terminal/data` actions between the preceding
+ * `terminal/commandExecuted` (same `commandId`) and this action constitutes
+ * the complete output of the command.
+ *
+ * @category Terminal Actions
+ * @version 1
+ */
+export interface TerminalCommandFinishedAction {
+  type: ActionType.TerminalCommandFinished;
+  /** Terminal URI */
+  terminal: URI;
+  /** Matches the `commandId` from the corresponding `commandExecuted` */
+  commandId: string;
+  /** Shell exit code. `undefined` if the shell did not report one. */
+  exitCode?: number;
+  /**
+   * Wall-clock duration of the command in milliseconds, as measured by the
+   * shell integration script on the server side.
+   */
+  durationMs?: number;
 }
 
 // ─── Discriminated Union ─────────────────────────────────────────────────────
@@ -988,49 +1196,57 @@ export interface ITerminalClearedAction {
 /**
  * Discriminated union of all state actions.
  */
-export type IStateAction =
-  | IRootAgentsChangedAction
-  | IRootActiveSessionsChangedAction
-  | IRootTerminalsChangedAction
-  | ISessionReadyAction
-  | ISessionCreationFailedAction
-  | ISessionTurnStartedAction
-  | ISessionDeltaAction
-  | ISessionResponsePartAction
-  | ISessionToolCallStartAction
-  | ISessionToolCallDeltaAction
-  | ISessionToolCallReadyAction
-  | ISessionToolCallConfirmedAction
-  | ISessionToolCallCompleteAction
-  | ISessionToolCallResultConfirmedAction
-  | ISessionToolCallContentChangedAction
-  | ISessionTurnCompleteAction
-  | ISessionTurnCancelledAction
-  | ISessionErrorAction
-  | ISessionTitleChangedAction
-  | ISessionUsageAction
-  | ISessionReasoningAction
-  | ISessionModelChangedAction
-  | ISessionServerToolsChangedAction
-  | ISessionActiveClientChangedAction
-  | ISessionActiveClientToolsChangedAction
-  | ISessionPendingMessageSetAction
-  | ISessionPendingMessageRemovedAction
-  | ISessionQueuedMessagesReorderedAction
-  | ISessionInputRequestedAction
-  | ISessionInputAnswerChangedAction
-  | ISessionInputCompletedAction
-  | ISessionCustomizationsChangedAction
-  | ISessionCustomizationToggledAction
-  | ISessionTruncatedAction
-  | ISessionIsReadChangedAction
-  | ISessionIsDoneChangedAction
-  | ISessionDiffsChangedAction
-  | ITerminalDataAction
-  | ITerminalInputAction
-  | ITerminalResizedAction
-  | ITerminalClaimedAction
-  | ITerminalTitleChangedAction
-  | ITerminalCwdChangedAction
-  | ITerminalExitedAction
-  | ITerminalClearedAction;
+export type StateAction =
+  | RootAgentsChangedAction
+  | RootActiveSessionsChangedAction
+  | RootTerminalsChangedAction
+  | RootConfigChangedAction
+  | SessionReadyAction
+  | SessionCreationFailedAction
+  | SessionTurnStartedAction
+  | SessionDeltaAction
+  | SessionResponsePartAction
+  | SessionToolCallStartAction
+  | SessionToolCallDeltaAction
+  | SessionToolCallReadyAction
+  | SessionToolCallConfirmedAction
+  | SessionToolCallCompleteAction
+  | SessionToolCallResultConfirmedAction
+  | SessionToolCallContentChangedAction
+  | SessionTurnCompleteAction
+  | SessionTurnCancelledAction
+  | SessionErrorAction
+  | SessionTitleChangedAction
+  | SessionUsageAction
+  | SessionReasoningAction
+  | SessionModelChangedAction
+  | SessionServerToolsChangedAction
+  | SessionActiveClientChangedAction
+  | SessionActiveClientToolsChangedAction
+  | SessionPendingMessageSetAction
+  | SessionPendingMessageRemovedAction
+  | SessionQueuedMessagesReorderedAction
+  | SessionInputRequestedAction
+  | SessionInputAnswerChangedAction
+  | SessionInputCompletedAction
+  | SessionCustomizationsChangedAction
+  | SessionCustomizationToggledAction
+  | SessionCustomizationUpdatedAction
+  | SessionTruncatedAction
+  | SessionIsReadChangedAction
+  | SessionIsArchivedChangedAction
+  | SessionActivityChangedAction
+  | SessionDiffsChangedAction
+  | SessionConfigChangedAction
+  | SessionMetaChangedAction
+  | TerminalDataAction
+  | TerminalInputAction
+  | TerminalResizedAction
+  | TerminalClaimedAction
+  | TerminalTitleChangedAction
+  | TerminalCwdChangedAction
+  | TerminalExitedAction
+  | TerminalClearedAction
+  | TerminalCommandDetectionAvailableAction
+  | TerminalCommandExecutedAction
+  | TerminalCommandFinishedAction;

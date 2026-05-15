@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { IToolCallResult, IUsageInfo } from "../../protocol/state.js";
+import type { ToolCallResult, UsageInfo } from "../../protocol/state.js";
 import { JsonFormatter } from "../json-formatter.js";
 import type { JsonEnvelope } from "../json-formatter.js";
 import type { WritableOutput } from "../renderer.js";
@@ -158,7 +158,7 @@ describe("JsonFormatter", () => {
 		it("tool_call_complete event", () => {
 			const cap = createCapture();
 			const fmt = new JsonFormatter(cap.out);
-			const result: IToolCallResult = {
+			const result: ToolCallResult = {
 				success: true,
 				pastTenseMessage: "Ran npm test",
 			};
@@ -167,7 +167,7 @@ describe("JsonFormatter", () => {
 			const env = cap.envelopes()[0];
 			expect(env.type).toBe("tool_call_complete");
 			expect(env.data.toolCallId).toBe("tc1");
-			expect((env.data.result as IToolCallResult).success).toBe(true);
+			expect((env.data.result as ToolCallResult).success).toBe(true);
 		});
 
 		it("tool_call_cancelled event", () => {
@@ -183,14 +183,14 @@ describe("JsonFormatter", () => {
 		it("usage event", () => {
 			const cap = createCapture();
 			const fmt = new JsonFormatter(cap.out);
-			const usage: IUsageInfo = { inputTokens: 100, outputTokens: 50, model: "gpt-4o" };
+			const usage: UsageInfo = { inputTokens: 100, outputTokens: 50, model: "gpt-4o" };
 			fmt.onUsage(usage);
 
 			const env = cap.envelopes()[0];
 			expect(env.type).toBe("usage");
-			expect((env.data.usage as IUsageInfo).inputTokens).toBe(100);
-			expect((env.data.usage as IUsageInfo).outputTokens).toBe(50);
-			expect((env.data.usage as IUsageInfo).model).toBe("gpt-4o");
+			expect((env.data.usage as UsageInfo).inputTokens).toBe(100);
+			expect((env.data.usage as UsageInfo).outputTokens).toBe(50);
+			expect((env.data.usage as UsageInfo).model).toBe("gpt-4o");
 		});
 
 		it("turn_complete event", () => {

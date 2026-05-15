@@ -8,17 +8,17 @@
 
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { IActionEnvelope, IStateAction } from "../protocol/actions.js";
+import type { ActionEnvelope, StateAction } from "../protocol/actions.js";
 import { ActionType } from "../protocol/actions.js";
-import type { ISessionDeltaAction, ISessionErrorAction, ISessionUsageAction } from "../protocol/actions.js";
-import type { IActiveTurn, IMessageAttachment, ISessionState, ITurn, IUsageInfo, URI } from "../protocol/state.js";
+import type { SessionDeltaAction, SessionErrorAction, SessionUsageAction } from "../protocol/actions.js";
+import type { ActiveTurn, MessageAttachment, SessionState, Turn, URI, UsageInfo } from "../protocol/state.js";
 import { SessionLifecycle } from "../protocol/state.js";
 import type { AhpClient } from "./index.js";
 
 /** Options for sending a prompt via SessionHandle. */
 export interface PromptOptions {
 	/** File or directory attachments to include with the message. */
-	attachments?: IMessageAttachment[];
+	attachments?: MessageAttachment[];
 	/** Timeout in ms for the entire turn (default: none). */
 	timeout?: number;
 }
@@ -36,9 +36,9 @@ export interface TurnResult {
 /** Events emitted by SessionHandle, scoped to a single session. */
 export interface SessionHandleEvents {
 	/** Any action for this session. */
-	action: [envelope: IActionEnvelope];
+	action: [envelope: ActionEnvelope];
 	/** A turn completed successfully. */
-	turnComplete: [turn: ITurn];
+	turnComplete: [turn: Turn];
 	/** An error occurred on this session. */
 	error: [error: Error];
 	/** Session was disposed. */
@@ -59,7 +59,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 
 	private _disposed = false;
 	private _activeTurnId: string | undefined;
-	private readonly _onAction: (envelope: IActionEnvelope) => void;
+	private readonly _onAction: (envelope: ActionEnvelope) => void;
 	private readonly _onDisconnect: (code: number, reason: string) => void;
 
 	constructor(
@@ -74,7 +74,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 		this.model = model;
 
 		// Filter client actions to only this session's events
-		this._onAction = (envelope: IActionEnvelope) => {
+		this._onAction = (envelope: ActionEnvelope) => {
 			const action = envelope.action;
 			if (!("session" in action) || (action as { session: URI }).session !== this.uri) {
 				return;
@@ -88,7 +88,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 					this.emit("turnComplete", session.turns[session.turns.length - 1]);
 				}
 			} else if (action.type === ActionType.SessionError) {
-				const a = action as ISessionErrorAction;
+				const a = action as SessionErrorAction;
 				this.emit("error", new Error(a.error.message));
 			}
 		};
@@ -104,7 +104,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 	// ── State accessors ────────────────────────────────────────────────────
 
 	/** Current session state from the state mirror. */
-	get state(): ISessionState | undefined {
+	get state(): SessionState | undefined {
 		return this.client.state.getSession(this.uri);
 	}
 
@@ -114,7 +114,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 	}
 
 	/** The currently active turn, if any. */
-	get activeTurn(): IActiveTurn | undefined {
+	get activeTurn(): ActiveTurn | undefined {
 		return this.state?.activeTurn;
 	}
 
@@ -149,7 +149,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 				reject(new Error(`Timed out waiting for session to be ready (${timeout}ms)`));
 			}, timeout);
 
-			const onAction = (envelope: IActionEnvelope) => {
+			const onAction = (envelope: ActionEnvelope) => {
 				const action = envelope.action;
 				if (action.type === ActionType.SessionReady) {
 					cleanup();
@@ -218,12 +218,12 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 
 		let responseText = "";
 		let toolCallCount = 0;
-		let usage: IUsageInfo | undefined;
+		let usage: UsageInfo | undefined;
 
 		return new Promise<TurnResult>((resolve) => {
 			let timer: ReturnType<typeof setTimeout> | undefined;
 
-			const onAction = (envelope: IActionEnvelope) => {
+			const onAction = (envelope: ActionEnvelope) => {
 				const action = envelope.action;
 
 				// Only handle actions for our turn (where turnId is present)
@@ -233,7 +233,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 
 				switch (action.type) {
 					case ActionType.SessionDelta: {
-						const a = action as ISessionDeltaAction;
+						const a = action as SessionDeltaAction;
 						responseText += a.content;
 						break;
 					}
@@ -243,7 +243,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 						break;
 
 					case ActionType.SessionUsage: {
-						const a = action as ISessionUsageAction;
+						const a = action as SessionUsageAction;
 						usage = a.usage;
 						break;
 					}
@@ -254,7 +254,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 					}
 
 					case ActionType.SessionError: {
-						const a = action as ISessionErrorAction;
+						const a = action as SessionErrorAction;
 						finish("error", a.error.message);
 						break;
 					}
@@ -357,7 +357,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 		this.client.dispatchAction({
 			...action,
 			session: this.uri,
-		} as IStateAction);
+		} as StateAction);
 	}
 
 	private ensureNotDisposed(): void {

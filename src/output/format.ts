@@ -7,7 +7,7 @@
  *   - quiet: Accumulates silently, prints only the final response
  */
 
-import type { IErrorInfo, IToolCallResult, IUsageInfo } from "../protocol/state.js";
+import type { ErrorInfo, ToolCallResult, UsageInfo } from "../protocol/state.js";
 import type { ToolCallInfo } from "./renderer.js";
 
 export type OutputFormat = "text" | "json" | "quiet";
@@ -24,11 +24,11 @@ export interface OutputFormatter {
 	onToolCallStart(id: string, name: string): void;
 	onToolCallDelta(id: string, paramsDelta: string): void;
 	onToolCallReady(id: string, call: ToolCallInfo): void;
-	onToolCallComplete(id: string, result: IToolCallResult): void;
+	onToolCallComplete(id: string, result: ToolCallResult): void;
 	onToolCallCancelled(id: string, reason: string): void;
-	onUsage(usage: IUsageInfo): void;
+	onUsage(usage: UsageInfo): void;
 	onTurnComplete(responseText: string): void;
-	onTurnError(error: IErrorInfo): void;
+	onTurnError(error: ErrorInfo): void;
 	onTurnCancelled(): void;
 	onTitleChanged(title: string): void;
 }

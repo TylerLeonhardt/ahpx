@@ -11,7 +11,7 @@
  * When `strict` mode is enabled, non-JSON stderr output is suppressed.
  */
 
-import type { IErrorInfo, IToolCallResult, IUsageInfo } from "../protocol/state.js";
+import type { ErrorInfo, ToolCallResult, UsageInfo } from "../protocol/state.js";
 import type { OutputFormatter, WritableOutput } from "./format.js";
 import type { ToolCallInfo } from "./renderer.js";
 
@@ -79,7 +79,7 @@ export class JsonFormatter implements OutputFormatter {
 		});
 	}
 
-	onToolCallComplete(id: string, result: IToolCallResult): void {
+	onToolCallComplete(id: string, result: ToolCallResult): void {
 		this.emit("tool_call_complete", { toolCallId: id, result });
 	}
 
@@ -87,7 +87,7 @@ export class JsonFormatter implements OutputFormatter {
 		this.emit("tool_call_cancelled", { toolCallId: id, reason });
 	}
 
-	onUsage(usage: IUsageInfo): void {
+	onUsage(usage: UsageInfo): void {
 		this.emit("usage", { usage });
 	}
 
@@ -95,7 +95,7 @@ export class JsonFormatter implements OutputFormatter {
 		this.emit("turn_complete", { responseText });
 	}
 
-	onTurnError(error: IErrorInfo): void {
+	onTurnError(error: ErrorInfo): void {
 		this.emit("turn_error", { error });
 	}
 

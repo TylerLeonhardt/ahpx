@@ -7,7 +7,7 @@
  */
 
 import { ActionType } from "../protocol/actions.js";
-import type { ISessionActiveClient, IToolDefinition, IToolResultContent, URI } from "../protocol/state.js";
+import type { SessionActiveClient, ToolDefinition, ToolResultContent, URI } from "../protocol/state.js";
 import { ToolResultContentType } from "../protocol/state.js";
 import type { AhpClient } from "./index.js";
 
@@ -27,8 +27,8 @@ export class ActiveClientManager {
 	 * Claim active client status for a session.
 	 * Dispatches `session/activeClientChanged` with this client's info.
 	 */
-	async claimActiveClient(sessionUri: URI, displayName?: string, tools: IToolDefinition[] = []): Promise<void> {
-		const activeClient: ISessionActiveClient = {
+	async claimActiveClient(sessionUri: URI, displayName?: string, tools: ToolDefinition[] = []): Promise<void> {
+		const activeClient: SessionActiveClient = {
 			clientId: this.clientId,
 			displayName,
 			tools,
@@ -71,7 +71,7 @@ export class ActiveClientManager {
 	 * Dispatches `session/activeClientToolsChanged`.
 	 * Only valid when this client is the active client.
 	 */
-	async registerTools(sessionUri: URI, tools: IToolDefinition[]): Promise<void> {
+	async registerTools(sessionUri: URI, tools: ToolDefinition[]): Promise<void> {
 		this.client.dispatchAction({
 			type: ActionType.SessionActiveClientToolsChanged,
 			session: sessionUri,
@@ -98,7 +98,7 @@ export class ActiveClientManager {
 				success: result.success,
 				pastTenseMessage: result.pastTenseMessage,
 				content: result.content?.map(
-					(c): IToolResultContent => ({
+					(c): ToolResultContent => ({
 						type: ToolResultContentType.Text,
 						text: c.text,
 					}),

@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AhpClient } from "../../client/index.js";
 import { ActionType } from "../../protocol/actions.js";
-import type { ISessionToolCallApprovedAction, ISessionToolCallDeniedAction } from "../../protocol/actions.js";
+import type { SessionToolCallApprovedAction, SessionToolCallDeniedAction } from "../../protocol/actions.js";
 import { ToolCallCancellationReason, ToolCallConfirmationReason } from "../../protocol/state.js";
 import { type MockServer, createMockServer, echoScenario, toolCallScenario } from "../helpers/mock-server.js";
 
@@ -66,7 +66,7 @@ describe("AhpClient integration", () => {
 
 			const result = await client.connect(server.url);
 
-			expect(result.protocolVersion).toBe(1);
+			expect(result.protocolVersion).toBe("0.1.0");
 			expect(result.snapshots).toHaveLength(1);
 			expect(result.snapshots[0].resource).toBe("agenthost:/root");
 			expect(client.connected).toBe(true);
@@ -272,7 +272,7 @@ describe("AhpClient integration", () => {
 						toolCallId: action.toolCallId!,
 						approved: true,
 						confirmed: ToolCallConfirmationReason.UserAction,
-					} as ISessionToolCallApprovedAction);
+					} as SessionToolCallApprovedAction);
 				}
 			});
 
@@ -306,7 +306,7 @@ describe("AhpClient integration", () => {
 						toolCallId: action.toolCallId!,
 						approved: false,
 						reason: ToolCallCancellationReason.Denied,
-					} as ISessionToolCallDeniedAction);
+					} as SessionToolCallDeniedAction);
 				}
 			});
 

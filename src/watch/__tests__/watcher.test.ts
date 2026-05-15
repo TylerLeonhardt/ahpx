@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { AhpClient } from "../../client/index.js";
 import type { OutputFormatter } from "../../output/format.js";
 import type { WritableOutput } from "../../output/renderer.js";
-import type { IActionEnvelope, IStateAction } from "../../protocol/actions.js";
+import type { ActionEnvelope, StateAction } from "../../protocol/actions.js";
 import { ActionType } from "../../protocol/actions.js";
-import type { ISubscribeResult } from "../../protocol/commands.js";
-import type { ISessionState } from "../../protocol/state.js";
+import type { SubscribeResult } from "../../protocol/commands.js";
+import type { SessionState } from "../../protocol/state.js";
 import {
 	ResponsePartKind,
 	SessionLifecycle,
@@ -55,7 +55,7 @@ function createMockFormatter(): OutputFormatter & { calls: Array<{ method: strin
 	};
 }
 
-function makeSessionState(overrides: Partial<ISessionState> = {}): ISessionState {
+function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 	return {
 		summary: {
 			resource: "copilot:/test",
@@ -79,10 +79,10 @@ const tick = () => Promise.resolve();
 function createMockClient() {
 	const emitter = new EventEmitter();
 	let seq = 0;
-	const sessionStates = new Map<string, ISessionState>();
+	const sessionStates = new Map<string, SessionState>();
 
 	const client = Object.assign(emitter, {
-		subscribe: async (_uri: string): Promise<ISubscribeResult> => {
+		subscribe: async (_uri: string): Promise<SubscribeResult> => {
 			return {
 				snapshot: {
 					resource: SESSION_URI,
@@ -100,12 +100,12 @@ function createMockClient() {
 
 	return {
 		client,
-		emitAction(action: IStateAction) {
+		emitAction(action: StateAction) {
 			seq++;
-			const envelope: IActionEnvelope = { action, serverSeq: seq, origin: undefined };
+			const envelope: ActionEnvelope = { action, serverSeq: seq, origin: undefined };
 			emitter.emit("action", envelope);
 		},
-		setSessionState(uri: string, state: ISessionState) {
+		setSessionState(uri: string, state: SessionState) {
 			sessionStates.set(uri, state);
 		},
 	};

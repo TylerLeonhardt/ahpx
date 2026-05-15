@@ -20,7 +20,7 @@ import { WebSocket, WebSocketServer } from "ws";
 
 // ── Protocol constants (mirroring src/protocol) ─────────────────────────
 
-const PROTOCOL_VERSION = 1;
+const PROTOCOL_VERSION = "0.1.0";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ interface ActionEnvelope {
 interface MockSession {
 	uri: string;
 	provider: string;
-	model?: string;
+	model?: { id: string };
 	workingDirectory?: string;
 	title: string;
 	createdAt: number;
@@ -320,7 +320,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			case "createSession": {
 				const sessionUri = params.session as string;
 				const provider = (params.provider ?? agents[0]?.provider ?? "mock-agent") as string;
-				const model = params.model as string | undefined;
+				const model = params.model as { id: string } | undefined;
 				const workingDirectory = params.workingDirectory as string | undefined;
 
 				if (sessions.has(sessionUri)) {

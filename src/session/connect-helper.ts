@@ -11,7 +11,7 @@ import { AhpClient } from "../client/index.js";
 import type { AhpxConfig } from "../config/index.js";
 import { ConnectionStore, isValidWsUrl } from "../config/index.js";
 import { NotificationType } from "../protocol/notifications.js";
-import type { IAuthRequiredNotification } from "../protocol/notifications.js";
+import type { AuthRequiredNotification } from "../protocol/notifications.js";
 
 export interface WithConnectionOptions {
 	/** Server name or WebSocket URL (from --server flag) */
@@ -95,7 +95,7 @@ export async function withConnection(
 		const authHandler = new AuthHandler(client, { token });
 		const onNotification = (notification: { type: string; resource?: string }) => {
 			if (notification.type === NotificationType.AuthRequired) {
-				const authNotification = notification as IAuthRequiredNotification;
+				const authNotification = notification as AuthRequiredNotification;
 				authHandler.handleAuthRequired({ resource: authNotification.resource }).catch(() => {
 					// Auth failure during session is non-fatal — server will retry or error
 				});

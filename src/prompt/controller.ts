@@ -11,21 +11,21 @@ import type { AhpClient } from "../client/index.js";
 import type { OutputFormatter } from "../output/format.js";
 import type { ToolCallInfo } from "../output/renderer.js";
 import type { PermissionHandler } from "../permissions/handler.js";
-import type { IActionEnvelope } from "../protocol/actions.js";
+import type { ActionEnvelope } from "../protocol/actions.js";
 import { ActionType } from "../protocol/actions.js";
 import type {
-	ISessionDeltaAction,
-	ISessionErrorAction,
-	ISessionReasoningAction,
-	ISessionTitleChangedAction,
-	ISessionToolCallCompleteAction,
-	ISessionToolCallDeltaAction,
-	ISessionToolCallReadyAction,
-	ISessionToolCallStartAction,
-	ISessionUsageAction,
+	SessionDeltaAction,
+	SessionErrorAction,
+	SessionReasoningAction,
+	SessionTitleChangedAction,
+	SessionToolCallCompleteAction,
+	SessionToolCallDeltaAction,
+	SessionToolCallReadyAction,
+	SessionToolCallStartAction,
+	SessionUsageAction,
 } from "../protocol/actions.js";
 import { ResponsePartKind, ToolCallCancellationReason, ToolCallConfirmationReason } from "../protocol/state.js";
-import type { IMessageAttachment, IUsageInfo, URI } from "../protocol/state.js";
+import type { MessageAttachment, URI, UsageInfo } from "../protocol/state.js";
 
 export interface TurnResult {
 	turnId: string;
@@ -60,7 +60,7 @@ export class TurnController {
 	 */
 	async prompt(
 		text: string,
-		attachments?: IMessageAttachment[],
+		attachments?: MessageAttachment[],
 		options?: { idleTimeout?: number },
 	): Promise<TurnResult> {
 		const turnId = randomUUID();
@@ -69,7 +69,7 @@ export class TurnController {
 
 		let responseText = "";
 		let toolCallCount = 0;
-		let usage: IUsageInfo | undefined;
+		let usage: UsageInfo | undefined;
 
 		return new Promise<TurnResult>((resolve) => {
 			let idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -97,7 +97,7 @@ export class TurnController {
 				}
 			};
 
-			const onAction = (envelope: IActionEnvelope) => {
+			const onAction = (envelope: ActionEnvelope) => {
 				const action = envelope.action;
 
 				// Only handle actions for our session
@@ -114,33 +114,33 @@ export class TurnController {
 
 				switch (action.type) {
 					case ActionType.SessionDelta: {
-						const a = action as ISessionDeltaAction;
+						const a = action as SessionDeltaAction;
 						responseText += a.content;
 						this.renderer.onDelta(a.content);
 						break;
 					}
 
 					case ActionType.SessionReasoning: {
-						const a = action as ISessionReasoningAction;
+						const a = action as SessionReasoningAction;
 						this.renderer.onReasoning(a.content);
 						break;
 					}
 
 					case ActionType.SessionToolCallStart: {
-						const a = action as ISessionToolCallStartAction;
+						const a = action as SessionToolCallStartAction;
 						toolCallCount++;
 						this.renderer.onToolCallStart(a.toolCallId, a.displayName);
 						break;
 					}
 
 					case ActionType.SessionToolCallDelta: {
-						const a = action as ISessionToolCallDeltaAction;
+						const a = action as SessionToolCallDeltaAction;
 						this.renderer.onToolCallDelta(a.toolCallId, a.content);
 						break;
 					}
 
 					case ActionType.SessionToolCallReady: {
-						const a = action as ISessionToolCallReadyAction;
+						const a = action as SessionToolCallReadyAction;
 						const serverConfirmed = !!a.confirmed;
 
 						// Look up tool call from session state (for toolClientId and display info)
@@ -213,20 +213,20 @@ export class TurnController {
 					}
 
 					case ActionType.SessionToolCallComplete: {
-						const a = action as ISessionToolCallCompleteAction;
+						const a = action as SessionToolCallCompleteAction;
 						this.renderer.onToolCallComplete(a.toolCallId, a.result);
 						break;
 					}
 
 					case ActionType.SessionUsage: {
-						const a = action as ISessionUsageAction;
+						const a = action as SessionUsageAction;
 						usage = a.usage;
 						this.renderer.onUsage(a.usage);
 						break;
 					}
 
 					case ActionType.SessionTitleChanged: {
-						const a = action as ISessionTitleChangedAction;
+						const a = action as SessionTitleChangedAction;
 						this.renderer.onTitleChanged(a.title);
 						break;
 					}
@@ -251,7 +251,7 @@ export class TurnController {
 					}
 
 					case ActionType.SessionError: {
-						const a = action as ISessionErrorAction;
+						const a = action as SessionErrorAction;
 						cleanup();
 						this.renderer.onTurnError(a.error);
 						resolve({

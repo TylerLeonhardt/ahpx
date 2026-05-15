@@ -6,73 +6,61 @@ Records when ahpx was last synchronized with the [Agent Host Protocol](https://g
 
 | Field | Value |
 |-------|-------|
-| **Spec Commit** | `1f722585c64b18e3e9e02fc6e2f1f7e3bf4eb0be` |
+| **Spec Commit** | `ac3d6f020eb51d1f2a88660f1cc9825fe856b7c7` |
 | **Spec Repo** | `microsoft/agent-host-protocol` |
-| **Synced On** | 2026-04-10 |
-| **ahpx Commit** | *(see PR branch `ahp-spec-sync-1f72258`)* |
+| **Synced On** | 2026-05-15 |
+| **ahpx Commit** | *(see PR branch `george/ahp-spec-sync-latest`)* |
 
 ## What Was Implemented
 
 ### Breaking Changes Applied
 
-- **SessionStatus enum → bitwise flags**: Changed from string enum (`'idle'`, `'in-progress'`, `'error'`) to numeric bitwise enum (`Idle = 1`, `Error = 2`, `InProgress = 8`, `InputNeeded = 24`). All application code updated to use enum values instead of string literals.
-- **CustomizationStatus → const enum**: No longer re-exportable as a runtime value; removed from library exports (still available as compile-time type).
-- **SessionDelta no-op for nonexistent partId**: `SessionDelta` targeting a `partId` that doesn't exist in `responseParts` is now a no-op. Parts must be created first by `SessionResponsePart`. Tests updated to match.
+- **I-prefix removal**: All protocol interfaces dropped the `I` prefix (e.g. `ISessionState` → `SessionState`, `IActionEnvelope` → `ActionEnvelope`, `ITurn` → `Turn`). ~100 type renames applied across all application code, tests, and library exports.
+- **Protocol versioning → SemVer**: `protocolVersion: number` → `protocolVersions: string[]` in `InitializeParams`. `PROTOCOL_VERSION` changed from `1` to `'0.1.0'`. `MIN_PROTOCOL_VERSION` removed. Version negotiation uses SemVer strings.
+- **`AttachmentType` → `MessageAttachmentKind`**: Enum renamed with new discriminated union variants (`Simple`, `EmbeddedResource`, `Resource`). New types: `MessageAttachmentBase`, `SimpleMessageAttachment`, `MessageEmbeddedResourceAttachment`, `MessageResourceAttachment`, `TextPosition`, `TextRange`, `TextSelection`.
+- **`session/isDoneChanged` → `session/isArchivedChanged`**: Action renamed. `ISessionIsDoneChangedAction` → `SessionIsArchivedChangedAction`.
+- **`SessionFileDiff` → `FileEdit`**: Type renamed and restructured.
+- **`model` field → `ModelSelection`**: `SessionSummary.model` changed from `string` to `ModelSelection` (object with `id` and optional `config`). `CreateSessionParams.model` and `SessionModelChangedAction.model` also changed. Application code updated to wrap/unwrap `.id`.
+- **Session status booleans cleanup**: `isDone` field removed, `isArchived` introduced.
+- **Settings type widened**: Settings values changed from `string` to `unknown`.
+- **`workingDirectory` removed from `ISessionState`**: Moved to session summary.
 
 ### Additive Features Added
 
-- **Terminal support**: Full terminal lifecycle management.
-  - New types: `ITerminalInfo`, `ITerminalState`, `ITerminalClaim` (discriminated union: `ITerminalClientClaim`, `ITerminalSessionClaim`), `TerminalClaimKind` enum.
-  - New actions (8): `terminal/data`, `terminal/input`, `terminal/resized`, `terminal/claimed`, `terminal/titleChanged`, `terminal/cwdChanged`, `terminal/exited`, `terminal/cleared`.
-  - New action union types: `ITerminalAction`, `IClientTerminalAction`, `IServerTerminalAction`.
-  - New commands: `createTerminal`, `disposeTerminal` on `AhpClient`.
-  - New reducer: `terminalReducer()` for terminal-scoped state.
-  - `IRootState.terminals` field for server-known terminals.
-  - `ISnapshot.state` widened to include `ITerminalState`.
-  - `StateMirror` updated with terminal state tracking, snapshot handling, and action routing.
-
-- **Session input / elicitation**: Structured input collection from the user during turns.
-  - New types: `ISessionInputRequest`, `ISessionInputQuestion` (6 question kinds: text, number, integer, boolean, single-select, multi-select), `ISessionInputAnswer`, `ISessionInputOption`, `ISessionInputAnswerValue` (5 value kinds).
-  - New enums: `SessionInputQuestionKind`, `SessionInputAnswerValueKind`, `SessionInputAnswerState`, `SessionInputResponseKind`.
-  - New actions: `session/inputRequested`, `session/inputAnswerChanged` (client-dispatchable), `session/inputCompleted` (client-dispatchable).
-  - `ISessionState.inputRequests` field.
-  - `SessionStatus.InputNeeded` bitwise flag for pending input.
-
-- **Session metadata enhancements**:
-  - `ISessionSummary.isRead`, `isDone`, `diffs`, `project` fields.
-  - New types: `ISessionFileDiff`, `IProjectInfo`.
-  - New actions: `session/isReadChanged` (client-dispatchable), `session/isDoneChanged` (client-dispatchable), `session/diffsChanged`.
-  - New notification: `ISessionSummaryChangedNotification` (`notify/sessionSummaryChanged`).
-
-- **Tool call content updates**: Live partial content during tool execution.
-  - New action: `session/toolCallContentChanged`.
-  - `IToolCallRunningState.content` field.
-
-- **New tool result content types**:
-  - `IToolResultTerminalContent` (`ToolResultContentType.Terminal`).
-  - `IToolResultSubagentContent` (`ToolResultContentType.Subagent`).
-
-- **Reducer improvements**:
-  - New helpers: `summaryStatus()`, `refreshSummaryStatus()`, `hasPendingToolCallConfirmation()`.
-  - Existing session actions wrapped with `refreshSummaryStatus()` for correct status derivation.
-  - `isClientDispatchable()` now accepts `ITerminalAction` and returns `IClientTerminalAction`.
+- **9 new action types**: `session/customizationUpdated`, `session/isArchivedChanged`, `session/activityChanged`, `session/configChanged`, `session/metaChanged`, `root/configChanged`, `terminal/commandDetectionAvailable`, `terminal/commandExecuted`, `terminal/commandFinished`.
+- **8 new command types**: `ping`, `resourceRequest`, `resolveSessionConfig`, `completions`, `sessionConfigCompletions` and related params/results.
+- **`SystemNotificationResponsePart`**: New response part kind for system notifications.
+- **`ConfirmationOption` / `ConfirmationOptionKind`**: Structured tool call confirmation options with approve/deny/custom kinds.
+- **`ModelSelection`**: Structured model selection with per-model configuration.
+- **`SessionConfigState` / `RootConfigState`**: New config state types for session and root configuration.
+- **Terminal content parts**: `TerminalContentPart`, `TerminalUnclassifiedPart`, `TerminalCommandPart` for structured terminal output.
+- **`UnsupportedProtocolVersionErrorData`**: New error data type for version negotiation failures.
+- **Provider metadata on `UsageInfo`**: `_meta` field for provider-specific usage metadata.
+- **`_meta` on `SessionState`**: Server-owned intrinsic metadata.
+- **`SessionInputRequest.message` made optional**.
+- **Attachment URI rename**: `path` → `uri` for message attachment paths.
 
 ### Application Code Updated
 
-- `StateMirror`: Added terminal state storage, snapshot handling, and action routing via `terminalReducer`.
-- `AhpClient`: Added `createTerminal()` and `disposeTerminal()` command methods.
-- `bin.ts`: Updated session status display to use `SessionStatus` enum values (handles `Idle`, `InProgress`, `InputNeeded`, `Error`).
-- `src/index.ts`: Exported all new types, enums, actions, commands, notifications, and `terminalReducer`.
-- All 626 tests updated and passing.
+- All 27 application source files updated for I-prefix removal.
+- `AhpClient.connect()`: Uses `protocolVersions: [PROTOCOL_VERSION]` (SemVer array).
+- `AhpClient.createSession()`: Wraps `model` string as `{ id: model }`.
+- `bin.ts`: `printServerInfo` / `serverInfoJson` use `string` protocol version. Model field extracts `.id` from `ModelSelection`. `SessionModelChanged` dispatch wraps model as `{ id: modelId }`.
+- `fleet/health.ts`: `ServerHealth.protocolVersion` changed from `number` to `string`.
+- `src/index.ts`: Added 30+ new type/enum exports for all additive features.
+- All 633 tests passing.
 
 ## Intentionally Not Implemented
 
 | Feature | Reason |
 |---------|--------|
-| Terminal CLI commands (`ahpx terminal create/attach/list`) | Additive — terminal UX needs design. Client API methods are exposed; CLI can be added when use case is clearer. |
-| Session input/elicitation interactive CLI | Additive — requires significant interactive prompt UX (multi-question forms, select menus). `TurnController` and `OutputFormatter` can be extended when this is prioritized. |
-| Session diff display (`ahpx session diffs`) | Additive — can be added as part of `session info` or a dedicated command. |
-| `isRead`/`isDone` CLI commands | Additive — `dispatchAction` can already set these via client-dispatchable actions. CLI surface can be added when needed. |
-| `SessionSummaryChangedNotification` CLI handling | Additive — notification is emitted on the `notification` event for library consumers. CLI integration can be added for real-time session list updates. |
+| Terminal command detection CLI | Additive — new `terminal/commandDetectionAvailable`, `terminal/commandExecuted`, `terminal/commandFinished` actions are handled by reducers. CLI UX for shell integration can be added when needed. |
+| Session config CLI commands | Additive — `resolveSessionConfig`, `session/configChanged`, `root/configChanged` are protocol-level. CLI surface for config management can be designed separately. |
+| Completions CLI integration | Additive — `completions` and `sessionConfigCompletions` commands are available via client API. Tab-completion UX requires interactive CLI work. |
+| Ping CLI command | Additive — `ping` command available via protocol. Could be exposed as `ahpx ping` health check. |
+| Resource request CLI | Additive — `resourceRequest` command available via client API. CLI surface can be added as needed. |
+| Structured confirmation options UI | Additive — `ConfirmationOption` with `approve`/`deny`/`custom` kinds. Permission handler could be enhanced to show custom options. |
+| Session activity display | Additive — `session/activityChanged` action updates state. CLI could display activity status in session info. |
+| Session customization update CLI | Additive — `session/customizationUpdated` upserts customization state. Library API supports it; CLI surface deferred. |
 
 These are all additive features that don't affect correctness. The protocol types, reducers, client API, and library exports support them — only CLI surface area and turn controller integration are deferred.

@@ -47,7 +47,7 @@ import type { PermissionMode } from "./permissions/index.js";
 import { TurnController } from "./prompt/index.js";
 import { ActionType } from "./protocol/actions.js";
 import { ResponsePartKind, SessionStatus } from "./protocol/state.js";
-import type { ITurn } from "./protocol/state.js";
+import type { Turn } from "./protocol/state.js";
 import { SessionPersistence, SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
 import type { SessionRecord } from "./session/index.js";
 import { ensureFileUri } from "./uri.js";
@@ -58,7 +58,7 @@ const sessionStore = new SessionStore();
 const sessionPersistence = new SessionPersistence(sessionStore);
 
 /** Derive response text from a turn's response parts (markdown parts concatenated). */
-function turnResponseText(turn: ITurn): string {
+function turnResponseText(turn: Turn): string {
 	let text = "";
 	for (const p of turn.responseParts) {
 		if (p.kind === ResponsePartKind.Markdown) {
@@ -69,7 +69,7 @@ function turnResponseText(turn: ITurn): string {
 }
 
 /** Count tool calls in a turn's response parts. */
-function turnToolCallCount(turn: ITurn): number {
+function turnToolCallCount(turn: Turn): number {
 	let count = 0;
 	for (const p of turn.responseParts) {
 		if (p.kind === ResponsePartKind.ToolCall) {
@@ -241,7 +241,7 @@ async function resolveTarget(target?: string): Promise<{ url: string; token?: st
 /** Print server information after a successful connect (text mode). */
 function printServerInfo(
 	client: AhpClient,
-	result: { protocolVersion: number; serverSeq: number; defaultDirectory?: string },
+	result: { protocolVersion: string; serverSeq: number; defaultDirectory?: string },
 ) {
 	console.log(pc.green("✓ Connected"));
 	console.log();
@@ -274,7 +274,7 @@ function printServerInfo(
 /** Format server info as a JSON-serializable object. */
 function serverInfoJson(
 	client: AhpClient,
-	result: { protocolVersion: number; serverSeq: number; defaultDirectory?: string },
+	result: { protocolVersion: string; serverSeq: number; defaultDirectory?: string },
 ): Record<string, unknown> {
 	const rootState = client.state.root;
 	return {
@@ -994,7 +994,7 @@ session
 								serverName: serverInfo.name,
 								serverUrl: serverInfo.url,
 								provider: resolvedProvider,
-								model: model ?? sessionState?.summary.model,
+								model: model ?? sessionState?.summary.model?.id,
 								name: opts.name,
 								workingDirectory: cwd,
 								gitRoot,
@@ -1529,7 +1529,7 @@ session
 
 								console.log(`  ${pc.bold(pc.cyan(s.resource))}`);
 								console.log(`    ${pc.bold("Provider:")} ${s.provider}`);
-								if (s.model) console.log(`    ${pc.bold("Model:")} ${s.model}`);
+								if (s.model) console.log(`    ${pc.bold("Model:")} ${s.model.id}`);
 								if (s.title) console.log(`    ${pc.bold("Title:")} ${s.title}`);
 								console.log(`    ${pc.bold("Status:")} ${status}`);
 								console.log();
@@ -1540,7 +1540,7 @@ session
 							sessions: result.items.map((s) => ({
 								resource: s.resource,
 								provider: s.provider,
-								model: s.model,
+								model: s.model?.id,
 								title: s.title,
 								status: s.status,
 								createdAt: s.createdAt,
@@ -1829,7 +1829,7 @@ async function resolveOrCreateSession(
 		serverName: serverInfo.name,
 		serverUrl: serverInfo.url,
 		provider,
-		model: opts.model ?? cfg.defaultModel ?? client.state.getSession(sessionUri)?.summary.model,
+		model: opts.model ?? cfg.defaultModel ?? client.state.getSession(sessionUri)?.summary.model?.id,
 		name: opts.sessionName,
 		workingDirectory: cwd,
 		gitRoot,
@@ -2227,7 +2227,7 @@ program
 				client.dispatchAction({
 					type: ActionType.SessionModelChanged,
 					session: record.sessionUri,
-					model: modelId,
+					model: { id: modelId },
 				});
 
 				outputResult(globalOpts, () => console.log(pc.green("✓"), `Model change to ${pc.bold(modelId)} dispatched.`), {
