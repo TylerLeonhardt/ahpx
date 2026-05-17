@@ -63,10 +63,12 @@ export class PromptRenderer implements OutputFormatter {
 		this.out.write(pc.dim(text));
 	}
 
-	/** Tool call started (streaming parameters) — defer output to onToolCallReady. */
-	onToolCallStart(id: string, _name: string): void {
+	/** Tool call started — show the tool name immediately so client-provided tools aren't invisible. */
+	onToolCallStart(id: string, name: string): void {
 		this.closeReasoningIfNeeded();
+		this.ensureNewline();
 		this.pendingToolCalls.add(id);
+		this.out.write(`${pc.yellow("[tool]")} ${name} ${pc.dim("(running)")}\n`);
 	}
 
 	/** Tool call streaming parameter delta — silent, state tracked internally. */
@@ -74,13 +76,9 @@ export class PromptRenderer implements OutputFormatter {
 		// Parameter streaming is silent in text mode; the state mirror tracks it.
 	}
 
-	/** Tool call parameters complete, pending confirmation. */
-	onToolCallReady(id: string, call: ToolCallInfo): void {
-		this.closeReasoningIfNeeded();
-		this.ensureNewline();
+	/** Tool call parameters complete — silent; the permission handler shows any needed prompt. */
+	onToolCallReady(id: string, _call: ToolCallInfo): void {
 		this.pendingToolCalls.delete(id);
-		const msg = textOf(call.invocationMessage);
-		this.out.write(`${pc.yellow("[tool]")} ${msg} ${pc.dim("(pending confirmation)")}\n`);
 	}
 
 	/** Tool call completed with result. */

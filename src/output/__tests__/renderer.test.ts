@@ -74,16 +74,18 @@ describe("PromptRenderer", () => {
 	});
 
 	describe("onToolCallStart", () => {
-		it("does not produce output (defers to onToolCallReady)", () => {
+		it("shows [tool] name (running)", () => {
 			const cap = createCapture();
 			const r = new PromptRenderer(cap.out);
-			r.onToolCallStart("tc1", "Run npm test");
-			expect(cap.text()).toBe("");
+			r.onToolCallStart("tc1", "Shell");
+			expect(cap.text()).toContain("[tool]");
+			expect(cap.text()).toContain("Shell");
+			expect(cap.text()).toContain("(running)");
 		});
 	});
 
 	describe("onToolCallReady", () => {
-		it("shows pending confirmation", () => {
+		it("produces no output (permission handler shows prompt)", () => {
 			const cap = createCapture();
 			const r = new PromptRenderer(cap.out);
 			const call: ToolCallInfo = {
@@ -93,22 +95,7 @@ describe("PromptRenderer", () => {
 				invocationMessage: "Run npm test",
 			};
 			r.onToolCallReady("tc1", call);
-			expect(cap.text()).toContain("[tool]");
-			expect(cap.text()).toContain("Run npm test");
-			expect(cap.text()).toContain("(pending confirmation)");
-		});
-
-		it("handles markdown invocation message", () => {
-			const cap = createCapture();
-			const r = new PromptRenderer(cap.out);
-			const call: ToolCallInfo = {
-				toolCallId: "tc1",
-				toolName: "shell",
-				displayName: "Shell",
-				invocationMessage: { markdown: "**bold command**" },
-			};
-			r.onToolCallReady("tc1", call);
-			expect(cap.text()).toContain("**bold command**");
+			expect(cap.text()).toBe("");
 		});
 	});
 
