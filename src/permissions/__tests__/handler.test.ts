@@ -59,12 +59,37 @@ describe("PermissionHandler", () => {
 	});
 
 	describe("approve-reads mode", () => {
-		it("prompts for tool confirmations", async () => {
+		it("auto-approves tool calls with readOnlyHint=true", async () => {
+			const cap = createCapture();
+			const handler = new PermissionHandler("approve-reads", { output: cap.out });
+			const result = await handler.handleToolConfirmation(makeToolCall({ annotations: { readOnlyHint: true } }));
+			expect(result).toBe(true);
+			expect(cap.text()).toContain("[auto-approved read]");
+		});
+
+		it("prompts for tool calls with readOnlyHint=false", async () => {
+			const cap = createCapture();
+			const input = createInput("y");
+			const handler = new PermissionHandler("approve-reads", { output: cap.out, input });
+			const result = await handler.handleToolConfirmation(makeToolCall({ annotations: { readOnlyHint: false } }));
+			expect(result).toBe(true);
+			expect(cap.text()).toContain("Allow Tool");
+		});
+
+		it("prompts for tool calls with no annotations", async () => {
 			const cap = createCapture();
 			const input = createInput("y");
 			const handler = new PermissionHandler("approve-reads", { output: cap.out, input });
 			const result = await handler.handleToolConfirmation(makeToolCall());
 			expect(result).toBe(true);
+		});
+
+		it("prompts for tool calls with annotations but no readOnlyHint", async () => {
+			const cap = createCapture();
+			const input = createInput("n");
+			const handler = new PermissionHandler("approve-reads", { output: cap.out, input });
+			const result = await handler.handleToolConfirmation(makeToolCall({ annotations: { destructiveHint: true } }));
+			expect(result).toBe(false);
 		});
 	});
 });

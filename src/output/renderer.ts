@@ -6,7 +6,7 @@
  */
 
 import pc from "picocolors";
-import type { ErrorInfo, StringOrMarkdown, ToolCallResult, UsageInfo } from "../protocol/state.js";
+import type { ErrorInfo, StringOrMarkdown, ToolAnnotations, ToolCallResult, UsageInfo } from "../protocol/state.js";
 import type { OutputFormatter } from "./format.js";
 
 /** Minimal info about a tool call ready for display. */
@@ -16,6 +16,8 @@ export interface ToolCallInfo {
 	displayName: string;
 	invocationMessage: StringOrMarkdown;
 	toolInput?: string;
+	/** Behavioral hints from the tool definition (e.g. readOnlyHint). */
+	annotations?: ToolAnnotations;
 }
 
 /** Writable stream interface for testability. */
@@ -37,6 +39,8 @@ function textOf(v: StringOrMarkdown): string {
 export class PromptRenderer implements OutputFormatter {
 	private hasStreamedText = false;
 	private reasoningOpen = false;
+	/** Track tool calls that have started but not yet shown output. */
+	private pendingToolCalls = new Set<string>();
 
 	constructor(private readonly out: WritableOutput = process.stdout) {}
 
@@ -59,10 +63,11 @@ export class PromptRenderer implements OutputFormatter {
 		this.out.write(pc.dim(text));
 	}
 
-	/** Tool call started (streaming parameters). */
-	onToolCallStart(_id: string, name: string): void {
+	/** Tool call started — show the tool name immediately so client-provided tools aren't invisible. */
+	onToolCallStart(id: string, name: string): void {
 		this.closeReasoningIfNeeded();
 		this.ensureNewline();
+		this.pendingToolCalls.add(id);
 		this.out.write(`${pc.yellow("[tool]")} ${name} ${pc.dim("(running)")}\n`);
 	}
 
@@ -71,12 +76,9 @@ export class PromptRenderer implements OutputFormatter {
 		// Parameter streaming is silent in text mode; the state mirror tracks it.
 	}
 
-	/** Tool call parameters complete, pending confirmation. */
-	onToolCallReady(_id: string, call: ToolCallInfo): void {
-		this.closeReasoningIfNeeded();
-		this.ensureNewline();
-		const msg = textOf(call.invocationMessage);
-		this.out.write(`${pc.yellow("[tool]")} ${msg} ${pc.dim("(pending confirmation)")}\n`);
+	/** Tool call parameters complete — silent; the permission handler shows any needed prompt. */
+	onToolCallReady(id: string, _call: ToolCallInfo): void {
+		this.pendingToolCalls.delete(id);
 	}
 
 	/** Tool call completed with result. */

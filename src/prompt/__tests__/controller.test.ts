@@ -285,7 +285,7 @@ describe("TurnController", () => {
 
 		const result = await resultPromise;
 		expect(result.toolCalls).toBe(1);
-		expect(cap.text()).toContain("Shell");
+		// onToolCallStart shows tool name with (running) status
 		expect(cap.text()).toContain("(running)");
 		expect(cap.text()).toContain("Ran npm test");
 	});
@@ -622,9 +622,6 @@ describe("TurnController", () => {
 
 		// Permission handler should have been consulted (auto-approved output)
 		expect(cap.text()).toContain("[auto-approved]");
-
-		// Renderer should have been notified (tool call ready output)
-		expect(cap.text()).toContain("Read config.json");
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
