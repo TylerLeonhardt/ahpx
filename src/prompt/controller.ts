@@ -170,12 +170,17 @@ export class TurnController {
 							// Server tool: fall through to consult the user's permission mode.
 						}
 
+						// Look up tool annotations from serverTools
+						const toolName = stateName ?? a.toolCallId;
+						const toolAnnotations = session?.serverTools?.find((t) => t.name === toolName)?.annotations;
+
 						const callInfo: ToolCallInfo = {
 							toolCallId: a.toolCallId,
-							toolName: stateName ?? a.toolCallId,
+							toolName,
 							displayName: stateDisplayName ?? a.toolCallId,
 							invocationMessage: a.invocationMessage,
 							toolInput: a.toolInput,
+							annotations: toolAnnotations,
 						};
 
 						this.renderer.onToolCallReady(a.toolCallId, callInfo);

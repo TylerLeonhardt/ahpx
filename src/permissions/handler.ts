@@ -51,7 +51,10 @@ export class PermissionHandler {
 		}
 
 		// approve-reads mode — use tool annotations to decide
-		// For now, prompt for all tool confirmations in approve-reads mode
+		if (toolCall.annotations?.readOnlyHint === true) {
+			this.output.write(`${pc.dim("  [auto-approved read]")}\n`);
+			return true;
+		}
 		const msg =
 			typeof toolCall.invocationMessage === "string" ? toolCall.invocationMessage : toolCall.invocationMessage.markdown;
 		return this.promptUser("tool", msg);

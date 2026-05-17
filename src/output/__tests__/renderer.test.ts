@@ -74,13 +74,11 @@ describe("PromptRenderer", () => {
 	});
 
 	describe("onToolCallStart", () => {
-		it("shows tool name with running status", () => {
+		it("does not produce output (defers to onToolCallReady)", () => {
 			const cap = createCapture();
 			const r = new PromptRenderer(cap.out);
 			r.onToolCallStart("tc1", "Run npm test");
-			expect(cap.text()).toContain("[tool]");
-			expect(cap.text()).toContain("Run npm test");
-			expect(cap.text()).toContain("(running)");
+			expect(cap.text()).toBe("");
 		});
 	});
 

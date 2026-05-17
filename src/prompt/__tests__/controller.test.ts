@@ -285,8 +285,8 @@ describe("TurnController", () => {
 
 		const result = await resultPromise;
 		expect(result.toolCalls).toBe(1);
-		expect(cap.text()).toContain("Shell");
-		expect(cap.text()).toContain("(running)");
+		// onToolCallStart is silent in text mode (defers to onToolCallReady)
+		expect(cap.text()).not.toContain("(running)");
 		expect(cap.text()).toContain("Ran npm test");
 	});
 

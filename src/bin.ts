@@ -1603,6 +1603,7 @@ async function runPrompt(
 		text: string;
 		server?: string;
 		sessionName?: string;
+		session?: string;
 		approveAll?: boolean;
 		approveReads?: boolean;
 		denyAll?: boolean;
@@ -1767,18 +1768,28 @@ async function createTempSession(
 async function resolveOrCreateSession(
 	client: AhpClient,
 	serverInfo: { name: string; url: string },
-	opts: { sessionName?: string; provider?: string; model?: string },
+	opts: { sessionName?: string; session?: string; provider?: string; model?: string },
 	cfg: AhpxConfig,
 	cwd: string,
 	gitRoot: string | undefined,
 	globalOpts: GlobalOpts,
 ): Promise<{ sessionUri: string; record: SessionRecord }> {
-	const record = await resolveSession({
-		serverName: serverInfo.name,
-		cwd,
-		name: opts.sessionName,
-		store: sessionStore,
-	});
+	let record: SessionRecord | undefined;
+
+	if (opts.session) {
+		// Direct session ID lookup
+		record = await sessionStore.get(opts.session);
+		if (!record) {
+			throw new NoSessionError(`Session "${opts.session}" not found.`);
+		}
+	} else {
+		record = await resolveSession({
+			serverName: serverInfo.name,
+			cwd,
+			name: opts.sessionName,
+			store: sessionStore,
+		});
+	}
 
 	if (record) {
 		// Verify the session still exists on the server
@@ -1789,15 +1800,17 @@ async function resolveOrCreateSession(
 		}
 
 		if (outcome.status === "not_found") {
-			// Session was disposed on the server — warn and create a new one
 			if (globalOpts.format === "text") {
-				console.error(
-					pc.yellow(`Previous session ${record.id.slice(0, 8)} was disposed on the server. Creating a new one.`),
-				);
+				console.error(pc.yellow("Session expired, creating new one..."));
 			}
 			await sessionStore.close(record.id);
 		}
-		// For "error" outcomes, fall through to create new
+		if (outcome.status === "error") {
+			if (globalOpts.format === "text") {
+				console.error(pc.yellow("Session expired, creating new one..."));
+			}
+			await sessionStore.close(record.id);
+		}
 	}
 
 	// Auto-create a session
@@ -1890,6 +1903,7 @@ program
 	.argument("<text...>", "Prompt text")
 	.option("-s, --server <name>", "Server name or WebSocket URL")
 	.option("-n, --session-name <name>", "Session name for scoped lookup")
+	.option("-S, --session <id>", "Target session by ID")
 	.option("-f, --file <path>", "Read prompt from file (- for stdin)")
 	.option("--cwd <dir>", "Working directory for auto-created sessions")
 	.option("--approve-all", "Auto-approve all permissions")
@@ -1907,6 +1921,7 @@ program
 			opts: {
 				server?: string;
 				sessionName?: string;
+				session?: string;
 				file?: string;
 				cwd?: string;
 				approveAll?: boolean;
@@ -2018,30 +2033,42 @@ program
 	.command("cancel")
 	.description("Cancel the active turn in a session")
 	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-S, --session <id>", "Target session by ID")
 	.option("-s, --server <name>", "Server name")
-	.action(async (opts: { sessionName?: string; server?: string }, cmd: Command) => {
+	.action(async (opts: { sessionName?: string; session?: string; server?: string }, cmd: Command) => {
 		const globalOpts = parseGlobalOpts(cmd);
 		applyGlobalOpts(globalOpts);
 
 		try {
-			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
-			const serverName = await resolveServerName(opts.server, cfg);
-			const cwd = process.cwd();
-
-			const record = await resolveSession({
-				serverName,
-				cwd,
-				name: opts.sessionName,
-				store: sessionStore,
-			});
-
-			if (!record) {
-				if (globalOpts.format === "text") {
-					console.log(pc.dim("No active session found. Nothing to cancel."));
+			let record: SessionRecord;
+			if (opts.session) {
+				const found = await sessionStore.get(opts.session);
+				if (!found) {
+					throw new NoSessionError(`Session "${opts.session}" not found.`);
 				}
-				return;
+				record = found;
+			} else {
+				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+				const serverName = await resolveServerName(opts.server, cfg);
+				const cwd = process.cwd();
+
+				const resolved = await resolveSession({
+					serverName,
+					cwd,
+					name: opts.sessionName,
+					store: sessionStore,
+				});
+
+				if (!resolved) {
+					if (globalOpts.format === "text") {
+						console.log(pc.dim("No active session found. Nothing to cancel."));
+					}
+					return;
+				}
+				record = resolved;
 			}
 
+			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 			await withConnection({ server: opts.server, config: cfg }, async (client) => {
 				await client.subscribe(record.sessionUri);
 				const sessionState = client.state.getSession(record.sessionUri);
@@ -2211,13 +2238,14 @@ program
 	.description("Switch the model for a session")
 	.argument("<model-id>", "Model ID to switch to")
 	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-S, --session <id>", "Target session by ID")
 	.option("-s, --server <name>", "Server name")
-	.action(async (modelId: string, opts: { sessionName?: string; server?: string }, cmd: Command) => {
+	.action(async (modelId: string, opts: { sessionName?: string; session?: string; server?: string }, cmd: Command) => {
 		const globalOpts = parseGlobalOpts(cmd);
 		applyGlobalOpts(globalOpts);
 
 		try {
-			const record = await resolveSessionRecord(undefined, { name: opts.sessionName, server: opts.server });
+			const record = await resolveSessionRecord(opts.session, { name: opts.sessionName, server: opts.server });
 
 			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 
