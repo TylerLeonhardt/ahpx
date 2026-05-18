@@ -3146,6 +3146,7 @@ async function handleImplicitPrompt(): Promise<boolean> {
 		const knownCommands = new Set([
 			"connect",
 			"server",
+			"tunnel",
 			"config",
 			"session",
 			"prompt",
