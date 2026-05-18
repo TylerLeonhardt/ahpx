@@ -228,4 +228,38 @@ describe("ConnectionStore", () => {
 			expect(parsed.connections[0].name).toBe("check");
 		});
 	});
+
+	describe("tunnel profiles", () => {
+		it("adds a tunnel-based connection without URL validation", async () => {
+			await store.add({
+				name: "my-tunnel",
+				url: "tunnel://abc123",
+				tunnelId: "abc123",
+				tunnelClusterId: "usw2",
+			});
+
+			const conn = await store.get("my-tunnel");
+			expect(conn).toBeDefined();
+			expect(conn!.name).toBe("my-tunnel");
+			expect(conn!.tunnelId).toBe("abc123");
+			expect(conn!.tunnelClusterId).toBe("usw2");
+			expect(conn!.url).toBe("tunnel://abc123");
+		});
+
+		it("persists tunnel fields across store instances", async () => {
+			await store.add({
+				name: "tunnel-persist",
+				url: "tunnel://xyz789",
+				tunnelId: "xyz789",
+			});
+
+			const store2 = new ConnectionStore(tmpDir);
+			const conn = await store2.get("tunnel-persist");
+			expect(conn!.tunnelId).toBe("xyz789");
+		});
+
+		it("still validates URL for non-tunnel profiles", async () => {
+			await expect(store.add({ name: "bad", url: "not-a-url" })).rejects.toThrow(ConnectionValidationError);
+		});
+	});
 });

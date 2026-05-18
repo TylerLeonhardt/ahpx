@@ -126,7 +126,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Connect to an AHP server and perform the initialization handshake.
 	 */
-	async connect(url: string): Promise<InitializeResult> {
+	async connect(url: string, connectOptions?: TransportOptions): Promise<InitializeResult> {
 		const transport = new Transport();
 		const protocol = new ProtocolLayer(transport, this.options);
 
@@ -153,8 +153,13 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 			this.emit("error", err);
 		});
 
-		// Connect WebSocket
-		await transport.connect(url, this.options);
+		// Connect WebSocket — merge constructor options with per-connect overrides
+		const transportOpts: TransportOptions = {
+			...this.options,
+			...connectOptions,
+			headers: { ...this.options.headers, ...connectOptions?.headers },
+		};
+		await transport.connect(url, transportOpts);
 
 		this.transport = transport;
 		this.protocol = protocol;

@@ -228,13 +228,20 @@ Examples:
  *
  * Accepts:
  *   - A ws:// or wss:// URL (used directly)
- *   - A saved connection name (looked up from the store)
+ *   - A tunnel://<tunnelId> URL (resolved via dev tunnel SDK)
+ *   - A saved connection name (looked up from the store; supports tunnel profiles)
  *   - undefined (uses the default connection, if set)
  */
 async function resolveTarget(target?: string): Promise<{ url: string; token?: string }> {
 	// Explicit ws(s):// URL — use as-is
 	if (target && isValidWsUrl(target)) {
 		return { url: target };
+	}
+
+	// tunnel://<tunnelId> URL — resolve dynamically
+	if (target?.startsWith("tunnel://")) {
+		const tunnelId = target.replace("tunnel://", "");
+		return resolveTunnelTarget(tunnelId);
 	}
 
 	// Named connection
@@ -246,7 +253,7 @@ async function resolveTarget(target?: string): Promise<{ url: string; token?: st
 				ExitCode.Error,
 			);
 		}
-		return { url: conn.url, token: conn.token };
+		return resolveConnectionProfile(conn);
 	}
 
 	// No argument — try default
@@ -257,7 +264,28 @@ async function resolveTarget(target?: string): Promise<{ url: string; token?: st
 			ExitCode.Error,
 		);
 	}
-	return { url: def.url, token: def.token };
+	return resolveConnectionProfile(def);
+}
+
+/** Resolve a connection profile, handling tunnel profiles dynamically. */
+async function resolveConnectionProfile(conn: {
+	url: string;
+	token?: string;
+	tunnelId?: string;
+	tunnelClusterId?: string;
+}): Promise<{ url: string; token?: string }> {
+	if (conn.tunnelId) {
+		return resolveTunnelTarget(conn.tunnelId, conn.tunnelClusterId);
+	}
+	return { url: conn.url, token: conn.token };
+}
+
+/** Resolve a tunnel ID to a WSS URL + access token. */
+async function resolveTunnelTarget(tunnelId: string, clusterId?: string): Promise<{ url: string; token?: string }> {
+	const { resolveGitHubToken, resolveTunnelUrl } = await import("./tunnel/index.js");
+	const githubToken = resolveGitHubToken();
+	const { wssUrl, accessToken } = await resolveTunnelUrl(githubToken, tunnelId, clusterId);
+	return { url: wssUrl, token: accessToken };
 }
 
 /** Print server information after a successful connect (text mode). */
@@ -410,7 +438,9 @@ server
 	.command("add")
 	.description("Save a named connection profile")
 	.argument("<name>", "Connection name")
-	.requiredOption("--url <url>", "WebSocket URL (ws:// or wss://)")
+	.option("--url <url>", "WebSocket URL (ws:// or wss://)")
+	.option("--tunnel <tunnelId>", "Dev tunnel ID (resolves URL dynamically)")
+	.option("--tunnel-cluster <clusterId>", "Dev tunnel cluster ID")
 	.option("--token <token>", "Authentication token")
 	.option("--default", "Set as the default server")
 	.option(
@@ -420,23 +450,48 @@ server
 		[] as string[],
 	)
 	.action(
-		async (name: string, opts: { url: string; token?: string; default?: boolean; tag: string[] }, cmd: Command) => {
+		async (
+			name: string,
+			opts: {
+				url?: string;
+				tunnel?: string;
+				tunnelCluster?: string;
+				token?: string;
+				default?: boolean;
+				tag: string[];
+			},
+			cmd: Command,
+		) => {
 			const globalOpts = parseGlobalOpts(cmd);
 			applyGlobalOpts(globalOpts);
 
 			try {
+				if (!opts.url && !opts.tunnel) {
+					throw new UsageError("Either --url or --tunnel is required.");
+				}
+				if (opts.url && opts.tunnel) {
+					throw new UsageError("Cannot specify both --url and --tunnel.");
+				}
+
 				const tags = opts.tag.length > 0 ? opts.tag : undefined;
+				const url = opts.url ?? `tunnel://${opts.tunnel}`;
 				await store.add({
 					name,
-					url: opts.url,
+					url,
 					token: opts.token,
 					default: opts.default ?? false,
 					tags,
+					tunnelId: opts.tunnel,
+					tunnelClusterId: opts.tunnelCluster,
 				});
 				outputResult(
 					globalOpts,
 					() => {
-						console.log(pc.green("✓"), `Saved connection ${pc.bold(name)} → ${pc.dim(opts.url)}`);
+						if (opts.tunnel) {
+							console.log(pc.green("✓"), `Saved tunnel connection ${pc.bold(name)} → tunnel ${pc.dim(opts.tunnel)}`);
+						} else {
+							console.log(pc.green("✓"), `Saved connection ${pc.bold(name)} → ${pc.dim(url)}`);
+						}
 						if (opts.default) {
 							console.log(pc.dim("  Set as default server"));
 						}
@@ -444,7 +499,7 @@ server
 							console.log(pc.dim(`  Tags: ${tags.join(", ")}`));
 						}
 					},
-					{ name, url: opts.url, default: opts.default ?? false, tags: tags ?? [] },
+					{ name, url, tunnel: opts.tunnel, default: opts.default ?? false, tags: tags ?? [] },
 				);
 			} catch (err) {
 				if (err instanceof ConnectionValidationError) {
@@ -715,6 +770,150 @@ server
 			handleError(err, globalOpts);
 		}
 	});
+
+// ── tunnel ──────────────────────────────────────────────────────────────────
+
+const tunnel = program.command("tunnel").description("Discover and connect to remote AHP agent hosts via dev tunnels");
+
+tunnel
+	.command("list")
+	.description("List dev tunnels running AHP agent hosts (tagged with protocolv5)")
+	.action(async (_opts: Record<string, unknown>, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const { resolveGitHubToken, listAgentHostTunnels } = await import("./tunnel/index.js");
+			const githubToken = resolveGitHubToken();
+			const spinner = startSpinner("Searching for AHP tunnels...", spinnersEnabled(globalOpts));
+
+			try {
+				const tunnels = await listAgentHostTunnels(githubToken);
+				spinner.stop();
+
+				outputResult(
+					globalOpts,
+					() => {
+						if (tunnels.length === 0) {
+							console.log(pc.dim("No AHP tunnels found (tagged with protocolv5)."));
+							return;
+						}
+
+						const idW = Math.max(9, ...tunnels.map((t) => t.tunnelId.length));
+						const nameW = Math.max(4, ...tunnels.map((t) => (t.name ?? "—").length));
+						const clusterW = Math.max(7, ...tunnels.map((t) => t.clusterId.length));
+
+						console.log(
+							`  ${pc.bold("Tunnel ID".padEnd(idW))}  ${pc.bold("Name".padEnd(nameW))}  ${pc.bold("Cluster".padEnd(clusterW))}  ${pc.bold("Host")}    ${pc.bold("Ports")}`,
+						);
+						console.log(
+							`  ${"─".repeat(idW)}  ${"─".repeat(nameW)}  ${"─".repeat(clusterW)}  ${"─".repeat(7)}  ${"─".repeat(20)}`,
+						);
+
+						for (const t of tunnels) {
+							const host = t.hostConnected ? pc.green("online") : pc.dim("offline");
+							const ports =
+								t.ports.map((p) => (p.name ? `${p.portNumber} (${p.name})` : String(p.portNumber))).join(", ") ||
+								pc.dim("—");
+							console.log(
+								`  ${pc.cyan(t.tunnelId.padEnd(idW))}  ${(t.name ?? pc.dim("—")).toString().padEnd(nameW)}  ${t.clusterId.padEnd(clusterW)}  ${host.padEnd(7)}  ${ports}`,
+							);
+						}
+					},
+					tunnels,
+				);
+			} catch (err) {
+				spinner.stop();
+				throw err;
+			}
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
+
+tunnel
+	.command("connect")
+	.description("Connect to a dev tunnel's AHP agent host")
+	.argument("<tunnel-id>", "Dev tunnel ID to connect to")
+	.option("--cluster <clusterId>", "Tunnel cluster ID")
+	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
+	.option("--save <name>", "Save this tunnel as a named connection profile")
+	.option("--default", "Set the saved connection as default (requires --save)")
+	.action(
+		async (
+			tunnelId: string,
+			opts: { cluster?: string; timeout: string; save?: string; default?: boolean },
+			cmd: Command,
+		) => {
+			const globalOpts = parseGlobalOpts(cmd);
+			applyGlobalOpts(globalOpts);
+
+			const client = new AhpClient({
+				connectTimeout: Number.parseInt(opts.timeout, 10),
+				initialSubscriptions: ["agenthost:/root"],
+			});
+
+			try {
+				const { resolveGitHubToken, resolveTunnelUrl } = await import("./tunnel/index.js");
+				const githubToken = resolveGitHubToken();
+
+				const spinner = startSpinner(`Resolving tunnel ${tunnelId}...`, spinnersEnabled(globalOpts));
+
+				try {
+					const { wssUrl, accessToken } = await resolveTunnelUrl(githubToken, tunnelId, opts.cluster);
+					spinner.update(`Connecting to ${wssUrl}...`);
+
+					const headers: Record<string, string> = {};
+					if (accessToken) {
+						headers.Authorization = `tunnel ${accessToken}`;
+					}
+
+					const result = await client.connect(wssUrl, { headers });
+					spinner.stop();
+
+					// Authenticate for protected resources
+					const agents = client.state.root?.agents ?? [];
+					const resources = agents.flatMap((a) => a.protectedResources ?? []);
+					const envToken = process.env.AHPX_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+					if (envToken) {
+						for (const r of resources) {
+							await client.authenticate(r.resource, envToken).catch(() => {});
+						}
+					}
+
+					// Optionally save as a connection profile
+					if (opts.save) {
+						await store.add({
+							name: opts.save,
+							url: `tunnel://${tunnelId}`,
+							default: opts.default ?? false,
+							tunnelId,
+							tunnelClusterId: opts.cluster,
+						});
+					}
+
+					outputResult(
+						globalOpts,
+						() => {
+							printServerInfo(client, result);
+							if (opts.save) {
+								console.log();
+								console.log(pc.green("✓"), `Saved as connection ${pc.bold(opts.save)}`);
+							}
+						},
+						{ ...serverInfoJson(client, result), tunnelId, wssUrl },
+					);
+				} catch (err) {
+					spinner.stop();
+					throw err;
+				}
+			} catch (err) {
+				handleError(err, globalOpts);
+			} finally {
+				await client.disconnect();
+			}
+		},
+	);
 
 // ── config ───────────────────────────────────────────────────────────────────
 
