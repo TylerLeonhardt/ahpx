@@ -11,7 +11,6 @@ import { EventEmitter } from "node:events";
 import type { ActionEnvelope, StateAction } from "../protocol/actions.js";
 import type {
 	ContentEncoding,
-	CreateSessionResult,
 	FetchTurnsResult,
 	InitializeResult,
 	ListSessionsResult,
@@ -237,9 +236,12 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		const sessionUri = `${provider}:/${sessionId}`;
 
 		// Create + subscribe
-		const createResult = await this.createSession(sessionUri, provider, model, workingDirectory, config);
-		const isProvisional = createResult?.provisional === true;
+		await this.createSession(sessionUri, provider, model, workingDirectory, config);
 		await this.subscribe(sessionUri);
+
+		// Check if session is provisional (lifecycle stays "creating" after subscribe)
+		const sessionState = this._state.getSession(sessionUri);
+		const isProvisional = sessionState?.lifecycle === "creating";
 
 		// Build handle
 		const handle = new SessionHandle(this, sessionUri, provider, model, isProvisional);
@@ -275,7 +277,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		model?: string,
 		workingDirectory?: string,
 		config?: Record<string, unknown>,
-	): Promise<CreateSessionResult | null> {
+	): Promise<null> {
 		this.ensureConnected();
 		return this.protocol!.request("createSession", {
 			session: sessionUri,

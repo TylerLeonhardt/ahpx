@@ -1028,17 +1028,14 @@ session
 
 						try {
 							// Create the session with config
-							const createResult = await client.createSession(
-								sessionUri,
-								resolvedProvider,
-								model,
-								ensureFileUri(cwd),
-								resolvedConfig,
-							);
-							const isProvisional = createResult?.provisional === true;
+							await client.createSession(sessionUri, resolvedProvider, model, ensureFileUri(cwd), resolvedConfig);
 
 							// Subscribe to the session URI
 							await client.subscribe(sessionUri);
+
+							// Check if session is provisional (lifecycle stays "creating" after subscribe)
+							const sessionStateAfterSub = client.state.getSession(sessionUri);
+							const isProvisional = sessionStateAfterSub?.lifecycle === "creating";
 
 							// Wait for session/ready or session/creationFailed.
 							// Provisional sessions skip this — they stay in "creating" until the first prompt.
@@ -2031,15 +2028,13 @@ async function createTempSession(
 	}
 	const sessionId = randomUUID();
 	const sessionUri = `${provider}:/${sessionId}`;
-	const createResult = await client.createSession(
-		sessionUri,
-		provider,
-		opts.model ?? cfg.defaultModel,
-		ensureFileUri(cwd),
-		sessionConfig,
-	);
-	const isProvisional = createResult?.provisional === true;
+	await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd), sessionConfig);
 	await client.subscribe(sessionUri);
+
+	// Check if session is provisional (lifecycle stays "creating" after subscribe)
+	const sessionState = client.state.getSession(sessionUri);
+	const isProvisional = sessionState?.lifecycle === "creating";
+
 	if (!isProvisional) {
 		await waitForReady(client, sessionUri);
 	}
@@ -2108,15 +2103,12 @@ async function resolveOrCreateSession(
 
 	const spinner = startSpinner(`Creating session on ${serverInfo.name}...`, spinnersEnabled(globalOpts));
 	try {
-		const createResult = await client.createSession(
-			sessionUri,
-			provider,
-			opts.model ?? cfg.defaultModel,
-			ensureFileUri(cwd),
-			sessionConfig,
-		);
-		const isProvisional = createResult?.provisional === true;
+		await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd), sessionConfig);
 		await client.subscribe(sessionUri);
+
+		// Check if session is provisional (lifecycle stays "creating" after subscribe)
+		const sessionState = client.state.getSession(sessionUri);
+		const isProvisional = sessionState?.lifecycle === "creating";
 
 		if (!isProvisional) {
 			spinner.update("Waiting for session ready...");
