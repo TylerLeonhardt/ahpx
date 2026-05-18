@@ -39,9 +39,17 @@ export interface ProtocolLayerOptions {
 	requestTimeout?: number;
 }
 
+/** An incoming JSON-RPC request from the server (reverse-RPC). */
+export interface IncomingRequest {
+	id: number;
+	method: string;
+	params: unknown;
+}
+
 export interface ProtocolLayerEvents {
 	action: [envelope: ActionEnvelope];
 	notification: [notification: ProtocolNotification];
+	request: [request: IncomingRequest];
 }
 
 interface PendingRequest {
@@ -132,6 +140,20 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 		}
 	}
 
+	/**
+	 * Send a success response to an incoming server request (reverse-RPC).
+	 */
+	respond(id: number, result: unknown): void {
+		this.transport.send({ jsonrpc: "2.0", id, result });
+	}
+
+	/**
+	 * Send an error response to an incoming server request (reverse-RPC).
+	 */
+	respondError(id: number, code: number, message: string): void {
+		this.transport.send({ jsonrpc: "2.0", id, error: { code, message } });
+	}
+
 	private handleMessage(data: unknown): void {
 		if (!data || typeof data !== "object") return;
 
@@ -145,23 +167,35 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 
 		// Response (has `id` and either `result` or `error`)
 		if ("id" in msg && typeof msg.id === "number") {
+			// Check if this is a response to one of our pending requests
 			const pending = this.pending.get(msg.id);
-			if (!pending) return;
+			if (pending) {
+				this.pending.delete(msg.id);
+				clearTimeout(pending.timer);
 
-			this.pending.delete(msg.id);
-			clearTimeout(pending.timer);
-
-			if ("error" in msg) {
-				const errPayload = (msg as unknown as JsonRpcErrorResponse).error;
-				if (process.env.AHPX_DEBUG_PROTOCOL && errPayload.message?.includes?.("Unknown method")) {
-					console.error(`[AHPX_DEBUG] !!! "Unknown method" error for request id=${msg.id}:`);
-					console.error(JSON.stringify(errPayload, null, 2));
+				if ("error" in msg) {
+					const errPayload = (msg as unknown as JsonRpcErrorResponse).error;
+					if (process.env.AHPX_DEBUG_PROTOCOL && errPayload.message?.includes?.("Unknown method")) {
+						console.error(`[AHPX_DEBUG] !!! "Unknown method" error for request id=${msg.id}:`);
+						console.error(JSON.stringify(errPayload, null, 2));
+					}
+					pending.reject(new RpcError(errPayload.code, errPayload.message, errPayload.data));
+				} else if ("result" in msg) {
+					pending.resolve(msg.result);
 				}
-				pending.reject(new RpcError(errPayload.code, errPayload.message, errPayload.data));
-			} else if ("result" in msg) {
-				pending.resolve(msg.result);
+				return;
 			}
-			return;
+
+			// Not a pending response — if it has a method, it's an incoming
+			// reverse-RPC request from the server
+			if ("method" in msg && typeof msg.method === "string") {
+				this.emit("request", {
+					id: msg.id,
+					method: msg.method,
+					params: msg.params,
+				});
+				return;
+			}
 		}
 
 		// Notification (has `method` but no `id`)

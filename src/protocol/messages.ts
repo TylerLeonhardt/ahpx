@@ -150,6 +150,8 @@ export interface CommandMap {
  */
 export interface ServerCommandMap {
   'resourceRequest': { params: ResourceRequestParams; result: ResourceRequestResult };
+  'resourceRead': { params: ResourceReadParams; result: ResourceReadResult };
+  'resourceList': { params: ResourceListParams; result: ResourceListResult };
 }
 
 // ─── Notification Maps ───────────────────────────────────────────────────────

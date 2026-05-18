@@ -33,6 +33,7 @@ import type {
 import type { ProtocolNotification } from "../protocol/notifications.js";
 import type { TerminalClaim, URI } from "../protocol/state.js";
 import { PROTOCOL_VERSION } from "../protocol/version/registry.js";
+import { FileServingHandler } from "./file-serving.js";
 import { ProtocolLayer, type ProtocolLayerOptions } from "./protocol.js";
 import { SessionHandle } from "./session-handle.js";
 import { StateMirror } from "./state.js";
@@ -85,6 +86,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	private protocol: ProtocolLayer | undefined;
 	private readonly _state = new StateMirror();
 	private readonly _sessions = new Map<string, SessionHandle>();
+	private readonly _fileServing = new FileServingHandler();
 	private _clientId: string;
 	private _clientSeq = 0;
 	private _connected = false;
@@ -114,6 +116,11 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		return this._sessions;
 	}
 
+	/** The file serving handler for reverse-RPC requests. */
+	get fileServing(): FileServingHandler {
+		return this._fileServing;
+	}
+
 	/**
 	 * Connect to an AHP server and perform the initialization handshake.
 	 */
@@ -130,6 +137,9 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		protocol.on("notification", (notification) => {
 			this.emit("notification", notification);
 		});
+
+		// Register reverse-RPC file serving handler
+		this._fileServing.register(protocol);
 
 		transport.on("close", (code, reason) => {
 			this._connected = false;
@@ -195,6 +205,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		if (this.protocol) {
 			this.protocol.cancelAll("Client disconnecting");
 		}
+		this._fileServing.clearAllowedPaths();
 		if (this.transport) {
 			this.transport.close();
 			this.transport = undefined;
@@ -467,9 +478,11 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 
 export { Transport, type TransportOptions } from "./transport.js";
 export { ProtocolLayer, RpcError, RpcTimeoutError, type ProtocolLayerOptions } from "./protocol.js";
+export type { IncomingRequest } from "./protocol.js";
 export { StateMirror } from "./state.js";
 export { SessionHandle } from "./session-handle.js";
 export type { SessionHandleEvents, PromptOptions, TurnResult as SessionTurnResult } from "./session-handle.js";
 export { ActiveClientManager } from "./active-client.js";
 export { ReconnectManager } from "./reconnect.js";
 export type { ReconnectOptions, ReconnectOutcome } from "./reconnect.js";
+export { FileServingHandler } from "./file-serving.js";

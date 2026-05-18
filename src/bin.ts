@@ -1108,6 +1108,8 @@ session
 								const discovered = await discoverCustomizations(cwd);
 								discoveredCount = discovered.length;
 								if (discovered.length > 0) {
+									// Register file URIs for reverse-RPC serving
+									client.fileServing.addAllowedUris(discovered.map((r) => r.uri));
 									client.dispatchAction({
 										type: ActionType.SessionActiveClientChanged,
 										session: sessionUri,
@@ -2121,6 +2123,8 @@ async function runPrompt(
 			if (opts.customizations !== false) {
 				const discovered = await discoverCustomizations(cwd);
 				if (discovered.length > 0) {
+					// Register file URIs for reverse-RPC serving
+					client.fileServing.addAllowedUris(discovered.map((r) => r.uri));
 					client.dispatchAction({
 						type: ActionType.SessionActiveClientChanged,
 						session: sessionUri,
