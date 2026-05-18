@@ -172,7 +172,6 @@ export class TurnController {
 
 						// Look up tool annotations from serverTools
 						const toolName = stateName ?? a.toolCallId;
-						const toolAnnotations = session?.serverTools?.find((t) => t.name === toolName)?.annotations;
 
 						const callInfo: ToolCallInfo = {
 							toolCallId: a.toolCallId,
@@ -180,7 +179,6 @@ export class TurnController {
 							displayName: stateDisplayName ?? a.toolCallId,
 							invocationMessage: a.invocationMessage,
 							toolInput: a.toolInput,
-							annotations: toolAnnotations,
 						};
 
 						this.renderer.onToolCallReady(a.toolCallId, callInfo);

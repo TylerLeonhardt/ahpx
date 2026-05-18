@@ -6,7 +6,7 @@
  */
 
 import pc from "picocolors";
-import type { ErrorInfo, StringOrMarkdown, ToolAnnotations, ToolCallResult, UsageInfo } from "../protocol/state.js";
+import type { ErrorInfo, StringOrMarkdown, ToolCallResult, UsageInfo } from "../protocol/state.js";
 import type { OutputFormatter } from "./format.js";
 
 /** Minimal info about a tool call ready for display. */
@@ -16,8 +16,6 @@ export interface ToolCallInfo {
 	displayName: string;
 	invocationMessage: StringOrMarkdown;
 	toolInput?: string;
-	/** Behavioral hints from the tool definition (e.g. readOnlyHint). */
-	annotations?: ToolAnnotations;
 }
 
 /** Writable stream interface for testability. */

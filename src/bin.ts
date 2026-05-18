@@ -1400,6 +1400,161 @@ function showLocalHistory(record: SessionRecord, limit: number, globalOpts: Glob
 	);
 }
 
+// ── session config ───────────────────────────────────────────────────────────
+
+const sessionConfig = session.command("config").description("Show or modify session configuration");
+
+sessionConfig
+	.argument("[id]", "Session ID")
+	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-s, --server <name>", "Server name")
+	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
+	.action(
+		async (id: string | undefined, opts: { sessionName?: string; server?: string; timeout: string }, cmd: Command) => {
+			const globalOpts = parseGlobalOpts(cmd);
+			applyGlobalOpts(globalOpts);
+
+			try {
+				const record = await resolveSessionRecord(id, { name: opts.sessionName, server: opts.server });
+				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+
+				await withConnection(
+					{
+						server: record.serverName,
+						config: cfg,
+						timeout: Number.parseInt(opts.timeout, 10),
+					},
+					async (client) => {
+						await client.subscribe(record.sessionUri);
+						const sessionState = client.state.getSession(record.sessionUri);
+						const config = sessionState?.config;
+
+						if (!config || Object.keys(config.schema.properties).length === 0) {
+							outputResult(globalOpts, () => console.log(pc.dim("No configuration available for this session.")), {
+								config: null,
+							});
+							return;
+						}
+
+						outputResult(
+							globalOpts,
+							() => {
+								console.log(pc.bold("Session Configuration"));
+								console.log();
+								for (const [key, prop] of Object.entries(config.schema.properties)) {
+									const value = config.values[key];
+									const mutable = prop.sessionMutable ? pc.green("mutable") : pc.dim("read-only");
+									console.log(`  ${pc.bold(key)} ${pc.dim(`(${prop.type})`)} [${mutable}]`);
+									if (prop.title) console.log(`    ${prop.title}`);
+									if (prop.description) console.log(`    ${pc.dim(prop.description)}`);
+									console.log(
+										`    Value: ${value !== undefined ? pc.cyan(JSON.stringify(value)) : pc.dim("(not set)")}`,
+									);
+									if (prop.default !== undefined) console.log(`    Default: ${pc.dim(JSON.stringify(prop.default))}`);
+									if (prop.enum) console.log(`    Allowed: ${prop.enum.join(", ")}`);
+									console.log();
+								}
+							},
+							config,
+						);
+					},
+				);
+			} catch (err) {
+				handleError(err, globalOpts);
+			}
+		},
+	);
+
+sessionConfig
+	.command("set")
+	.description("Set a session-mutable configuration property")
+	.argument("<key>", "Configuration property key")
+	.argument("<value>", "New value")
+	.argument("[id]", "Session ID")
+	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-s, --server <name>", "Server name")
+	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
+	.action(
+		async (
+			key: string,
+			value: string,
+			id: string | undefined,
+			opts: { sessionName?: string; server?: string; timeout: string },
+			cmd: Command,
+		) => {
+			const globalOpts = parseGlobalOpts(cmd);
+			applyGlobalOpts(globalOpts);
+
+			try {
+				const record = await resolveSessionRecord(id, { name: opts.sessionName, server: opts.server });
+				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+
+				await withConnection(
+					{
+						server: record.serverName,
+						config: cfg,
+						timeout: Number.parseInt(opts.timeout, 10),
+					},
+					async (client) => {
+						await client.subscribe(record.sessionUri);
+						const sessionState = client.state.getSession(record.sessionUri);
+						const config = sessionState?.config;
+
+						if (!config) {
+							throw new UsageError("No configuration available for this session.");
+						}
+
+						const prop = config.schema.properties[key];
+						if (!prop) {
+							const available = Object.keys(config.schema.properties);
+							throw new UsageError(
+								`Unknown config key "${key}". Available keys: ${available.length > 0 ? available.join(", ") : "(none)"}`,
+							);
+						}
+
+						if (!prop.sessionMutable) {
+							throw new UsageError(`Config key "${key}" is not session-mutable (read-only after creation).`);
+						}
+
+						// Coerce value based on schema type
+						let coerced: unknown = value;
+						if (prop.type === "number") {
+							coerced = Number(value);
+							if (Number.isNaN(coerced as number)) {
+								throw new UsageError(`Invalid number value "${value}" for key "${key}".`);
+							}
+						} else if (prop.type === "boolean") {
+							if (value === "true") coerced = true;
+							else if (value === "false") coerced = false;
+							else throw new UsageError(`Invalid boolean value "${value}" for key "${key}". Use "true" or "false".`);
+						}
+
+						// Validate against enum if present
+						if (prop.enum && !prop.enum.includes(String(coerced))) {
+							throw new UsageError(
+								`Invalid value "${value}" for key "${key}". Allowed values: ${prop.enum.join(", ")}`,
+							);
+						}
+
+						client.dispatchAction({
+							type: ActionType.SessionConfigChanged,
+							session: record.sessionUri,
+							config: { [key]: coerced },
+						});
+
+						outputResult(
+							globalOpts,
+							() => console.log(pc.green("✓"), `Set ${pc.bold(key)} = ${pc.cyan(JSON.stringify(coerced))}`),
+							{ key, value: coerced, sessionUri: record.sessionUri },
+						);
+					},
+				);
+			} catch (err) {
+				handleError(err, globalOpts);
+			}
+		},
+	);
+
 // ── session export / import ─────────────────────────────────────────────────
 
 session
