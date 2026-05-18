@@ -21,6 +21,7 @@ vi.mock("../../client/index.js", () => {
 						displayName: "Copilot",
 						description: "Copilot agent",
 						models: [{ id: "gpt-4" }, { id: "gpt-3.5" }],
+						protectedResources: [{ resource: "https://api.github.com" }],
 					},
 					{
 						provider: "mock",
@@ -182,7 +183,7 @@ describe("HealthChecker", () => {
 			await checker.check("ws://localhost:8080", "test-server", { token: "secret" });
 
 			expect(mockInstances).toHaveLength(1);
-			expect(mockInstances[0].authenticateCalls).toEqual([{ resource: "ws://localhost:8080", token: "secret" }]);
+			expect(mockInstances[0].authenticateCalls).toEqual([{ resource: "https://api.github.com", token: "secret" }]);
 		});
 	});
 

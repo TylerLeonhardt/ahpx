@@ -9,6 +9,19 @@ const mockClient = {
 	authenticate: vi.fn().mockResolvedValue(undefined),
 	on: vi.fn(),
 	removeListener: vi.fn(),
+	state: {
+		root: {
+			agents: [
+				{
+					provider: "copilot",
+					displayName: "Copilot",
+					description: "Copilot agent",
+					models: [],
+					protectedResources: [{ resource: "https://api.github.com" }],
+				},
+			],
+		},
+	},
 };
 
 vi.mock("../../client/index.js", () => ({
@@ -197,13 +210,25 @@ describe("withConnection", () => {
 
 			await withConnection({ server: "auth", config: makeConfig() }, vi.fn());
 
-			expect(mockClient.authenticate).toHaveBeenCalledWith("ws://auth.local", "my-secret");
+			expect(mockClient.authenticate).toHaveBeenCalledWith("https://api.github.com", "my-secret");
 		});
 
-		it("does not authenticate when there is no token", async () => {
-			await withConnection({ server: "ws://localhost:3000", config: makeConfig() }, vi.fn());
+		it("does not authenticate when there is no token and no env vars", async () => {
+			const origAhpx = process.env.AHPX_TOKEN;
+			const origGh = process.env.GITHUB_TOKEN;
+			const origGhToken = process.env.GH_TOKEN;
+			Reflect.deleteProperty(process.env, "AHPX_TOKEN");
+			Reflect.deleteProperty(process.env, "GITHUB_TOKEN");
+			Reflect.deleteProperty(process.env, "GH_TOKEN");
 
-			expect(mockClient.authenticate).not.toHaveBeenCalled();
+			try {
+				await withConnection({ server: "ws://localhost:3000", config: makeConfig() }, vi.fn());
+				expect(mockClient.authenticate).not.toHaveBeenCalled();
+			} finally {
+				if (origAhpx !== undefined) process.env.AHPX_TOKEN = origAhpx;
+				if (origGh !== undefined) process.env.GITHUB_TOKEN = origGh;
+				if (origGhToken !== undefined) process.env.GH_TOKEN = origGhToken;
+			}
 		});
 
 		it("registers and removes notification listener around callback", async () => {

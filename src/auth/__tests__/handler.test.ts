@@ -153,29 +153,13 @@ describe("AuthHandler", () => {
 			}
 		});
 
-		it("uses stored token when available", async () => {
+		it("falls back to GITHUB_TOKEN for GitHub resources", async () => {
 			const { client, authenticateCalls } = createMockClient(true);
-			const handler = new AuthHandler(client, {
-				configDir: tmpDir,
-				interactive: false,
-			});
 
-			// Pre-store a token
-			await handler.storeToken("https://api.github.com", "stored-token");
-
-			const result = await handler.handleAuthRequired({
-				resource: "https://api.github.com",
-			});
-
-			expect(result).toBe(true);
-			expect(authenticateCalls[0].token).toBe("stored-token");
-		});
-
-		it("returns false when no token available and not interactive", async () => {
-			const { client } = createMockClient(true);
-
-			const originalEnv = process.env.AHPX_TOKEN;
+			const origAhpx = process.env.AHPX_TOKEN;
+			const origGh = process.env.GITHUB_TOKEN;
 			Reflect.deleteProperty(process.env, "AHPX_TOKEN");
+			process.env.GITHUB_TOKEN = "gh-env-token";
 
 			try {
 				const handler = new AuthHandler(client, {
@@ -187,11 +171,119 @@ describe("AuthHandler", () => {
 					resource: "https://api.github.com",
 				});
 
+				expect(result).toBe(true);
+				expect(authenticateCalls[0].token).toBe("gh-env-token");
+			} finally {
+				if (origAhpx !== undefined) process.env.AHPX_TOKEN = origAhpx;
+				else Reflect.deleteProperty(process.env, "AHPX_TOKEN");
+				if (origGh !== undefined) process.env.GITHUB_TOKEN = origGh;
+				else Reflect.deleteProperty(process.env, "GITHUB_TOKEN");
+			}
+		});
+
+		it("falls back to GH_TOKEN for GitHub resources", async () => {
+			const { client, authenticateCalls } = createMockClient(true);
+
+			const origAhpx = process.env.AHPX_TOKEN;
+			const origGhToken = process.env.GITHUB_TOKEN;
+			const origGh = process.env.GH_TOKEN;
+			Reflect.deleteProperty(process.env, "AHPX_TOKEN");
+			Reflect.deleteProperty(process.env, "GITHUB_TOKEN");
+			process.env.GH_TOKEN = "gh-cli-token";
+
+			try {
+				const handler = new AuthHandler(client, {
+					configDir: tmpDir,
+					interactive: false,
+				});
+
+				const result = await handler.handleAuthRequired({
+					resource: "https://api.github.com",
+				});
+
+				expect(result).toBe(true);
+				expect(authenticateCalls[0].token).toBe("gh-cli-token");
+			} finally {
+				if (origAhpx !== undefined) process.env.AHPX_TOKEN = origAhpx;
+				else Reflect.deleteProperty(process.env, "AHPX_TOKEN");
+				if (origGhToken !== undefined) process.env.GITHUB_TOKEN = origGhToken;
+				else Reflect.deleteProperty(process.env, "GITHUB_TOKEN");
+				if (origGh !== undefined) process.env.GH_TOKEN = origGh;
+				else Reflect.deleteProperty(process.env, "GH_TOKEN");
+			}
+		});
+
+		it("does not use GITHUB_TOKEN for non-GitHub resources", async () => {
+			const { client, authenticateCalls } = createMockClient(true);
+
+			const origAhpx = process.env.AHPX_TOKEN;
+			const origGh = process.env.GITHUB_TOKEN;
+			Reflect.deleteProperty(process.env, "AHPX_TOKEN");
+			process.env.GITHUB_TOKEN = "gh-env-token";
+
+			try {
+				const handler = new AuthHandler(client, {
+					configDir: tmpDir,
+					interactive: false,
+				});
+
+				const result = await handler.handleAuthRequired({
+					resource: "https://api.example.com",
+				});
+
+				expect(result).toBe(false);
+				expect(authenticateCalls).toHaveLength(0);
+			} finally {
+				if (origAhpx !== undefined) process.env.AHPX_TOKEN = origAhpx;
+				else Reflect.deleteProperty(process.env, "AHPX_TOKEN");
+				if (origGh !== undefined) process.env.GITHUB_TOKEN = origGh;
+				else Reflect.deleteProperty(process.env, "GITHUB_TOKEN");
+			}
+		});
+
+		it("uses stored token when available", async () => {
+			const { client, authenticateCalls } = createMockClient(true);
+			const handler = new AuthHandler(client, {
+				configDir: tmpDir,
+				interactive: false,
+			});
+
+			// Use a non-GitHub resource to avoid GitHub-specific env/CLI fallbacks
+			await handler.storeToken("https://api.example.com", "stored-token");
+
+			const result = await handler.handleAuthRequired({
+				resource: "https://api.example.com",
+			});
+
+			expect(result).toBe(true);
+			expect(authenticateCalls[0].token).toBe("stored-token");
+		});
+
+		it("returns false when no token available and not interactive", async () => {
+			const { client } = createMockClient(true);
+
+			const originalEnv = process.env.AHPX_TOKEN;
+			const origGh = process.env.GITHUB_TOKEN;
+			const origGhToken = process.env.GH_TOKEN;
+			Reflect.deleteProperty(process.env, "AHPX_TOKEN");
+			Reflect.deleteProperty(process.env, "GITHUB_TOKEN");
+			Reflect.deleteProperty(process.env, "GH_TOKEN");
+
+			try {
+				const handler = new AuthHandler(client, {
+					configDir: tmpDir,
+					interactive: false,
+				});
+
+				const result = await handler.handleAuthRequired({
+					resource: "https://api.example.com",
+				});
+
 				expect(result).toBe(false);
 			} finally {
-				if (originalEnv !== undefined) {
-					process.env.AHPX_TOKEN = originalEnv;
-				}
+				if (originalEnv !== undefined) process.env.AHPX_TOKEN = originalEnv;
+				if (origGh !== undefined) process.env.GITHUB_TOKEN = origGh;
+				if (origGhToken !== undefined) process.env.GH_TOKEN = origGhToken;
 			}
 		});
 

@@ -372,9 +372,21 @@ program
 				const result = await client.connect(url);
 				spinner.stop();
 
-				// If the connection profile had a token, authenticate automatically
+				// Authenticate for each protected resource declared by agents
+				const agents = client.state.root?.agents ?? [];
+				const resources = agents.flatMap((a) => a.protectedResources ?? []);
+
 				if (token) {
-					await client.authenticate(url, token);
+					for (const r of resources) {
+						await client.authenticate(r.resource, token);
+					}
+				} else {
+					const envToken = process.env.AHPX_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+					if (envToken) {
+						for (const r of resources) {
+							await client.authenticate(r.resource, envToken).catch(() => {});
+						}
+					}
 				}
 
 				outputResult(globalOpts, () => printServerInfo(client, result), serverInfoJson(client, result));
@@ -531,8 +543,21 @@ server
 				const result = await client.connect(url);
 				spinner.stop();
 
+				// Authenticate for each protected resource declared by agents
+				const agents = client.state.root?.agents ?? [];
+				const resources = agents.flatMap((a) => a.protectedResources ?? []);
+
 				if (token) {
-					await client.authenticate(url, token);
+					for (const r of resources) {
+						await client.authenticate(r.resource, token);
+					}
+				} else {
+					const envToken = process.env.AHPX_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+					if (envToken) {
+						for (const r of resources) {
+							await client.authenticate(r.resource, envToken).catch(() => {});
+						}
+					}
 				}
 
 				outputResult(globalOpts, () => printServerInfo(client, result), serverInfoJson(client, result));
@@ -985,7 +1010,10 @@ session
 								}
 							}
 						} catch (err) {
-							if (err instanceof RpcError && (err.code === -32601 || err.code === -32603 || err.message?.includes('Unknown method'))) {
+							if (
+								err instanceof RpcError &&
+								(err.code === -32601 || err.code === -32603 || err.message?.includes("Unknown method"))
+							) {
 								// Server doesn't support resolveSessionConfig — continue without config resolution
 							} else {
 								throw err;
