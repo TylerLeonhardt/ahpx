@@ -11,6 +11,7 @@
  * Tokens are stored with restrictive file permissions (0600).
  */
 
+import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -73,13 +74,19 @@ export class AuthHandler {
 			return this.tryAuthenticate(resourceUri, this.explicitToken);
 		}
 
-		// 2. Check environment variable
+		// 2. Check AHPX_TOKEN environment variable
 		const envToken = process.env.AHPX_TOKEN;
 		if (envToken) {
 			return this.tryAuthenticate(resourceUri, envToken);
 		}
 
-		// 3. Check stored token
+		// 3. Check GitHub-specific env vars for GitHub resources
+		const githubToken = this.resolveGitHubToken(resourceUri);
+		if (githubToken) {
+			return this.tryAuthenticate(resourceUri, githubToken);
+		}
+
+		// 4. Check stored token
 		const stored = await this.loadToken(resourceUri);
 		if (stored) {
 			const success = await this.tryAuthenticate(resourceUri, stored);
@@ -87,7 +94,7 @@ export class AuthHandler {
 			// Token expired or invalid — fall through to prompting
 		}
 
-		// 4. Interactive prompt (if available)
+		// 5. Interactive prompt (if available)
 		if (this.interactive) {
 			const token = await this.promptForToken(resource);
 			if (token) {
@@ -100,6 +107,36 @@ export class AuthHandler {
 		}
 
 		return false;
+	}
+
+	/**
+	 * Resolve a GitHub token from environment variables or the `gh` CLI.
+	 * Only applies when the resource is `https://api.github.com`.
+	 */
+	private resolveGitHubToken(resourceUri: string): string | undefined {
+		if (resourceUri !== "https://api.github.com") {
+			return undefined;
+		}
+
+		const fromEnv = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+		if (fromEnv) {
+			return fromEnv;
+		}
+
+		try {
+			const result = execSync("gh auth token", {
+				encoding: "utf-8",
+				timeout: 5_000,
+				stdio: ["pipe", "pipe", "pipe"],
+			}).trim();
+			if (result) {
+				return result;
+			}
+		} catch {
+			// gh CLI not installed or not authenticated — fall through
+		}
+
+		return undefined;
 	}
 
 	/**

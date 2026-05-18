@@ -38,7 +38,11 @@ export class HealthChecker {
 			const result: InitializeResult = await client.connect(url);
 
 			if (options?.token) {
-				await client.authenticate(url, options.token);
+				const agents = client.state.root?.agents ?? [];
+				const resources = agents.flatMap((a) => a.protectedResources ?? []);
+				for (const r of resources) {
+					await client.authenticate(r.resource, options.token);
+				}
 			}
 
 			const latencyMs = performance.now() - start;

@@ -50,11 +50,8 @@ export class PermissionHandler {
 			return false;
 		}
 
-		// approve-reads mode — use tool annotations to decide
-		if (toolCall.annotations?.readOnlyHint === true) {
-			this.output.write(`${pc.dim("  [auto-approved read]")}\n`);
-			return true;
-		}
+		// approve-reads requires server-side session config support — readOnlyHint
+		// annotations are not sent by current servers
 		const msg =
 			typeof toolCall.invocationMessage === "string" ? toolCall.invocationMessage : toolCall.invocationMessage.markdown;
 		return this.promptUser("tool", msg);

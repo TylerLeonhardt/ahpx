@@ -87,8 +87,22 @@ export async function withConnection(
 	try {
 		await client.connect(url);
 
+		// Upfront auth: authenticate for each protected resource declared by agents
+		const agents = client.state.root?.agents ?? [];
+		const resources = agents.flatMap((a) => a.protectedResources ?? []);
+
 		if (token) {
-			await client.authenticate(url, token);
+			for (const r of resources) {
+				await client.authenticate(r.resource, token);
+			}
+		} else {
+			// Proactive auth from environment tokens
+			const envToken = process.env.AHPX_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+			if (envToken) {
+				for (const r of resources) {
+					await client.authenticate(r.resource, envToken).catch(() => {});
+				}
+			}
 		}
 
 		// Wire up auth handler for server-initiated auth challenges
