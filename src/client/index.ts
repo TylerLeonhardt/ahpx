@@ -148,11 +148,23 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		this.protocol = protocol;
 
 		// Send initialize
-		const result = await protocol.request("initialize", {
+		const initParams = {
 			protocolVersions: [PROTOCOL_VERSION],
 			clientId: this._clientId,
 			initialSubscriptions: this.options.initialSubscriptions ?? ["agenthost:/root"],
-		});
+		};
+
+		// DEBUG: Log initialize params
+		if (process.env.AHPX_DEBUG_PROTOCOL) {
+			console.error("[AHPX_DEBUG] Initialize params:", JSON.stringify(initParams, null, 2));
+		}
+
+		const result = await protocol.request("initialize", initParams);
+
+		// DEBUG: Log initialize result
+		if (process.env.AHPX_DEBUG_PROTOCOL) {
+			console.error("[AHPX_DEBUG] Initialize result:", JSON.stringify(result, null, 2));
+		}
 
 		// Apply initial snapshots to state mirror
 		for (const snapshot of result.snapshots) {

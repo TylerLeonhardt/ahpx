@@ -102,7 +102,7 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 			};
 
 			if (process.env.AHPX_DEBUG_PROTOCOL) {
-				console.error(`[AHPX_DEBUG] >>> SENDING JSON-RPC request:`);
+				console.error("[AHPX_DEBUG] >>> SENDING JSON-RPC request:");
 				console.error(JSON.stringify(msg, null, 2));
 			}
 
@@ -139,7 +139,7 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 
 		// DEBUG: Log all incoming messages when debug is enabled
 		if (process.env.AHPX_DEBUG_PROTOCOL) {
-			console.error(`[AHPX_DEBUG] <<< RECEIVED:`);
+			console.error("[AHPX_DEBUG] <<< RECEIVED:");
 			console.error(JSON.stringify(msg, null, 2));
 		}
 
