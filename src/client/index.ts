@@ -239,8 +239,12 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		await this.createSession(sessionUri, provider, model, workingDirectory, config);
 		await this.subscribe(sessionUri);
 
+		// Check if session is provisional (lifecycle stays "creating" after subscribe)
+		const sessionState = this._state.getSession(sessionUri);
+		const isProvisional = sessionState?.lifecycle === "creating";
+
 		// Build handle
-		const handle = new SessionHandle(this, sessionUri, provider, model);
+		const handle = new SessionHandle(this, sessionUri, provider, model, isProvisional);
 		this._sessions.set(sessionUri, handle);
 
 		// Clean up tracking when handle is disposed
@@ -248,8 +252,9 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 			this._sessions.delete(sessionUri);
 		});
 
-		// Wait for ready (clean up on failure)
-		if (waitForReady) {
+		// Wait for ready (clean up on failure).
+		// Provisional sessions skip this — they stay in "creating" until the first prompt.
+		if (waitForReady && !isProvisional) {
 			try {
 				await handle.waitForReady(readyTimeout);
 			} catch (err) {

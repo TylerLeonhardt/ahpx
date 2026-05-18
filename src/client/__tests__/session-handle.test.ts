@@ -356,9 +356,47 @@ describe("SessionHandle", () => {
 
 			await expect(handle.waitForReady()).rejects.toThrow("disposed");
 		});
+
+		it("resolves immediately for provisional sessions even if lifecycle is creating", async () => {
+			const { client, setSessionState } = createMockClient();
+			setSessionState(SESSION_URI, makeSessionState({ lifecycle: SessionLifecycle.Creating }));
+			const handle = new SessionHandle(client, SESSION_URI, PROVIDER, undefined, true);
+
+			await expect(handle.waitForReady()).resolves.toBeUndefined();
+		});
 	});
 
 	describe("sendPrompt", () => {
+		it("allows sending prompts on provisional sessions in creating state", async () => {
+			const { client, dispatched, emitAction, setSessionState } = createMockClient();
+			setSessionState(SESSION_URI, makeSessionState({ lifecycle: SessionLifecycle.Creating }));
+			const handle = new SessionHandle(client, SESSION_URI, PROVIDER, undefined, true);
+
+			const turnPromise = handle.sendPrompt("hello");
+
+			expect(dispatched.length).toBe(1);
+			expect(dispatched[0].type).toBe(ActionType.SessionTurnStarted);
+
+			// Simulate turn complete
+			emitAction(
+				envelope({
+					type: ActionType.SessionTurnComplete,
+					session: SESSION_URI,
+					turnId: (dispatched[0] as { turnId: string }).turnId,
+				}),
+			);
+
+			const result = await turnPromise;
+			expect(result.state).toBe("complete");
+		});
+
+		it("rejects sending prompts on non-provisional sessions in creating state", async () => {
+			const { client, setSessionState } = createMockClient();
+			setSessionState(SESSION_URI, makeSessionState({ lifecycle: SessionLifecycle.Creating }));
+			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
+
+			await expect(handle.sendPrompt("hello")).rejects.toThrow("Session is not ready");
+		});
 		it("dispatches turnStarted and resolves on turnComplete", async () => {
 			const { client, dispatched, emitAction, setSessionState } = createMockClient();
 			setSessionState(SESSION_URI, makeSessionState());

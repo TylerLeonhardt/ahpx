@@ -56,6 +56,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 	readonly uri: URI;
 	readonly provider: string;
 	readonly model?: string;
+	readonly provisional: boolean;
 
 	private _disposed = false;
 	private _activeTurnId: string | undefined;
@@ -67,11 +68,13 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 		uri: URI,
 		provider: string,
 		model?: string,
+		provisional = false,
 	) {
 		super();
 		this.uri = uri;
 		this.provider = provider;
 		this.model = model;
+		this.provisional = provisional;
 
 		// Filter client actions to only this session's events
 		this._onAction = (envelope: ActionEnvelope) => {
@@ -133,6 +136,10 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 	 */
 	async waitForReady(timeout = 30_000): Promise<void> {
 		this.ensureNotDisposed();
+
+		// Provisional sessions are valid immediately — they stay in "creating"
+		// until the first prompt triggers materialization.
+		if (this.provisional) return;
 
 		// Already ready?
 		if (this.isReady) return;
@@ -206,7 +213,8 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 	 */
 	async sendPrompt(text: string, options?: PromptOptions): Promise<TurnResult> {
 		this.ensureNotDisposed();
-		if (!this.isReady) {
+		// Provisional sessions are usable — the first prompt triggers materialization.
+		if (!this.isReady && !this.provisional) {
 			throw new Error("Session is not ready");
 		}
 		if (this._activeTurnId) {
