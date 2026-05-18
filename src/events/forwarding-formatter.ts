@@ -76,6 +76,11 @@ export class ForwardingFormatter implements OutputFormatter {
 		});
 	}
 
+	onToolCallAutoApproved(id: string): void {
+		this.inner.onToolCallAutoApproved(id);
+		this.emit("tool_call_auto_approved", { toolCallId: id });
+	}
+
 	onToolCallComplete(id: string, result: ToolCallResult): void {
 		this.inner.onToolCallComplete(id, result);
 		this.emit("tool_call_complete", { toolCallId: id, result });

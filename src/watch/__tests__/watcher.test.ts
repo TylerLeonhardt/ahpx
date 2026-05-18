@@ -45,6 +45,7 @@ function createMockFormatter(): OutputFormatter & { calls: Array<{ method: strin
 		onToolCallStart: record("onToolCallStart"),
 		onToolCallDelta: record("onToolCallDelta"),
 		onToolCallReady: record("onToolCallReady"),
+		onToolCallAutoApproved: record("onToolCallAutoApproved"),
 		onToolCallComplete: record("onToolCallComplete"),
 		onToolCallCancelled: record("onToolCallCancelled"),
 		onUsage: record("onUsage"),

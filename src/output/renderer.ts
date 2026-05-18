@@ -79,6 +79,11 @@ export class PromptRenderer implements OutputFormatter {
 		this.pendingToolCalls.delete(id);
 	}
 
+	/** Tool call was auto-approved by the server — show indicator without prompting. */
+	onToolCallAutoApproved(_id: string): void {
+		this.out.write(`${pc.dim("  [auto-approved]")}\n`);
+	}
+
 	/** Tool call completed with result. */
 	onToolCallComplete(_id: string, result: ToolCallResult): void {
 		const msg = textOf(result.pastTenseMessage);

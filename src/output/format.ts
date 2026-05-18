@@ -24,6 +24,7 @@ export interface OutputFormatter {
 	onToolCallStart(id: string, name: string): void;
 	onToolCallDelta(id: string, paramsDelta: string): void;
 	onToolCallReady(id: string, call: ToolCallInfo): void;
+	onToolCallAutoApproved(id: string): void;
 	onToolCallComplete(id: string, result: ToolCallResult): void;
 	onToolCallCancelled(id: string, reason: string): void;
 	onUsage(usage: UsageInfo): void;

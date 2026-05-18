@@ -21,6 +21,7 @@ export type JsonEventType =
 	| "tool_call_start"
 	| "tool_call_delta"
 	| "tool_call_ready"
+	| "tool_call_auto_approved"
 	| "tool_call_complete"
 	| "tool_call_cancelled"
 	| "usage"
@@ -77,6 +78,10 @@ export class JsonFormatter implements OutputFormatter {
 			invocationMessage: call.invocationMessage,
 			...(call.toolInput !== undefined ? { toolInput: call.toolInput } : {}),
 		});
+	}
+
+	onToolCallAutoApproved(id: string): void {
+		this.emit("tool_call_auto_approved", { toolCallId: id });
 	}
 
 	onToolCallComplete(id: string, result: ToolCallResult): void {
