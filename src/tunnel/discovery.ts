@@ -27,10 +27,9 @@ async function loadTunnelSdk() {
 	try {
 		const management = await import("@microsoft/dev-tunnels-management");
 		const contracts = await import("@microsoft/dev-tunnels-contracts");
-		const { TunnelAuthenticationSchemes } = await import(
-			// @ts-expect-error — not in contracts index but exported from the package
-			"@microsoft/dev-tunnels-contracts/tunnelAuthenticationSchemes"
-		);
+		// TunnelAuthenticationSchemes is re-exported from the management package;
+		// the contracts subpath import doesn't work under ESM.
+		const { TunnelAuthenticationSchemes } = management;
 		return { management, contracts, TunnelAuthenticationSchemes };
 	} catch {
 		throw new Error(
@@ -92,7 +91,7 @@ export async function listAgentHostTunnels(githubToken: string): Promise<TunnelI
 	const client = new management.TunnelManagementHttpClient(
 		{ name: "ahpx", version: "1.0" },
 		management.ManagementApiVersions.Version20230927preview,
-		async () => `${TunnelAuthenticationSchemes.GitHub} ${githubToken}`,
+		async () => `${TunnelAuthenticationSchemes.github} ${githubToken}`,
 	);
 
 	const tunnels = await client.listTunnels(undefined, undefined, {
@@ -113,7 +112,7 @@ export async function getTunnelById(githubToken: string, tunnelId: string, clust
 	const client = new management.TunnelManagementHttpClient(
 		{ name: "ahpx", version: "1.0" },
 		management.ManagementApiVersions.Version20230927preview,
-		async () => `${TunnelAuthenticationSchemes.GitHub} ${githubToken}`,
+		async () => `${TunnelAuthenticationSchemes.github} ${githubToken}`,
 	);
 
 	const tunnel = await client.getTunnel(
