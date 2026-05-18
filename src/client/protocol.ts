@@ -94,12 +94,19 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 				timer,
 			});
 
-			this.transport.send({
-				jsonrpc: "2.0",
+			const msg = {
+				jsonrpc: "2.0" as const,
 				id,
 				method,
 				params,
-			});
+			};
+
+			if (process.env.AHPX_DEBUG_PROTOCOL) {
+				console.error(`[AHPX_DEBUG] >>> SENDING JSON-RPC request:`);
+				console.error(JSON.stringify(msg, null, 2));
+			}
+
+			this.transport.send(msg);
 		});
 	}
 
@@ -130,6 +137,12 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 
 		const msg = data as Record<string, unknown>;
 
+		// DEBUG: Log all incoming messages when debug is enabled
+		if (process.env.AHPX_DEBUG_PROTOCOL) {
+			console.error(`[AHPX_DEBUG] <<< RECEIVED:`);
+			console.error(JSON.stringify(msg, null, 2));
+		}
+
 		// Response (has `id` and either `result` or `error`)
 		if ("id" in msg && typeof msg.id === "number") {
 			const pending = this.pending.get(msg.id);
@@ -140,6 +153,10 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 
 			if ("error" in msg) {
 				const errPayload = (msg as unknown as JsonRpcErrorResponse).error;
+				if (process.env.AHPX_DEBUG_PROTOCOL && errPayload.message?.includes?.("Unknown method")) {
+					console.error(`[AHPX_DEBUG] !!! "Unknown method" error for request id=${msg.id}:`);
+					console.error(JSON.stringify(errPayload, null, 2));
+				}
 				pending.reject(new RpcError(errPayload.code, errPayload.message, errPayload.data));
 			} else if ("result" in msg) {
 				pending.resolve(msg.result);

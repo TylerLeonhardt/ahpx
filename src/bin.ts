@@ -985,8 +985,11 @@ session
 								}
 							}
 						} catch (err) {
-							// Server doesn't support resolveSessionConfig — continue without config resolution
-							if (!(err instanceof RpcError)) throw err;
+							if (err instanceof RpcError && (err.code === -32601 || err.code === -32603 || err.message?.includes('Unknown method'))) {
+								// Server doesn't support resolveSessionConfig — continue without config resolution
+							} else {
+								throw err;
+							}
 						}
 
 						// Generate a session URI
