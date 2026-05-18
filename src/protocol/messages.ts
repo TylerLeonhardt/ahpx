@@ -16,6 +16,7 @@ import type {
   SubscribeParams,
   SubscribeResult,
   CreateSessionParams,
+  CreateSessionResult,
   DisposeSessionParams,
   CreateTerminalParams,
   DisposeTerminalParams,
@@ -118,7 +119,7 @@ export interface CommandMap {
   'ping': { params: PingParams; result: null };
   'reconnect': { params: ReconnectParams; result: ReconnectResult };
   'subscribe': { params: SubscribeParams; result: SubscribeResult };
-  'createSession': { params: CreateSessionParams; result: null };
+  'createSession': { params: CreateSessionParams; result: CreateSessionResult | null };
   'disposeSession': { params: DisposeSessionParams; result: null };
   'createTerminal': { params: CreateTerminalParams; result: null };
   'disposeTerminal': { params: DisposeTerminalParams; result: null };

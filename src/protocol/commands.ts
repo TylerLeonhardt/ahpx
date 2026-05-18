@@ -263,6 +263,28 @@ export interface CreateSessionParams {
   activeClient?: SessionActiveClient;
 }
 
+/**
+ * Result returned by the `createSession` command.
+ *
+ * When the server supports provisional sessions, the result includes
+ * `provisional: true` to indicate the session stays in `lifecycle: "creating"`
+ * until the first prompt is sent. Clients should skip waiting for the
+ * `session/ready` action in this case.
+ *
+ * Servers that do not support provisional sessions return `null` (the
+ * previous behavior), which is also valid.
+ *
+ * @category Commands
+ */
+export interface CreateSessionResult {
+  /**
+   * When `true`, the session is provisional — it remains in `lifecycle: "creating"`
+   * until the first prompt triggers materialization. The session is valid and
+   * usable; clients should not wait for a `session/ready` action.
+   */
+  provisional?: boolean;
+}
+
 // ─── disposeSession ──────────────────────────────────────────────────────────
 
 /**

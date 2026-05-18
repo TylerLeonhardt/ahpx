@@ -161,6 +161,7 @@ import type {
   ResourceRequestResult,
   CreateTerminalParams,
   CreateSessionParams,
+  CreateSessionResult,
   DisposeTerminalParams,
   ResolveSessionConfigParams,
   ResolveSessionConfigResult,
@@ -333,6 +334,7 @@ type V1_ITerminalUnclassifiedPart = TerminalUnclassifiedPart;
 type V1_ITerminalCommandPart = TerminalCommandPart;
 type V1_ICreateTerminalParams = CreateTerminalParams;
 type V1_ICreateSessionParams = CreateSessionParams;
+type V1_ICreateSessionResult = CreateSessionResult;
 type V1_IDisposeTerminalParams = DisposeTerminalParams;
 type V1_ISessionForkSource = SessionForkSource;
 type V1_IProtocolNotification = ProtocolNotification;
@@ -685,6 +687,8 @@ type _CheckTerminalCommandPart = AssertCompatible<V1_ITerminalCommandPart, Termi
 type _CheckCreateTerminalParams = AssertCompatible<V1_ICreateTerminalParams, CreateTerminalParams>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckCreateSessionParams = AssertCompatible<V1_ICreateSessionParams, CreateSessionParams>;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+type _CheckCreateSessionResult = AssertCompatible<V1_ICreateSessionResult, CreateSessionResult>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 type _CheckDisposeTerminalParams = AssertCompatible<V1_IDisposeTerminalParams, DisposeTerminalParams>;
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

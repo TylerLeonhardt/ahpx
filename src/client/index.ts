@@ -11,6 +11,7 @@ import { EventEmitter } from "node:events";
 import type { ActionEnvelope, StateAction } from "../protocol/actions.js";
 import type {
 	ContentEncoding,
+	CreateSessionResult,
 	FetchTurnsResult,
 	InitializeResult,
 	ListSessionsResult,
@@ -236,11 +237,12 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		const sessionUri = `${provider}:/${sessionId}`;
 
 		// Create + subscribe
-		await this.createSession(sessionUri, provider, model, workingDirectory, config);
+		const createResult = await this.createSession(sessionUri, provider, model, workingDirectory, config);
+		const isProvisional = createResult?.provisional === true;
 		await this.subscribe(sessionUri);
 
 		// Build handle
-		const handle = new SessionHandle(this, sessionUri, provider, model);
+		const handle = new SessionHandle(this, sessionUri, provider, model, isProvisional);
 		this._sessions.set(sessionUri, handle);
 
 		// Clean up tracking when handle is disposed
@@ -248,8 +250,9 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 			this._sessions.delete(sessionUri);
 		});
 
-		// Wait for ready (clean up on failure)
-		if (waitForReady) {
+		// Wait for ready (clean up on failure).
+		// Provisional sessions skip this — they stay in "creating" until the first prompt.
+		if (waitForReady && !isProvisional) {
 			try {
 				await handle.waitForReady(readyTimeout);
 			} catch (err) {
@@ -272,7 +275,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		model?: string,
 		workingDirectory?: string,
 		config?: Record<string, unknown>,
-	): Promise<null> {
+	): Promise<CreateSessionResult | null> {
 		this.ensureConnected();
 		return this.protocol!.request("createSession", {
 			session: sessionUri,

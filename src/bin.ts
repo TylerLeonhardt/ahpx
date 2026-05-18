@@ -1028,40 +1028,51 @@ session
 
 						try {
 							// Create the session with config
-							await client.createSession(sessionUri, resolvedProvider, model, ensureFileUri(cwd), resolvedConfig);
+							const createResult = await client.createSession(
+								sessionUri,
+								resolvedProvider,
+								model,
+								ensureFileUri(cwd),
+								resolvedConfig,
+							);
+							const isProvisional = createResult?.provisional === true;
 
 							// Subscribe to the session URI
 							await client.subscribe(sessionUri);
 
-							spinner.update("Waiting for session ready...");
+							// Wait for session/ready or session/creationFailed.
+							// Provisional sessions skip this — they stay in "creating" until the first prompt.
+							let ready = true;
+							if (!isProvisional) {
+								spinner.update("Waiting for session ready...");
 
-							// Wait for session/ready or session/creationFailed
-							const ready = await new Promise<boolean>((resolve, reject) => {
-								const timeout = setTimeout(() => {
-									reject(new TimeoutError("Timed out waiting for session to be ready"));
-								}, 30_000);
+								ready = await new Promise<boolean>((resolve, reject) => {
+									const timeout = setTimeout(() => {
+										reject(new TimeoutError("Timed out waiting for session to be ready"));
+									}, 30_000);
 
-								client.on("action", (envelope) => {
-									const action = envelope.action;
-									if (action.type === ActionType.SessionReady && action.session === sessionUri) {
+									client.on("action", (envelope) => {
+										const action = envelope.action;
+										if (action.type === ActionType.SessionReady && action.session === sessionUri) {
+											clearTimeout(timeout);
+											resolve(true);
+										} else if (action.type === ActionType.SessionCreationFailed && action.session === sessionUri) {
+											clearTimeout(timeout);
+											resolve(false);
+										}
+									});
+
+									// Also check if already ready from the snapshot
+									const sessionState = client.state.getSession(sessionUri);
+									if (sessionState?.lifecycle === "ready") {
 										clearTimeout(timeout);
 										resolve(true);
-									} else if (action.type === ActionType.SessionCreationFailed && action.session === sessionUri) {
+									} else if (sessionState?.lifecycle === "creationFailed") {
 										clearTimeout(timeout);
 										resolve(false);
 									}
 								});
-
-								// Also check if already ready from the snapshot
-								const sessionState = client.state.getSession(sessionUri);
-								if (sessionState?.lifecycle === "ready") {
-									clearTimeout(timeout);
-									resolve(true);
-								} else if (sessionState?.lifecycle === "creationFailed") {
-									clearTimeout(timeout);
-									resolve(false);
-								}
-							});
+							}
 
 							spinner.stop();
 
@@ -1095,6 +1106,9 @@ session
 								globalOpts,
 								() => {
 									console.log(pc.green("✓ Session created"));
+									if (isProvisional) {
+										console.log(pc.dim("  (provisional — becomes active on first prompt)"));
+									}
 									console.log();
 									console.log(pc.bold("ID:"), sessionId);
 									console.log(pc.bold("URI:"), pc.cyan(sessionUri));
@@ -1117,6 +1131,7 @@ session
 									workingDirectory: cwd,
 									gitRoot,
 									status: "active",
+									...(isProvisional ? { provisional: true } : {}),
 									...(resolvedConfig ? { config: resolvedConfig } : {}),
 								},
 							);
@@ -2016,9 +2031,18 @@ async function createTempSession(
 	}
 	const sessionId = randomUUID();
 	const sessionUri = `${provider}:/${sessionId}`;
-	await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd), sessionConfig);
+	const createResult = await client.createSession(
+		sessionUri,
+		provider,
+		opts.model ?? cfg.defaultModel,
+		ensureFileUri(cwd),
+		sessionConfig,
+	);
+	const isProvisional = createResult?.provisional === true;
 	await client.subscribe(sessionUri);
-	await waitForReady(client, sessionUri);
+	if (!isProvisional) {
+		await waitForReady(client, sessionUri);
+	}
 	return sessionUri;
 }
 
@@ -2084,11 +2108,20 @@ async function resolveOrCreateSession(
 
 	const spinner = startSpinner(`Creating session on ${serverInfo.name}...`, spinnersEnabled(globalOpts));
 	try {
-		await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd), sessionConfig);
+		const createResult = await client.createSession(
+			sessionUri,
+			provider,
+			opts.model ?? cfg.defaultModel,
+			ensureFileUri(cwd),
+			sessionConfig,
+		);
+		const isProvisional = createResult?.provisional === true;
 		await client.subscribe(sessionUri);
 
-		spinner.update("Waiting for session ready...");
-		await waitForReady(client, sessionUri);
+		if (!isProvisional) {
+			spinner.update("Waiting for session ready...");
+			await waitForReady(client, sessionUri);
+		}
 		spinner.stop();
 	} catch (err) {
 		spinner.stop();

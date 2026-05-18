@@ -202,6 +202,7 @@ export type {
   SubscribeParams,
   SubscribeResult,
   CreateSessionParams,
+  CreateSessionResult,
   SessionForkSource,
   DisposeSessionParams,
   CreateTerminalParams,
