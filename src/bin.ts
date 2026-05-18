@@ -1060,6 +1060,15 @@ session
 							// Subscribe to the session URI
 							await client.subscribe(sessionUri);
 
+							// Dispatch activeClient so the session state mirror gets customizations
+							if (activeClientParam) {
+								client.dispatchAction({
+									type: ActionType.SessionActiveClientChanged,
+									session: sessionUri,
+									activeClient: activeClientParam,
+								});
+							}
+
 							// Check if session is provisional (lifecycle stays "creating" after subscribe)
 							const sessionStateAfterSub = client.state.getSession(sessionUri);
 							const isProvisional = sessionStateAfterSub?.lifecycle === "creating";
@@ -2242,6 +2251,15 @@ async function createTempSession(
 	);
 	await client.subscribe(sessionUri);
 
+	// Dispatch activeClient so the session state mirror gets customizations
+	if (activeClient) {
+		client.dispatchAction({
+			type: ActionType.SessionActiveClientChanged,
+			session: sessionUri,
+			activeClient,
+		});
+	}
+
 	// Check if session is provisional (lifecycle stays "creating" after subscribe)
 	const sessionState = client.state.getSession(sessionUri);
 	const isProvisional = sessionState?.lifecycle === "creating";
@@ -2324,6 +2342,15 @@ async function resolveOrCreateSession(
 			activeClient,
 		);
 		await client.subscribe(sessionUri);
+
+		// Dispatch activeClient so the session state mirror gets customizations
+		if (activeClient) {
+			client.dispatchAction({
+				type: ActionType.SessionActiveClientChanged,
+				session: sessionUri,
+				activeClient,
+			});
+		}
 
 		// Check if session is provisional (lifecycle stays "creating" after subscribe)
 		const sessionState = client.state.getSession(sessionUri);
