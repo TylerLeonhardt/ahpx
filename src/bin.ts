@@ -232,7 +232,9 @@ Examples:
  *   - A saved connection name (looked up from the store; supports tunnel profiles)
  *   - undefined (uses the default connection, if set)
  */
-async function resolveTarget(target?: string): Promise<{ url: string; token?: string }> {
+async function resolveTarget(
+	target?: string,
+): Promise<{ url: string; token?: string; headers?: Record<string, string> }> {
 	// Explicit ws(s):// URL — use as-is
 	if (target && isValidWsUrl(target)) {
 		return { url: target };
@@ -273,19 +275,22 @@ async function resolveConnectionProfile(conn: {
 	token?: string;
 	tunnelId?: string;
 	tunnelClusterId?: string;
-}): Promise<{ url: string; token?: string }> {
+}): Promise<{ url: string; token?: string; headers?: Record<string, string> }> {
 	if (conn.tunnelId) {
 		return resolveTunnelTarget(conn.tunnelId, conn.tunnelClusterId);
 	}
 	return { url: conn.url, token: conn.token };
 }
 
-/** Resolve a tunnel ID to a WSS URL + access token. */
-async function resolveTunnelTarget(tunnelId: string, clusterId?: string): Promise<{ url: string; token?: string }> {
-	const { resolveGitHubToken, resolveTunnelUrl } = await import("./tunnel/index.js");
+/** Resolve a tunnel ID to a WSS URL + access token + tunnel headers. */
+async function resolveTunnelTarget(
+	tunnelId: string,
+	clusterId?: string,
+): Promise<{ url: string; token?: string; headers?: Record<string, string> }> {
+	const { resolveGitHubToken, resolveTunnelUrl, buildTunnelHeaders } = await import("./tunnel/index.js");
 	const githubToken = resolveGitHubToken();
 	const { wssUrl, accessToken } = await resolveTunnelUrl(githubToken, tunnelId, clusterId);
-	return { url: wssUrl, token: accessToken };
+	return { url: wssUrl, token: accessToken, headers: buildTunnelHeaders(accessToken) };
 }
 
 /** Print server information after a successful connect (text mode). */
@@ -394,11 +399,11 @@ program
 		});
 
 		try {
-			const { url, token } = await resolveTarget(target);
+			const { url, token, headers } = await resolveTarget(target);
 			const spinner = startSpinner(`Connecting to ${url}...`, spinnersEnabled(globalOpts));
 
 			try {
-				const result = await client.connect(url);
+				const result = await client.connect(url, { headers });
 				spinner.stop();
 
 				// Authenticate for each protected resource declared by agents
@@ -592,11 +597,11 @@ server
 		});
 
 		try {
-			const { url, token } = await resolveTarget(target);
+			const { url, token, headers } = await resolveTarget(target);
 			const spinner = startSpinner(`Testing connection to ${url}...`, spinnersEnabled(globalOpts));
 
 			try {
-				const result = await client.connect(url);
+				const result = await client.connect(url, { headers });
 				spinner.stop();
 
 				// Authenticate for each protected resource declared by agents
@@ -854,7 +859,7 @@ tunnel
 			});
 
 			try {
-				const { resolveGitHubToken, resolveTunnelUrl } = await import("./tunnel/index.js");
+				const { resolveGitHubToken, resolveTunnelUrl, buildTunnelHeaders } = await import("./tunnel/index.js");
 				const githubToken = resolveGitHubToken();
 
 				const spinner = startSpinner(`Resolving tunnel ${tunnelId}...`, spinnersEnabled(globalOpts));
@@ -863,10 +868,7 @@ tunnel
 					const { wssUrl, accessToken } = await resolveTunnelUrl(githubToken, tunnelId, opts.cluster);
 					spinner.update(`Connecting to ${wssUrl}...`);
 
-					const headers: Record<string, string> = {};
-					if (accessToken) {
-						headers.Authorization = `tunnel ${accessToken}`;
-					}
+					const headers = buildTunnelHeaders(accessToken);
 
 					const result = await client.connect(wssUrl, { headers });
 					spinner.stop();

@@ -119,17 +119,22 @@ export async function getTunnelById(githubToken: string, tunnelId: string): Prom
 		async () => `${TunnelAuthenticationSchemes.github} ${githubToken}`,
 	);
 
-	// List tunnels and find the matching one — avoids needing clusterId
+	// List tunnels to find the matching one (gets clusterId)
 	const tunnels = await client.listTunnels(undefined, undefined, {
 		labels: [AHP_TUNNEL_LABEL],
 		includePorts: true,
-		tokenScopes: ["connect"],
 	});
 
-	const tunnel = tunnels.find((t: { tunnelId?: string }) => t.tunnelId === tunnelId);
-	if (!tunnel) {
+	const found = tunnels.find((t: { tunnelId?: string }) => t.tunnelId === tunnelId);
+	if (!found) {
 		throw new Error(`Tunnel "${tunnelId}" not found.`);
 	}
+
+	// Call getTunnel with the clusterId to get the connect access token
+	const tunnel = await client.getTunnel(
+		{ tunnelId: found.tunnelId, clusterId: found.clusterId },
+		{ includePorts: true, tokenScopes: ["connect"] },
+	);
 
 	return tunnelToInfo(tunnel, contracts);
 }
@@ -162,6 +167,18 @@ export async function resolveTunnelUrl(
 	throw new Error(
 		`Could not resolve WebSocket URL for tunnel "${tunnelId}". No web-forwarding endpoint found and no cluster ID available.`,
 	);
+}
+
+/**
+ * Build WebSocket handshake headers required for tunnel connections.
+ * Returns an empty object if no access token is available.
+ */
+export function buildTunnelHeaders(accessToken?: string): Record<string, string> {
+	if (!accessToken) return {};
+	return {
+		"X-Tunnel-Authorization": `tunnel ${accessToken}`,
+		"X-Tunnel-Skip-AntiPhishing-Page": "true",
+	};
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: contracts module type is dynamic

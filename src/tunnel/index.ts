@@ -9,6 +9,7 @@ export {
 	getTunnelById,
 	resolveTunnelUrl,
 	resolveGitHubToken,
+	buildTunnelHeaders,
 } from "./discovery.js";
 
 export type { TunnelInfo } from "./discovery.js";
