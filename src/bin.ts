@@ -33,6 +33,7 @@ import {
 	loadConfigWithSources,
 } from "./config/index.js";
 import type { AhpxConfig, ConfigSource } from "./config/index.js";
+import { discoverCustomizations } from "./customizations/discovery.js";
 import { AhpxError, ExitCode, NoSessionError, TimeoutError, UsageError } from "./errors.js";
 import type { EventForwarder } from "./events/forwarder.js";
 import { ForwardingFormatter } from "./events/forwarding-formatter.js";
@@ -938,6 +939,7 @@ session
 	.option("-n, --name <name>", "Name this session (for scoped lookups)")
 	.option("--cwd <dir>", "Working directory")
 	.option("-c, --config <key=value...>", "Session config values (repeatable, e.g. -c autoApprove=autopilot)")
+	.option("--no-customizations", "Skip workspace customization discovery")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
 	.action(
 		async (
@@ -948,6 +950,7 @@ session
 				name?: string;
 				cwd?: string;
 				config?: string[];
+				customizations: boolean;
 				timeout: string;
 			},
 			cmd: Command,
@@ -1099,6 +1102,24 @@ session
 							};
 							await sessionStore.save(record);
 
+							// Discover and dispatch workspace customizations
+							let discoveredCount = 0;
+							if (opts.customizations !== false) {
+								const discovered = await discoverCustomizations(cwd);
+								discoveredCount = discovered.length;
+								if (discovered.length > 0) {
+									client.dispatchAction({
+										type: ActionType.SessionActiveClientChanged,
+										session: sessionUri,
+										activeClient: {
+											clientId: client.clientId,
+											tools: [],
+											customizations: discovered,
+										},
+									});
+								}
+							}
+
 							outputResult(
 								globalOpts,
 								() => {
@@ -1118,6 +1139,9 @@ session
 									if (resolvedConfig && Object.keys(resolvedConfig).length > 0) {
 										console.log(pc.bold("Config:"), JSON.stringify(resolvedConfig));
 									}
+									if (discoveredCount > 0) {
+										console.log(pc.bold("Customizations:"), `Discovered ${discoveredCount} customizations`);
+									}
 								},
 								{
 									id: sessionId,
@@ -1130,6 +1154,7 @@ session
 									status: "active",
 									...(isProvisional ? { provisional: true } : {}),
 									...(resolvedConfig ? { config: resolvedConfig } : {}),
+									...(discoveredCount > 0 ? { customizations: discoveredCount } : {}),
 								},
 							);
 						} catch (err) {
@@ -1658,6 +1683,161 @@ sessionConfig
 		},
 	);
 
+// ── session customization ────────────────────────────────────────────────────
+
+const sessionCustomization = session
+	.command("customization")
+	.alias("cust")
+	.description("View and manage session customizations");
+
+sessionCustomization
+	.argument("[id]", "Session ID")
+	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-s, --server <name>", "Server name")
+	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
+	.action(
+		async (id: string | undefined, opts: { sessionName?: string; server?: string; timeout: string }, cmd: Command) => {
+			// Default action: list customizations (same as `session customization list`)
+			await listCustomizations(id, opts, cmd);
+		},
+	);
+
+sessionCustomization
+	.command("list")
+	.description("List customizations on a session")
+	.argument("[id]", "Session ID")
+	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-s, --server <name>", "Server name")
+	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
+	.action(
+		async (id: string | undefined, opts: { sessionName?: string; server?: string; timeout: string }, cmd: Command) => {
+			await listCustomizations(id, opts, cmd);
+		},
+	);
+
+async function listCustomizations(
+	id: string | undefined,
+	opts: { sessionName?: string; server?: string; timeout: string },
+	cmd: Command,
+): Promise<void> {
+	const globalOpts = parseGlobalOpts(cmd);
+	applyGlobalOpts(globalOpts);
+
+	try {
+		const record = await resolveSessionRecord(id, { name: opts.sessionName, server: opts.server });
+		const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+
+		await withConnection(
+			{
+				server: record.serverName,
+				config: cfg,
+				timeout: Number.parseInt(opts.timeout, 10),
+			},
+			async (client) => {
+				await client.subscribe(record.sessionUri);
+				const sessionState = client.state.getSession(record.sessionUri);
+				const customizations = sessionState?.customizations ?? [];
+
+				if (customizations.length === 0) {
+					outputResult(globalOpts, () => console.log(pc.dim("No customizations on this session.")), []);
+					return;
+				}
+
+				outputResult(
+					globalOpts,
+					() => {
+						const uriW = Math.max(3, ...customizations.map((c) => c.customization.uri.length));
+						const nameW = Math.max(4, ...customizations.map((c) => c.customization.displayName.length));
+						const enabledW = 7;
+						const statusW = 8;
+
+						console.log(
+							`  ${pc.bold("URI".padEnd(uriW))}  ${pc.bold("Name".padEnd(nameW))}  ${pc.bold("Enabled".padEnd(enabledW))}  ${pc.bold("Status".padEnd(statusW))}`,
+						);
+						console.log(`  ${"─".repeat(uriW)}  ${"─".repeat(nameW)}  ${"─".repeat(enabledW)}  ${"─".repeat(statusW)}`);
+
+						for (const c of customizations) {
+							const enabled = c.enabled ? pc.green("yes") : pc.red("no");
+							const status = c.status ?? pc.dim("—");
+							console.log(
+								`  ${c.customization.uri.padEnd(uriW)}  ${c.customization.displayName.padEnd(nameW)}  ${String(enabled).padEnd(enabledW + 10)}  ${String(status).padEnd(statusW)}`,
+							);
+						}
+					},
+					customizations,
+				);
+			},
+		);
+	} catch (err) {
+		handleError(err, globalOpts);
+	}
+}
+
+sessionCustomization
+	.command("toggle")
+	.description("Toggle a customization's enabled state")
+	.argument("<uri>", "Customization URI to toggle")
+	.argument("[id]", "Session ID")
+	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-s, --server <name>", "Server name")
+	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
+	.action(
+		async (
+			uri: string,
+			id: string | undefined,
+			opts: { sessionName?: string; server?: string; timeout: string },
+			cmd: Command,
+		) => {
+			const globalOpts = parseGlobalOpts(cmd);
+			applyGlobalOpts(globalOpts);
+
+			try {
+				const record = await resolveSessionRecord(id, { name: opts.sessionName, server: opts.server });
+				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+
+				await withConnection(
+					{
+						server: record.serverName,
+						config: cfg,
+						timeout: Number.parseInt(opts.timeout, 10),
+					},
+					async (client) => {
+						await client.subscribe(record.sessionUri);
+						const sessionState = client.state.getSession(record.sessionUri);
+						const customizations = sessionState?.customizations ?? [];
+
+						const target = customizations.find((c) => c.customization.uri === uri);
+						if (!target) {
+							throw new UsageError(
+								`Customization "${uri}" not found on this session.${customizations.length > 0 ? ` Available: ${customizations.map((c) => c.customization.uri).join(", ")}` : ""}`,
+							);
+						}
+
+						const newEnabled = !target.enabled;
+						client.dispatchAction({
+							type: ActionType.SessionCustomizationToggled,
+							session: record.sessionUri,
+							uri,
+							enabled: newEnabled,
+						});
+
+						outputResult(
+							globalOpts,
+							() =>
+								console.log(
+									pc.green("✓"),
+									`${pc.bold(target.customization.displayName)} ${newEnabled ? pc.green("enabled") : pc.red("disabled")}`,
+								),
+							{ uri, enabled: newEnabled, displayName: target.customization.displayName },
+						);
+					},
+				);
+			} catch (err) {
+				handleError(err, globalOpts);
+			}
+		},
+	);
+
 // ── session export / import ─────────────────────────────────────────────────
 
 session
@@ -1873,6 +2053,8 @@ async function runPrompt(
 		cwd?: string;
 		/** Session configuration values to pass at creation. */
 		sessionConfig?: Record<string, unknown>;
+		/** Whether to discover workspace customizations. Defaults to true. */
+		customizations?: boolean;
 		/** Idle timeout in seconds. */
 		idleTimeout?: number;
 		/** Metadata tags to include in JSON output envelopes. */
@@ -1933,6 +2115,22 @@ async function runPrompt(
 				);
 				sessionUri = resolved.sessionUri;
 				sessionRecord = resolved.record;
+			}
+
+			// Discover and dispatch workspace customizations
+			if (opts.customizations !== false) {
+				const discovered = await discoverCustomizations(cwd);
+				if (discovered.length > 0) {
+					client.dispatchAction({
+						type: ActionType.SessionActiveClientChanged,
+						session: sessionUri,
+						activeClient: {
+							clientId: client.clientId,
+							tools: [],
+							customizations: discovered,
+						},
+					});
+				}
 			}
 
 			// Run the turn
@@ -2258,6 +2456,7 @@ program
 	.option("-m, --model <model>", "Model to use")
 	.option("--cwd <dir>", "Working directory for the session")
 	.option("-c, --config <key=value...>", "Session config values (repeatable, e.g. -c autoApprove=autopilot)")
+	.option("--no-customizations", "Skip workspace customization discovery")
 	.option("--approve-all", "Auto-approve all permissions")
 	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
 	.option("--deny-all", "Auto-deny all permissions")
@@ -2276,6 +2475,7 @@ program
 				model?: string;
 				cwd?: string;
 				config?: string[];
+				customizations: boolean;
 				approveAll?: boolean;
 				approveReads?: boolean;
 				denyAll?: boolean;
