@@ -105,8 +105,12 @@ export async function listAgentHostTunnels(githubToken: string): Promise<TunnelI
 
 /**
  * Look up a single tunnel by ID and return its connection info.
+ *
+ * Uses `listTunnels` filtered by label rather than `getTunnel` directly,
+ * because the SDK's `getTunnel` requires a `clusterId` which callers
+ * rarely have upfront.
  */
-export async function getTunnelById(githubToken: string, tunnelId: string, clusterId?: string): Promise<TunnelInfo> {
+export async function getTunnelById(githubToken: string, tunnelId: string): Promise<TunnelInfo> {
 	const { management, contracts, TunnelAuthenticationSchemes } = await loadTunnelSdk();
 
 	const client = new management.TunnelManagementHttpClient(
@@ -115,14 +119,14 @@ export async function getTunnelById(githubToken: string, tunnelId: string, clust
 		async () => `${TunnelAuthenticationSchemes.github} ${githubToken}`,
 	);
 
-	const tunnel = await client.getTunnel(
-		{ tunnelId, clusterId },
-		{
-			includePorts: true,
-			tokenScopes: ["connect"],
-		},
-	);
+	// List tunnels and find the matching one — avoids needing clusterId
+	const tunnels = await client.listTunnels(undefined, undefined, {
+		labels: [AHP_TUNNEL_LABEL],
+		includePorts: true,
+		tokenScopes: ["connect"],
+	});
 
+	const tunnel = tunnels.find((t: { tunnelId?: string }) => t.tunnelId === tunnelId);
 	if (!tunnel) {
 		throw new Error(`Tunnel "${tunnelId}" not found.`);
 	}
@@ -139,19 +143,18 @@ export async function getTunnelById(githubToken: string, tunnelId: string, clust
 export async function resolveTunnelUrl(
 	githubToken: string,
 	tunnelId: string,
-	clusterId?: string,
+	_clusterId?: string,
 	port: number = AHP_TUNNEL_PORT,
 ): Promise<{ wssUrl: string; accessToken?: string }> {
-	const info = await getTunnelById(githubToken, tunnelId, clusterId);
+	const info = await getTunnelById(githubToken, tunnelId);
 
 	if (info.wssUrl) {
 		return { wssUrl: info.wssUrl, accessToken: info.accessToken };
 	}
 
 	// Fallback: construct URL from cluster + tunnel ID pattern
-	const cluster = info.clusterId || clusterId;
-	if (cluster) {
-		const wssUrl = `wss://${info.tunnelId}-${port}.${cluster}.devtunnels.ms`;
+	if (info.clusterId) {
+		const wssUrl = `wss://${info.tunnelId}-${port}.${info.clusterId}.devtunnels.ms`;
 		log.info("constructed fallback tunnel URL", { wssUrl });
 		return { wssUrl, accessToken: info.accessToken };
 	}
