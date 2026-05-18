@@ -20,7 +20,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { Command } from "commander";
 import pc from "picocolors";
-import { AhpClient } from "./client/index.js";
+import { AhpClient, RpcError } from "./client/index.js";
 import { bashCompletion, fishCompletion, zshCompletion } from "./completions.js";
 import {
 	ConnectionStore,
@@ -113,6 +113,27 @@ function parseTags(raw?: string[]): Record<string, string> | undefined {
 		tags[entry.slice(0, eq)] = entry.slice(eq + 1);
 	}
 	return tags;
+}
+
+/** Parse --config key=value pairs into a config record. */
+function parseConfigFlags(raw?: string[]): Record<string, unknown> | undefined {
+	if (!raw || raw.length === 0) return undefined;
+	const config: Record<string, unknown> = {};
+	for (const entry of raw) {
+		const eq = entry.indexOf("=");
+		if (eq <= 0) {
+			throw new UsageError(`Invalid --config format: "${entry}". Expected key=value`);
+		}
+		const key = entry.slice(0, eq);
+		const val = entry.slice(eq + 1);
+		// Try to parse as JSON value (for booleans, numbers), fall back to string
+		try {
+			config[key] = JSON.parse(val);
+		} catch {
+			config[key] = val;
+		}
+	}
+	return config;
 }
 
 /** Parse --idle-timeout <seconds> into a validated positive integer. */
@@ -891,6 +912,7 @@ session
 	.option("-m, --model <model>", "Model to use")
 	.option("-n, --name <name>", "Name this session (for scoped lookups)")
 	.option("--cwd <dir>", "Working directory")
+	.option("-c, --config <key=value...>", "Session config values (repeatable, e.g. -c autoApprove=autopilot)")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
 	.action(
 		async (
@@ -900,6 +922,7 @@ session
 				model?: string;
 				name?: string;
 				cwd?: string;
+				config?: string[];
 				timeout: string;
 			},
 			cmd: Command,
@@ -914,6 +937,7 @@ session
 				const model = opts.model ?? cfg.defaultModel;
 				const cwd = opts.cwd ?? process.cwd();
 				const gitRoot = await findGitRoot(cwd);
+				const sessionConfig = parseConfigFlags(opts.config);
 
 				await withConnection(
 					{
@@ -933,6 +957,38 @@ session
 							);
 						}
 
+						// Resolve session config (gracefully handle servers that don't support it)
+						let resolvedConfig = sessionConfig;
+						try {
+							const configResult = await client.resolveSessionConfig({
+								provider: resolvedProvider,
+								workingDirectory: ensureFileUri(cwd),
+								config: sessionConfig,
+							});
+
+							// Merge server defaults with user-provided config
+							resolvedConfig = { ...configResult.values, ...sessionConfig };
+
+							if (globalOpts.format === "text") {
+								const props = Object.entries(configResult.schema.properties);
+								if (props.length > 0) {
+									console.log(pc.bold("Session Configuration"));
+									for (const [key, prop] of props) {
+										const value = resolvedConfig?.[key];
+										const mutable = prop.sessionMutable ? pc.green("mutable") : pc.dim("read-only");
+										const valStr = value !== undefined ? pc.cyan(JSON.stringify(value)) : pc.dim("(default)");
+										console.log(
+											`  ${pc.bold(key)}: ${valStr} [${mutable}]${prop.enum ? ` (${prop.enum.join(", ")})` : ""}`,
+										);
+									}
+									console.log();
+								}
+							}
+						} catch (err) {
+							// Server doesn't support resolveSessionConfig — continue without config resolution
+							if (!(err instanceof RpcError)) throw err;
+						}
+
 						// Generate a session URI
 						const sessionId = randomUUID();
 						const sessionUri = `${resolvedProvider}:/${sessionId}`;
@@ -940,8 +996,8 @@ session
 						const spinner = startSpinner(`Creating session on ${serverInfo.name}...`, spinnersEnabled(globalOpts));
 
 						try {
-							// Create the session
-							await client.createSession(sessionUri, resolvedProvider, model, ensureFileUri(cwd));
+							// Create the session with config
+							await client.createSession(sessionUri, resolvedProvider, model, ensureFileUri(cwd), resolvedConfig);
 
 							// Subscribe to the session URI
 							await client.subscribe(sessionUri);
@@ -1017,6 +1073,9 @@ session
 									console.log(pc.bold("Directory:"), cwd);
 									if (gitRoot) console.log(pc.bold("Git root:"), gitRoot);
 									console.log(pc.bold("Status:"), pc.green("active"));
+									if (resolvedConfig && Object.keys(resolvedConfig).length > 0) {
+										console.log(pc.bold("Config:"), JSON.stringify(resolvedConfig));
+									}
 								},
 								{
 									id: sessionId,
@@ -1027,6 +1086,7 @@ session
 									workingDirectory: cwd,
 									gitRoot,
 									status: "active",
+									...(resolvedConfig ? { config: resolvedConfig } : {}),
 								},
 							);
 						} catch (err) {
@@ -1768,6 +1828,8 @@ async function runPrompt(
 		oneShot?: boolean;
 		/** Working directory for session creation. Defaults to process.cwd(). */
 		cwd?: string;
+		/** Session configuration values to pass at creation. */
+		sessionConfig?: Record<string, unknown>;
 		/** Idle timeout in seconds. */
 		idleTimeout?: number;
 		/** Metadata tags to include in JSON output envelopes. */
@@ -1808,7 +1870,7 @@ async function runPrompt(
 				// One-shot: create a temporary session
 				const spinner = startSpinner("Creating session...", spinnersEnabled(globalOpts));
 				try {
-					sessionUri = await createTempSession(client, opts, cfg, cwd);
+					sessionUri = await createTempSession(client, opts, cfg, cwd, opts.sessionConfig);
 					spinner.stop();
 				} catch (err) {
 					spinner.stop();
@@ -1816,7 +1878,16 @@ async function runPrompt(
 				}
 			} else {
 				// Try to resolve existing session
-				const resolved = await resolveOrCreateSession(client, serverInfo, opts, cfg, cwd, gitRoot, globalOpts);
+				const resolved = await resolveOrCreateSession(
+					client,
+					serverInfo,
+					opts,
+					cfg,
+					cwd,
+					gitRoot,
+					globalOpts,
+					opts.sessionConfig,
+				);
 				sessionUri = resolved.sessionUri;
 				sessionRecord = resolved.record;
 			}
@@ -1904,6 +1975,7 @@ async function createTempSession(
 	opts: { provider?: string; model?: string },
 	cfg: AhpxConfig,
 	cwd: string,
+	sessionConfig?: Record<string, unknown>,
 ): Promise<string> {
 	const rootState = client.state.root;
 	const provider =
@@ -1913,7 +1985,7 @@ async function createTempSession(
 	}
 	const sessionId = randomUUID();
 	const sessionUri = `${provider}:/${sessionId}`;
-	await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd));
+	await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd), sessionConfig);
 	await client.subscribe(sessionUri);
 	await waitForReady(client, sessionUri);
 	return sessionUri;
@@ -1928,6 +2000,7 @@ async function resolveOrCreateSession(
 	cwd: string,
 	gitRoot: string | undefined,
 	globalOpts: GlobalOpts,
+	sessionConfig?: Record<string, unknown>,
 ): Promise<{ sessionUri: string; record: SessionRecord }> {
 	let record: SessionRecord | undefined;
 
@@ -1980,7 +2053,7 @@ async function resolveOrCreateSession(
 
 	const spinner = startSpinner(`Creating session on ${serverInfo.name}...`, spinnersEnabled(globalOpts));
 	try {
-		await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd));
+		await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd), sessionConfig);
 		await client.subscribe(sessionUri);
 
 		spinner.update("Waiting for session ready...");
@@ -2128,6 +2201,7 @@ program
 	.option("-p, --provider <provider>", "Agent provider (e.g. copilot)")
 	.option("-m, --model <model>", "Model to use")
 	.option("--cwd <dir>", "Working directory for the session")
+	.option("-c, --config <key=value...>", "Session config values (repeatable, e.g. -c autoApprove=autopilot)")
 	.option("--approve-all", "Auto-approve all permissions")
 	.option("--approve-reads", "Auto-approve read permissions, prompt for others")
 	.option("--deny-all", "Auto-deny all permissions")
@@ -2145,6 +2219,7 @@ program
 				provider?: string;
 				model?: string;
 				cwd?: string;
+				config?: string[];
 				approveAll?: boolean;
 				approveReads?: boolean;
 				denyAll?: boolean;
@@ -2170,6 +2245,7 @@ program
 						text,
 						oneShot: true,
 						...opts,
+						sessionConfig: parseConfigFlags(opts.config),
 						tags: parseTags(opts.tag),
 						idleTimeout: parseIdleTimeout(opts.idleTimeout),
 						forwarders: buildForwarders(opts),

@@ -14,6 +14,8 @@ import type {
 	FetchTurnsResult,
 	InitializeResult,
 	ListSessionsResult,
+	ResolveSessionConfigParams,
+	ResolveSessionConfigResult,
 	ResourceCopyParams,
 	ResourceCopyResult,
 	ResourceDeleteParams,
@@ -24,6 +26,8 @@ import type {
 	ResourceReadResult,
 	ResourceWriteParams,
 	ResourceWriteResult,
+	SessionConfigCompletionsParams,
+	SessionConfigCompletionsResult,
 	SubscribeResult,
 } from "../protocol/commands.js";
 import type { ProtocolNotification } from "../protocol/notifications.js";
@@ -57,6 +61,8 @@ export interface OpenSessionOptions {
 	model?: string;
 	/** Working directory for the session. */
 	workingDirectory?: string;
+	/** Agent-specific configuration values collected via `resolveSessionConfig`. */
+	config?: Record<string, unknown>;
 	/** Whether to wait for the session to be ready (default: true). */
 	waitForReady?: boolean;
 	/** Timeout in ms for waiting for ready state (default: 30000). */
@@ -200,6 +206,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 			provider: requestedProvider,
 			model,
 			workingDirectory,
+			config,
 			waitForReady = true,
 			readyTimeout = 30_000,
 		} = options;
@@ -217,7 +224,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		const sessionUri = `${provider}:/${sessionId}`;
 
 		// Create + subscribe
-		await this.createSession(sessionUri, provider, model, workingDirectory);
+		await this.createSession(sessionUri, provider, model, workingDirectory, config);
 		await this.subscribe(sessionUri);
 
 		// Build handle
@@ -247,14 +254,41 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Create a new session with the specified agent provider.
 	 */
-	async createSession(sessionUri: URI, provider?: string, model?: string, workingDirectory?: string): Promise<null> {
+	async createSession(
+		sessionUri: URI,
+		provider?: string,
+		model?: string,
+		workingDirectory?: string,
+		config?: Record<string, unknown>,
+	): Promise<null> {
 		this.ensureConnected();
 		return this.protocol!.request("createSession", {
 			session: sessionUri,
 			provider,
 			model: model ? { id: model } : undefined,
 			workingDirectory,
+			...(config && Object.keys(config).length > 0 ? { config } : {}),
 		});
+	}
+
+	/**
+	 * Resolve session configuration schema from the server.
+	 *
+	 * Iteratively resolves available config options. The server returns a
+	 * JSON Schema describing what configuration properties are available
+	 * given the current context (provider, working directory, partial config).
+	 */
+	async resolveSessionConfig(params: ResolveSessionConfigParams): Promise<ResolveSessionConfigResult> {
+		this.ensureConnected();
+		return this.protocol!.request("resolveSessionConfig", params);
+	}
+
+	/**
+	 * Query the server for allowed values of a dynamic session config property.
+	 */
+	async sessionConfigCompletions(params: SessionConfigCompletionsParams): Promise<SessionConfigCompletionsResult> {
+		this.ensureConnected();
+		return this.protocol!.request("sessionConfigCompletions", params);
 	}
 
 	/**
