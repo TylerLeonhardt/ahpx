@@ -39,7 +39,7 @@ export type { TransportOptions } from "./client/transport.js";
 // ── Protocol layer (advanced use) ───────────────────────────────────────
 
 export { ProtocolLayer, RpcError, RpcTimeoutError } from "./client/protocol.js";
-export type { ProtocolLayerOptions } from "./client/protocol.js";
+export type { ProtocolLayerOptions, IncomingRequest } from "./client/protocol.js";
 
 // ── State mirror ────────────────────────────────────────────────────────
 
@@ -48,6 +48,10 @@ export { StateMirror } from "./client/state.js";
 // ── Active client management ────────────────────────────────────────────
 
 export { ActiveClientManager } from "./client/active-client.js";
+
+// ── File serving (reverse-RPC) ──────────────────────────────────────────
+
+export { FileServingHandler } from "./client/file-serving.js";
 
 // ── Reconnection ────────────────────────────────────────────────────────
 
