@@ -39,6 +39,10 @@ export class QuietFormatter implements OutputFormatter {
 		// Silent
 	}
 
+	onToolCallAutoApproved(_id: string): void {
+		// Silent
+	}
+
 	onToolCallComplete(_id: string, _result: ToolCallResult): void {
 		// Silent
 	}

@@ -505,7 +505,7 @@ describe("TurnController", () => {
 		await resultPromise;
 	});
 
-	it("respects deny-all for server-confirmed tools", async () => {
+	it("skips permission handler for server-confirmed tools (deny-all mode)", async () => {
 		const { client, dispatched, emitAction, setSessionState } = createMockClient();
 		const cap = createCapture();
 		const renderer = new PromptRenderer(cap.out);
@@ -540,7 +540,7 @@ describe("TurnController", () => {
 
 		const turnId = (dispatched[0] as { turnId: string }).turnId;
 
-		// Server tool auto-confirmed, but user has deny-all
+		// Server tool auto-confirmed — permission handler should be skipped entirely
 		emitAction({
 			type: ActionType.SessionToolCallReady,
 			session: SESSION_URI,
@@ -552,13 +552,13 @@ describe("TurnController", () => {
 
 		await new Promise((r) => setTimeout(r, 50));
 
-		// Should have dispatched toolCallConfirmed with approved: false
+		// Should NOT have dispatched toolCallConfirmed — server already handled it
 		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
-		expect(confirmAction).toBeDefined();
-		expect((confirmAction as { approved: boolean }).approved).toBe(false);
+		expect(confirmAction).toBeUndefined();
 
-		// Permission handler should have been consulted
-		expect(cap.text()).toContain("[denied]");
+		// Renderer should show auto-approved (not denied, because permission handler was skipped)
+		expect(cap.text()).toContain("[auto-approved]");
+		expect(cap.text()).not.toContain("[denied]");
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
@@ -569,7 +569,7 @@ describe("TurnController", () => {
 		await resultPromise;
 	});
 
-	it("respects approve-all for server-confirmed tools without dispatching", async () => {
+	it("shows auto-approved for server-confirmed tools without dispatching", async () => {
 		const { client, dispatched, emitAction, setSessionState } = createMockClient();
 		const cap = createCapture();
 		const renderer = new PromptRenderer(cap.out);
@@ -616,11 +616,11 @@ describe("TurnController", () => {
 
 		await new Promise((r) => setTimeout(r, 50));
 
-		// Should NOT have dispatched toolCallConfirmed — server already running, user approves
+		// Should NOT have dispatched toolCallConfirmed — server already running
 		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
 		expect(confirmAction).toBeUndefined();
 
-		// Permission handler should have been consulted (auto-approved output)
+		// Renderer should show auto-approved (permission handler was not called)
 		expect(cap.text()).toContain("[auto-approved]");
 
 		emitAction({
@@ -632,7 +632,7 @@ describe("TurnController", () => {
 		await resultPromise;
 	});
 
-	it("treats tool with non-matching toolClientId as server tool", async () => {
+	it("treats tool with non-matching toolClientId as server tool and auto-approves", async () => {
 		const { client, dispatched, emitAction, setSessionState } = createMockClient();
 		const cap = createCapture();
 		const renderer = new PromptRenderer(cap.out);
@@ -668,7 +668,7 @@ describe("TurnController", () => {
 
 		const turnId = (dispatched[0] as { turnId: string }).turnId;
 
-		// Auto-confirmed but toolClientId doesn't match → treated as server tool
+		// Auto-confirmed but toolClientId doesn't match → treated as server tool, auto-approved
 		emitAction({
 			type: ActionType.SessionToolCallReady,
 			session: SESSION_URI,
@@ -680,10 +680,12 @@ describe("TurnController", () => {
 
 		await new Promise((r) => setTimeout(r, 50));
 
-		// Should have dispatched denied — non-matching toolClientId treated as server tool
+		// Should NOT have dispatched any confirmation — server already confirmed
 		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
-		expect(confirmAction).toBeDefined();
-		expect((confirmAction as { approved: boolean }).approved).toBe(false);
+		expect(confirmAction).toBeUndefined();
+
+		// Renderer should show auto-approved
+		expect(cap.text()).toContain("[auto-approved]");
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,

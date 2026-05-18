@@ -167,7 +167,6 @@ export class TurnController {
 							if (isClientTool) {
 								break;
 							}
-							// Server tool: fall through to consult the user's permission mode.
 						}
 
 						// Look up tool annotations from serverTools
@@ -183,14 +182,15 @@ export class TurnController {
 
 						this.renderer.onToolCallReady(a.toolCallId, callInfo);
 
-						// Handle confirmation asynchronously
+						if (serverConfirmed) {
+							// Server already confirmed — show auto-approved, skip user prompt
+							this.renderer.onToolCallAutoApproved(a.toolCallId);
+							break;
+						}
+
+						// Only prompt user when server didn't auto-approve
 						this.permissionHandler.handleToolConfirmation(callInfo).then((approved) => {
 							if (this.cancelled) return;
-
-							if (serverConfirmed && approved) {
-								// Server already confirmed and user approves — nothing to dispatch.
-								return;
-							}
 
 							if (approved) {
 								this.client.dispatchAction({

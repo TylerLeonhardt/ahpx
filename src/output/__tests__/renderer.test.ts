@@ -99,6 +99,15 @@ describe("PromptRenderer", () => {
 		});
 	});
 
+	describe("onToolCallAutoApproved", () => {
+		it("shows [auto-approved] indicator", () => {
+			const cap = createCapture();
+			const r = new PromptRenderer(cap.out);
+			r.onToolCallAutoApproved("tc1");
+			expect(cap.text()).toContain("[auto-approved]");
+		});
+	});
+
 	describe("onToolCallComplete", () => {
 		it("shows completed tool with green prefix for success", () => {
 			const cap = createCapture();

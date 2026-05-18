@@ -16,6 +16,7 @@ function createMockFormatter(): OutputFormatter & { calls: Array<{ method: strin
 		onToolCallStart: vi.fn((...args: unknown[]) => calls.push({ method: "onToolCallStart", args })),
 		onToolCallDelta: vi.fn((...args: unknown[]) => calls.push({ method: "onToolCallDelta", args })),
 		onToolCallReady: vi.fn((...args: unknown[]) => calls.push({ method: "onToolCallReady", args })),
+		onToolCallAutoApproved: vi.fn((...args: unknown[]) => calls.push({ method: "onToolCallAutoApproved", args })),
 		onToolCallComplete: vi.fn((...args: unknown[]) => calls.push({ method: "onToolCallComplete", args })),
 		onToolCallCancelled: vi.fn((...args: unknown[]) => calls.push({ method: "onToolCallCancelled", args })),
 		onUsage: vi.fn((...args: unknown[]) => calls.push({ method: "onUsage", args })),
@@ -112,6 +113,12 @@ describe("ForwardingFormatter", () => {
 			const { formatter, inner } = createFormatter();
 			formatter.onToolCallReady("tc-1", sampleToolCallInfo);
 			expect(inner.onToolCallReady).toHaveBeenCalledWith("tc-1", sampleToolCallInfo);
+		});
+
+		it("calls inner.onToolCallAutoApproved with same args", () => {
+			const { formatter, inner } = createFormatter();
+			formatter.onToolCallAutoApproved("tc-1");
+			expect(inner.onToolCallAutoApproved).toHaveBeenCalledWith("tc-1");
 		});
 
 		it("calls inner.onToolCallComplete with same args", () => {
@@ -333,6 +340,12 @@ describe("ForwardingFormatter", () => {
 					displayName: "Search",
 					invocationMessage: "Searching...",
 				},
+			},
+			{
+				method: "onToolCallAutoApproved",
+				invoke: (f) => f.onToolCallAutoApproved("tc-1"),
+				expectedType: "tool_call_auto_approved",
+				expectedData: { toolCallId: "tc-1" },
 			},
 			{
 				method: "onToolCallComplete",

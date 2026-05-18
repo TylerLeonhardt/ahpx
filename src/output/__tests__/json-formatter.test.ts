@@ -155,6 +155,16 @@ describe("JsonFormatter", () => {
 			expect(env.data).not.toHaveProperty("toolInput");
 		});
 
+		it("tool_call_auto_approved event", () => {
+			const cap = createCapture();
+			const fmt = new JsonFormatter(cap.out);
+			fmt.onToolCallAutoApproved("tc1");
+
+			const env = cap.envelopes()[0];
+			expect(env.type).toBe("tool_call_auto_approved");
+			expect(env.data.toolCallId).toBe("tc1");
+		});
+
 		it("tool_call_complete event", () => {
 			const cap = createCapture();
 			const fmt = new JsonFormatter(cap.out);
