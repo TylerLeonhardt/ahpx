@@ -48,7 +48,7 @@ import type { PermissionMode } from "./permissions/index.js";
 import { TurnController } from "./prompt/index.js";
 import { ActionType } from "./protocol/actions.js";
 import { ResponsePartKind, SessionStatus } from "./protocol/state.js";
-import type { Turn } from "./protocol/state.js";
+import type { SessionActiveClient, Turn } from "./protocol/state.js";
 import { SessionPersistence, SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
 import type { SessionRecord } from "./session/index.js";
 import { ensureFileUri } from "./uri.js";
@@ -1030,8 +1030,32 @@ session
 						const spinner = startSpinner(`Creating session on ${serverInfo.name}...`, spinnersEnabled(globalOpts));
 
 						try {
-							// Create the session with config
-							await client.createSession(sessionUri, resolvedProvider, model, ensureFileUri(cwd), resolvedConfig);
+							// Discover workspace customizations BEFORE creating the session
+							let discoveredCount = 0;
+							let activeClientParam: SessionActiveClient | undefined;
+							if (opts.customizations !== false) {
+								const discovered = await discoverCustomizations(cwd);
+								discoveredCount = discovered.length;
+								if (discovered.length > 0) {
+									// Register file URIs for reverse-RPC serving
+									client.fileServing.addAllowedUris(discovered.map((r) => r.uri));
+									activeClientParam = {
+										clientId: client.clientId,
+										tools: [],
+										customizations: discovered,
+									};
+								}
+							}
+
+							// Create the session with config and activeClient
+							await client.createSession(
+								sessionUri,
+								resolvedProvider,
+								model,
+								ensureFileUri(cwd),
+								resolvedConfig,
+								activeClientParam,
+							);
 
 							// Subscribe to the session URI
 							await client.subscribe(sessionUri);
@@ -1101,26 +1125,6 @@ session
 								createdAt: new Date().toISOString(),
 							};
 							await sessionStore.save(record);
-
-							// Discover and dispatch workspace customizations
-							let discoveredCount = 0;
-							if (opts.customizations !== false) {
-								const discovered = await discoverCustomizations(cwd);
-								discoveredCount = discovered.length;
-								if (discovered.length > 0) {
-									// Register file URIs for reverse-RPC serving
-									client.fileServing.addAllowedUris(discovered.map((r) => r.uri));
-									client.dispatchAction({
-										type: ActionType.SessionActiveClientChanged,
-										session: sessionUri,
-										activeClient: {
-											clientId: client.clientId,
-											tools: [],
-											customizations: discovered,
-										},
-									});
-								}
-							}
 
 							outputResult(
 								globalOpts,
@@ -2093,11 +2097,25 @@ async function runPrompt(
 			let sessionUri: string;
 			let sessionRecord: SessionRecord | undefined;
 
+			// Discover workspace customizations BEFORE creating/resolving the session
+			let activeClientParam: SessionActiveClient | undefined;
+			if (opts.customizations !== false) {
+				const discovered = await discoverCustomizations(cwd);
+				if (discovered.length > 0) {
+					client.fileServing.addAllowedUris(discovered.map((r) => r.uri));
+					activeClientParam = {
+						clientId: client.clientId,
+						tools: [],
+						customizations: discovered,
+					};
+				}
+			}
+
 			if (opts.oneShot) {
 				// One-shot: create a temporary session
 				const spinner = startSpinner("Creating session...", spinnersEnabled(globalOpts));
 				try {
-					sessionUri = await createTempSession(client, opts, cfg, cwd, opts.sessionConfig);
+					sessionUri = await createTempSession(client, opts, cfg, cwd, opts.sessionConfig, activeClientParam);
 					spinner.stop();
 				} catch (err) {
 					spinner.stop();
@@ -2114,27 +2132,10 @@ async function runPrompt(
 					gitRoot,
 					globalOpts,
 					opts.sessionConfig,
+					activeClientParam,
 				);
 				sessionUri = resolved.sessionUri;
 				sessionRecord = resolved.record;
-			}
-
-			// Discover and dispatch workspace customizations
-			if (opts.customizations !== false) {
-				const discovered = await discoverCustomizations(cwd);
-				if (discovered.length > 0) {
-					// Register file URIs for reverse-RPC serving
-					client.fileServing.addAllowedUris(discovered.map((r) => r.uri));
-					client.dispatchAction({
-						type: ActionType.SessionActiveClientChanged,
-						session: sessionUri,
-						activeClient: {
-							clientId: client.clientId,
-							tools: [],
-							customizations: discovered,
-						},
-					});
-				}
 			}
 
 			// Run the turn
@@ -2221,6 +2222,7 @@ async function createTempSession(
 	cfg: AhpxConfig,
 	cwd: string,
 	sessionConfig?: Record<string, unknown>,
+	activeClient?: SessionActiveClient,
 ): Promise<string> {
 	const rootState = client.state.root;
 	const provider =
@@ -2230,7 +2232,14 @@ async function createTempSession(
 	}
 	const sessionId = randomUUID();
 	const sessionUri = `${provider}:/${sessionId}`;
-	await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd), sessionConfig);
+	await client.createSession(
+		sessionUri,
+		provider,
+		opts.model ?? cfg.defaultModel,
+		ensureFileUri(cwd),
+		sessionConfig,
+		activeClient,
+	);
 	await client.subscribe(sessionUri);
 
 	// Check if session is provisional (lifecycle stays "creating" after subscribe)
@@ -2253,6 +2262,7 @@ async function resolveOrCreateSession(
 	gitRoot: string | undefined,
 	globalOpts: GlobalOpts,
 	sessionConfig?: Record<string, unknown>,
+	activeClient?: SessionActiveClient,
 ): Promise<{ sessionUri: string; record: SessionRecord }> {
 	let record: SessionRecord | undefined;
 
@@ -2305,7 +2315,14 @@ async function resolveOrCreateSession(
 
 	const spinner = startSpinner(`Creating session on ${serverInfo.name}...`, spinnersEnabled(globalOpts));
 	try {
-		await client.createSession(sessionUri, provider, opts.model ?? cfg.defaultModel, ensureFileUri(cwd), sessionConfig);
+		await client.createSession(
+			sessionUri,
+			provider,
+			opts.model ?? cfg.defaultModel,
+			ensureFileUri(cwd),
+			sessionConfig,
+			activeClient,
+		);
 		await client.subscribe(sessionUri);
 
 		// Check if session is provisional (lifecycle stays "creating" after subscribe)

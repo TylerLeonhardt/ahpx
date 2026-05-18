@@ -31,7 +31,7 @@ import type {
 	SubscribeResult,
 } from "../protocol/commands.js";
 import type { ProtocolNotification } from "../protocol/notifications.js";
-import type { TerminalClaim, URI } from "../protocol/state.js";
+import type { SessionActiveClient, TerminalClaim, URI } from "../protocol/state.js";
 import { PROTOCOL_VERSION } from "../protocol/version/registry.js";
 import { FileServingHandler } from "./file-serving.js";
 import { ProtocolLayer, type ProtocolLayerOptions } from "./protocol.js";
@@ -64,6 +64,8 @@ export interface OpenSessionOptions {
 	workingDirectory?: string;
 	/** Agent-specific configuration values collected via `resolveSessionConfig`. */
 	config?: Record<string, unknown>;
+	/** Eagerly claim the active client role with tools and customizations. */
+	activeClient?: SessionActiveClient;
 	/** Whether to wait for the session to be ready (default: true). */
 	waitForReady?: boolean;
 	/** Timeout in ms for waiting for ready state (default: 30000). */
@@ -230,6 +232,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 			model,
 			workingDirectory,
 			config,
+			activeClient,
 			waitForReady = true,
 			readyTimeout = 30_000,
 		} = options;
@@ -247,7 +250,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		const sessionUri = `${provider}:/${sessionId}`;
 
 		// Create + subscribe
-		await this.createSession(sessionUri, provider, model, workingDirectory, config);
+		await this.createSession(sessionUri, provider, model, workingDirectory, config, activeClient);
 		await this.subscribe(sessionUri);
 
 		// Check if session is provisional (lifecycle stays "creating" after subscribe)
@@ -288,6 +291,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		model?: string,
 		workingDirectory?: string,
 		config?: Record<string, unknown>,
+		activeClient?: SessionActiveClient,
 	): Promise<null> {
 		this.ensureConnected();
 		return this.protocol!.request("createSession", {
@@ -296,6 +300,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 			model: model ? { id: model } : undefined,
 			workingDirectory,
 			...(config && Object.keys(config).length > 0 ? { config } : {}),
+			...(activeClient ? { activeClient } : {}),
 		});
 	}
 
