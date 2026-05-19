@@ -26,6 +26,10 @@ export interface ConnectionProfile {
 	default?: boolean;
 	/** Optional tags for server grouping (e.g., ['gpu', 'cloud']) */
 	tags?: string[];
+	/** Optional dev tunnel ID — URL is resolved dynamically at connect time */
+	tunnelId?: string;
+	/** Optional cluster ID for the dev tunnel */
+	tunnelClusterId?: string;
 }
 
 interface ConnectionsFile {
@@ -118,7 +122,8 @@ export class ConnectionStore {
 
 	/** Add a new connection profile. Throws if name already exists or URL is invalid. */
 	async add(profile: ConnectionProfile): Promise<void> {
-		if (!isValidWsUrl(profile.url)) {
+		// Tunnel-based profiles use a placeholder URL that gets resolved dynamically
+		if (!profile.tunnelId && !isValidWsUrl(profile.url)) {
 			throw new ConnectionValidationError(`Invalid WebSocket URL: ${profile.url} (must be ws:// or wss://)`);
 		}
 

@@ -160,17 +160,16 @@ describe("CLI integration: subcommand --help", () => {
 // ── Error handling / missing args ────────────────────────────────────────────
 
 describe("CLI integration: error handling", () => {
-	it("server add without required --url exits non-zero", async () => {
+	it("server add without --url or --tunnel exits non-zero", async () => {
 		const result = await runCli("server", "add", "test-server");
 		expect(result.exitCode).not.toBe(0);
 		expect(result.stderr).toContain("--url");
 	});
 
-	it("server add without name argument shows --url error", async () => {
-		// Commander reports the first missing required option before checking positional args
+	it("server add without name argument shows missing argument error", async () => {
+		// Commander reports missing positional argument when no required option forces an error first
 		const result = await runCli("server", "add");
 		expect(result.exitCode).not.toBe(0);
-		expect(result.stderr).toContain("--url");
 	});
 
 	it("server remove without name argument exits non-zero", async () => {

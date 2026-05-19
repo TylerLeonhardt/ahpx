@@ -228,13 +228,22 @@ Examples:
  *
  * Accepts:
  *   - A ws:// or wss:// URL (used directly)
- *   - A saved connection name (looked up from the store)
+ *   - A tunnel://<tunnelId> URL (resolved via dev tunnel SDK)
+ *   - A saved connection name (looked up from the store; supports tunnel profiles)
  *   - undefined (uses the default connection, if set)
  */
-async function resolveTarget(target?: string): Promise<{ url: string; token?: string }> {
+async function resolveTarget(
+	target?: string,
+): Promise<{ url: string; token?: string; headers?: Record<string, string> }> {
 	// Explicit ws(s):// URL — use as-is
 	if (target && isValidWsUrl(target)) {
 		return { url: target };
+	}
+
+	// tunnel://<tunnelId> URL — resolve dynamically
+	if (target?.startsWith("tunnel://")) {
+		const tunnelId = target.replace("tunnel://", "");
+		return resolveTunnelTarget(tunnelId);
 	}
 
 	// Named connection
@@ -246,7 +255,7 @@ async function resolveTarget(target?: string): Promise<{ url: string; token?: st
 				ExitCode.Error,
 			);
 		}
-		return { url: conn.url, token: conn.token };
+		return resolveConnectionProfile(conn);
 	}
 
 	// No argument — try default
@@ -257,7 +266,31 @@ async function resolveTarget(target?: string): Promise<{ url: string; token?: st
 			ExitCode.Error,
 		);
 	}
-	return { url: def.url, token: def.token };
+	return resolveConnectionProfile(def);
+}
+
+/** Resolve a connection profile, handling tunnel profiles dynamically. */
+async function resolveConnectionProfile(conn: {
+	url: string;
+	token?: string;
+	tunnelId?: string;
+	tunnelClusterId?: string;
+}): Promise<{ url: string; token?: string; headers?: Record<string, string> }> {
+	if (conn.tunnelId) {
+		return resolveTunnelTarget(conn.tunnelId, conn.tunnelClusterId);
+	}
+	return { url: conn.url, token: conn.token };
+}
+
+/** Resolve a tunnel ID to a WSS URL + access token + tunnel headers. */
+async function resolveTunnelTarget(
+	tunnelId: string,
+	clusterId?: string,
+): Promise<{ url: string; token?: string; headers?: Record<string, string> }> {
+	const { resolveGitHubToken, resolveTunnelUrl, buildTunnelHeaders } = await import("./tunnel/index.js");
+	const githubToken = resolveGitHubToken();
+	const { wssUrl, accessToken } = await resolveTunnelUrl(githubToken, tunnelId, clusterId);
+	return { url: wssUrl, token: undefined, headers: buildTunnelHeaders(accessToken) };
 }
 
 /** Print server information after a successful connect (text mode). */
@@ -366,11 +399,11 @@ program
 		});
 
 		try {
-			const { url, token } = await resolveTarget(target);
+			const { url, token, headers } = await resolveTarget(target);
 			const spinner = startSpinner(`Connecting to ${url}...`, spinnersEnabled(globalOpts));
 
 			try {
-				const result = await client.connect(url);
+				const result = await client.connect(url, { headers });
 				spinner.stop();
 
 				// Authenticate for each protected resource declared by agents
@@ -410,7 +443,9 @@ server
 	.command("add")
 	.description("Save a named connection profile")
 	.argument("<name>", "Connection name")
-	.requiredOption("--url <url>", "WebSocket URL (ws:// or wss://)")
+	.option("--url <url>", "WebSocket URL (ws:// or wss://)")
+	.option("--tunnel <tunnelId>", "Dev tunnel ID (resolves URL dynamically)")
+	.option("--tunnel-cluster <clusterId>", "Dev tunnel cluster ID")
 	.option("--token <token>", "Authentication token")
 	.option("--default", "Set as the default server")
 	.option(
@@ -420,23 +455,48 @@ server
 		[] as string[],
 	)
 	.action(
-		async (name: string, opts: { url: string; token?: string; default?: boolean; tag: string[] }, cmd: Command) => {
+		async (
+			name: string,
+			opts: {
+				url?: string;
+				tunnel?: string;
+				tunnelCluster?: string;
+				token?: string;
+				default?: boolean;
+				tag: string[];
+			},
+			cmd: Command,
+		) => {
 			const globalOpts = parseGlobalOpts(cmd);
 			applyGlobalOpts(globalOpts);
 
 			try {
+				if (!opts.url && !opts.tunnel) {
+					throw new UsageError("Either --url or --tunnel is required.");
+				}
+				if (opts.url && opts.tunnel) {
+					throw new UsageError("Cannot specify both --url and --tunnel.");
+				}
+
 				const tags = opts.tag.length > 0 ? opts.tag : undefined;
+				const url = opts.url ?? `tunnel://${opts.tunnel}`;
 				await store.add({
 					name,
-					url: opts.url,
+					url,
 					token: opts.token,
 					default: opts.default ?? false,
 					tags,
+					tunnelId: opts.tunnel,
+					tunnelClusterId: opts.tunnelCluster,
 				});
 				outputResult(
 					globalOpts,
 					() => {
-						console.log(pc.green("✓"), `Saved connection ${pc.bold(name)} → ${pc.dim(opts.url)}`);
+						if (opts.tunnel) {
+							console.log(pc.green("✓"), `Saved tunnel connection ${pc.bold(name)} → tunnel ${pc.dim(opts.tunnel)}`);
+						} else {
+							console.log(pc.green("✓"), `Saved connection ${pc.bold(name)} → ${pc.dim(url)}`);
+						}
 						if (opts.default) {
 							console.log(pc.dim("  Set as default server"));
 						}
@@ -444,7 +504,7 @@ server
 							console.log(pc.dim(`  Tags: ${tags.join(", ")}`));
 						}
 					},
-					{ name, url: opts.url, default: opts.default ?? false, tags: tags ?? [] },
+					{ name, url, tunnel: opts.tunnel, default: opts.default ?? false, tags: tags ?? [] },
 				);
 			} catch (err) {
 				if (err instanceof ConnectionValidationError) {
@@ -537,11 +597,11 @@ server
 		});
 
 		try {
-			const { url, token } = await resolveTarget(target);
+			const { url, token, headers } = await resolveTarget(target);
 			const spinner = startSpinner(`Testing connection to ${url}...`, spinnersEnabled(globalOpts));
 
 			try {
-				const result = await client.connect(url);
+				const result = await client.connect(url, { headers });
 				spinner.stop();
 
 				// Authenticate for each protected resource declared by agents
@@ -716,6 +776,147 @@ server
 		}
 	});
 
+// ── tunnel ──────────────────────────────────────────────────────────────────
+
+const tunnel = program.command("tunnel").description("Discover and connect to remote AHP agent hosts via dev tunnels");
+
+tunnel
+	.command("list")
+	.description("List dev tunnels running AHP agent hosts (tagged with protocolv5)")
+	.action(async (_opts: Record<string, unknown>, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const { resolveGitHubToken, listAgentHostTunnels } = await import("./tunnel/index.js");
+			const githubToken = resolveGitHubToken();
+			const spinner = startSpinner("Searching for AHP tunnels...", spinnersEnabled(globalOpts));
+
+			try {
+				const tunnels = await listAgentHostTunnels(githubToken);
+				spinner.stop();
+
+				outputResult(
+					globalOpts,
+					() => {
+						if (tunnels.length === 0) {
+							console.log(pc.dim("No AHP tunnels found (tagged with protocolv5)."));
+							return;
+						}
+
+						const idW = Math.max(9, ...tunnels.map((t) => t.tunnelId.length));
+						const nameW = Math.max(4, ...tunnels.map((t) => (t.name ?? "—").length));
+						const clusterW = Math.max(7, ...tunnels.map((t) => t.clusterId.length));
+
+						console.log(
+							`  ${pc.bold("Tunnel ID".padEnd(idW))}  ${pc.bold("Name".padEnd(nameW))}  ${pc.bold("Cluster".padEnd(clusterW))}  ${pc.bold("Host")}    ${pc.bold("Ports")}`,
+						);
+						console.log(
+							`  ${"─".repeat(idW)}  ${"─".repeat(nameW)}  ${"─".repeat(clusterW)}  ${"─".repeat(7)}  ${"─".repeat(20)}`,
+						);
+
+						for (const t of tunnels) {
+							const host = t.hostConnected ? pc.green("online") : pc.dim("offline");
+							const ports =
+								t.ports.map((p) => (p.name ? `${p.portNumber} (${p.name})` : String(p.portNumber))).join(", ") ||
+								pc.dim("—");
+							console.log(
+								`  ${pc.cyan(t.tunnelId.padEnd(idW))}  ${(t.name ?? pc.dim("—")).toString().padEnd(nameW)}  ${t.clusterId.padEnd(clusterW)}  ${host.padEnd(7)}  ${ports}`,
+							);
+						}
+					},
+					tunnels,
+				);
+			} catch (err) {
+				spinner.stop();
+				throw err;
+			}
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
+
+tunnel
+	.command("connect")
+	.description("Connect to a dev tunnel's AHP agent host")
+	.argument("<tunnel-id>", "Dev tunnel ID to connect to")
+	.option("--cluster <clusterId>", "Tunnel cluster ID")
+	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
+	.option("--save <name>", "Save this tunnel as a named connection profile")
+	.option("--default", "Set the saved connection as default (requires --save)")
+	.action(
+		async (
+			tunnelId: string,
+			opts: { cluster?: string; timeout: string; save?: string; default?: boolean },
+			cmd: Command,
+		) => {
+			const globalOpts = parseGlobalOpts(cmd);
+			applyGlobalOpts(globalOpts);
+
+			const client = new AhpClient({
+				connectTimeout: Number.parseInt(opts.timeout, 10),
+				initialSubscriptions: ["agenthost:/root"],
+			});
+
+			try {
+				const { resolveGitHubToken, resolveTunnelUrl, buildTunnelHeaders } = await import("./tunnel/index.js");
+				const githubToken = resolveGitHubToken();
+
+				const spinner = startSpinner(`Resolving tunnel ${tunnelId}...`, spinnersEnabled(globalOpts));
+
+				try {
+					const { wssUrl, accessToken } = await resolveTunnelUrl(githubToken, tunnelId, opts.cluster);
+					spinner.update(`Connecting to ${wssUrl}...`);
+
+					const headers = buildTunnelHeaders(accessToken);
+
+					const result = await client.connect(wssUrl, { headers });
+					spinner.stop();
+
+					// Authenticate for protected resources
+					const agents = client.state.root?.agents ?? [];
+					const resources = agents.flatMap((a) => a.protectedResources ?? []);
+					const envToken = process.env.AHPX_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+					if (envToken) {
+						for (const r of resources) {
+							await client.authenticate(r.resource, envToken).catch(() => {});
+						}
+					}
+
+					// Optionally save as a connection profile
+					if (opts.save) {
+						await store.add({
+							name: opts.save,
+							url: `tunnel://${tunnelId}`,
+							default: opts.default ?? false,
+							tunnelId,
+							tunnelClusterId: opts.cluster,
+						});
+					}
+
+					outputResult(
+						globalOpts,
+						() => {
+							printServerInfo(client, result);
+							if (opts.save) {
+								console.log();
+								console.log(pc.green("✓"), `Saved as connection ${pc.bold(opts.save)}`);
+							}
+						},
+						{ ...serverInfoJson(client, result), tunnelId, wssUrl },
+					);
+				} catch (err) {
+					spinner.stop();
+					throw err;
+				}
+			} catch (err) {
+				handleError(err, globalOpts);
+			} finally {
+				await client.disconnect();
+			}
+		},
+	);
+
 // ── config ───────────────────────────────────────────────────────────────────
 
 const config = program.command("config").description("Manage ahpx configuration");
@@ -882,13 +1083,19 @@ async function resolveSessionRecord(
 		store: sessionStore,
 	});
 
-	if (!record) {
-		const hint = opts.name ? ` named "${opts.name}"` : "";
-		throw new NoSessionError(
-			`No active session${hint} found for ${pc.bold(serverName)} in ${pc.dim(cwd)}.\nRun ${pc.bold("ahpx session new")} to create one.`,
-		);
+	if (record) return record;
+
+	// Fallback: if name is provided, try direct lookup by name + server
+	// (handles remote sessions where the local cwd won't match the stored remote path)
+	if (opts.name) {
+		const byName = await sessionStore.getByNameAndServer(opts.name, serverName);
+		if (byName) return byName;
 	}
-	return record;
+
+	const hint = opts.name ? ` named "${opts.name}"` : "";
+	throw new NoSessionError(
+		`No active session${hint} found for ${pc.bold(serverName)} in ${pc.dim(cwd)}.\nRun ${pc.bold("ahpx session new")} to create one.`,
+	);
 }
 
 /** Build config overrides from global CLI opts. */
@@ -905,23 +1112,32 @@ function applyGlobalOpts(globalOpts: GlobalOpts): void {
 }
 
 /**
+ * Check whether the server target is a remote (non-local) host.
+ * Returns true if the server URL points to a non-localhost address.
+ */
+async function isRemoteServerTarget(server: string | undefined): Promise<boolean> {
+	if (!server) return false;
+
+	let url: string;
+	if (isValidWsUrl(server)) {
+		url = server;
+	} else {
+		const conn = await store.get(server);
+		if (!conn) return false;
+		url = conn.url;
+	}
+
+	return !isLocalUrl(url);
+}
+
+/**
  * Validate that --cwd is provided when targeting a remote server.
  * Throws UsageError if --server points to a non-local host and --cwd is missing.
  */
 async function requireCwdForRemoteServer(server: string | undefined, cwd: string | undefined): Promise<void> {
 	if (!server || cwd) return;
 
-	let url: string;
-	if (isValidWsUrl(server)) {
-		url = server;
-	} else {
-		const store = new ConnectionStore();
-		const conn = await store.get(server);
-		if (!conn) return; // Unknown server — let withConnection() handle the error
-		url = conn.url;
-	}
-
-	if (!isLocalUrl(url)) {
+	if (await isRemoteServerTarget(server)) {
 		throw new UsageError(
 			`--cwd is required when targeting a remote server.\nUse 'ahpx browse --server ${server}' to browse the remote filesystem and find the correct working directory.`,
 		);
@@ -964,7 +1180,8 @@ session
 				const provider = opts.provider ?? cfg.defaultProvider;
 				const model = opts.model ?? cfg.defaultModel;
 				const cwd = opts.cwd ?? process.cwd();
-				const gitRoot = await findGitRoot(cwd);
+				const isRemote = await isRemoteServerTarget(opts.server);
+				const gitRoot = isRemote ? undefined : await findGitRoot(cwd);
 				const sessionConfig = parseConfigFlags(opts.config);
 
 				await withConnection(
@@ -1708,12 +1925,17 @@ const sessionCustomization = session
 sessionCustomization
 	.argument("[id]", "Session ID")
 	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-S, --session <id>", "Target session by ID")
 	.option("-s, --server <name>", "Server name")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
 	.action(
-		async (id: string | undefined, opts: { sessionName?: string; server?: string; timeout: string }, cmd: Command) => {
+		async (
+			id: string | undefined,
+			opts: { sessionName?: string; session?: string; server?: string; timeout: string },
+			cmd: Command,
+		) => {
 			// Default action: list customizations (same as `session customization list`)
-			await listCustomizations(id, opts, cmd);
+			await listCustomizations(opts.session ?? id, opts, cmd);
 		},
 	);
 
@@ -1722,11 +1944,16 @@ sessionCustomization
 	.description("List customizations on a session")
 	.argument("[id]", "Session ID")
 	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-S, --session <id>", "Target session by ID")
 	.option("-s, --server <name>", "Server name")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
 	.action(
-		async (id: string | undefined, opts: { sessionName?: string; server?: string; timeout: string }, cmd: Command) => {
-			await listCustomizations(id, opts, cmd);
+		async (
+			id: string | undefined,
+			opts: { sessionName?: string; session?: string; server?: string; timeout: string },
+			cmd: Command,
+		) => {
+			await listCustomizations(opts.session ?? id, opts, cmd);
 		},
 	);
 
@@ -1794,20 +2021,21 @@ sessionCustomization
 	.argument("<uri>", "Customization URI to toggle")
 	.argument("[id]", "Session ID")
 	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-S, --session <id>", "Target session by ID")
 	.option("-s, --server <name>", "Server name")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
 	.action(
 		async (
 			uri: string,
 			id: string | undefined,
-			opts: { sessionName?: string; server?: string; timeout: string },
+			opts: { sessionName?: string; session?: string; server?: string; timeout: string },
 			cmd: Command,
 		) => {
 			const globalOpts = parseGlobalOpts(cmd);
 			applyGlobalOpts(globalOpts);
 
 			try {
-				const record = await resolveSessionRecord(id, { name: opts.sessionName, server: opts.server });
+				const record = await resolveSessionRecord(opts.session ?? id, { name: opts.sessionName, server: opts.server });
 				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 
 				await withConnection(
@@ -2079,10 +2307,23 @@ async function runPrompt(
 	},
 	globalOpts: GlobalOpts,
 ): Promise<void> {
-	await requireCwdForRemoteServer(opts.server, opts.cwd);
+	// If a named session is specified but no cwd, look up the existing session's workingDirectory
+	// so we don't require --cwd for remote sessions that already have a stored path
+	let resolvedCwd = opts.cwd;
+	if (!resolvedCwd && opts.sessionName) {
+		const lookupCfg = await loadConfig();
+		const serverName = await resolveServerName(opts.server, lookupCfg);
+		const existingRecord = await sessionStore.getByNameAndServer(opts.sessionName, serverName);
+		if (existingRecord?.workingDirectory) {
+			resolvedCwd = existingRecord.workingDirectory;
+		}
+	}
+
+	await requireCwdForRemoteServer(opts.server, resolvedCwd);
 	const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
-	const cwd = opts.cwd ?? process.cwd();
-	const gitRoot = await findGitRoot(cwd);
+	const cwd = resolvedCwd ?? process.cwd();
+	const isRemote = await isRemoteServerTarget(opts.server);
+	const gitRoot = isRemote ? undefined : await findGitRoot(cwd);
 	const permMode = resolvePermissionMode(opts, cfg);
 	let formatter: OutputFormatter = formatterFromOpts(globalOpts, opts.tags);
 
@@ -2947,6 +3188,7 @@ async function handleImplicitPrompt(): Promise<boolean> {
 		const knownCommands = new Set([
 			"connect",
 			"server",
+			"tunnel",
 			"config",
 			"session",
 			"prompt",

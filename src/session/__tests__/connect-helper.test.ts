@@ -75,7 +75,7 @@ describe("withConnection", () => {
 			const callback = vi.fn();
 			await withConnection({ server: "ws://localhost:3000", config: makeConfig() }, callback);
 
-			expect(mockClient.connect).toHaveBeenCalledWith("ws://localhost:3000");
+			expect(mockClient.connect).toHaveBeenCalledWith("ws://localhost:3000", { headers: undefined });
 			expect(callback).toHaveBeenCalledWith(mockClient, {
 				name: "ws://localhost:3000",
 				url: "ws://localhost:3000",
@@ -88,7 +88,7 @@ describe("withConnection", () => {
 			const callback = vi.fn();
 			await withConnection({ server: "wss://prod.example.com/ahp", config: makeConfig() }, callback);
 
-			expect(mockClient.connect).toHaveBeenCalledWith("wss://prod.example.com/ahp");
+			expect(mockClient.connect).toHaveBeenCalledWith("wss://prod.example.com/ahp", { headers: undefined });
 			expect(callback).toHaveBeenCalledWith(mockClient, {
 				name: "wss://prod.example.com/ahp",
 				url: "wss://prod.example.com/ahp",
@@ -103,7 +103,7 @@ describe("withConnection", () => {
 			await withConnection({ server: "dev", config: makeConfig() }, callback);
 
 			expect(mockStoreGet).toHaveBeenCalledWith("dev");
-			expect(mockClient.connect).toHaveBeenCalledWith("ws://dev.local:4000");
+			expect(mockClient.connect).toHaveBeenCalledWith("ws://dev.local:4000", { headers: undefined });
 			expect(callback).toHaveBeenCalledWith(mockClient, {
 				name: "dev",
 				url: "ws://dev.local:4000",
@@ -126,7 +126,7 @@ describe("withConnection", () => {
 			await withConnection({ config: makeConfig({ defaultServer: "prod" }) }, callback);
 
 			expect(mockStoreGet).toHaveBeenCalledWith("prod");
-			expect(mockClient.connect).toHaveBeenCalledWith("wss://prod.example.com");
+			expect(mockClient.connect).toHaveBeenCalledWith("wss://prod.example.com", { headers: undefined });
 			expect(callback).toHaveBeenCalledWith(mockClient, {
 				name: "prod",
 				url: "wss://prod.example.com",
@@ -149,7 +149,7 @@ describe("withConnection", () => {
 			await withConnection({ config: makeConfig() }, callback);
 
 			expect(mockStoreGetDefault).toHaveBeenCalled();
-			expect(mockClient.connect).toHaveBeenCalledWith("ws://fallback:5000");
+			expect(mockClient.connect).toHaveBeenCalledWith("ws://fallback:5000", { headers: undefined });
 			expect(callback).toHaveBeenCalledWith(mockClient, {
 				name: "fallback",
 				url: "ws://fallback:5000",

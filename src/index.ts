@@ -84,6 +84,18 @@ export type { FleetManagerOptions, RoutingStrategy, ServerRequirements } from ".
 
 export type { ConnectionProfile } from "./config/connections.js";
 
+// ── Tunnel discovery ────────────────────────────────────────────────────
+
+export {
+	AHP_TUNNEL_PORT,
+	AHP_TUNNEL_LABEL,
+	listAgentHostTunnels,
+	getTunnelById,
+	resolveTunnelUrl,
+	resolveGitHubToken,
+} from "./tunnel/index.js";
+export type { TunnelInfo } from "./tunnel/index.js";
+
 // ── Session persistence ─────────────────────────────────────────────────
 
 export { SessionStore, buildTurnSummary, truncatePreview } from "./session/store.js";

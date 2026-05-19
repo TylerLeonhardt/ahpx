@@ -10,6 +10,7 @@ import { AuthHandler } from "../auth/index.js";
 import { AhpClient } from "../client/index.js";
 import type { AhpxConfig } from "../config/index.js";
 import { ConnectionStore, isValidWsUrl } from "../config/index.js";
+import type { ConnectionProfile } from "../config/index.js";
 import { NotificationType } from "../protocol/notifications.js";
 import type { AuthRequiredNotification } from "../protocol/notifications.js";
 
@@ -22,14 +23,28 @@ export interface WithConnectionOptions {
 	timeout?: number;
 }
 
+/** Resolve a connection profile to a URL + token + headers, handling tunnel profiles. */
+async function resolveProfileUrl(
+	conn: ConnectionProfile,
+): Promise<{ url: string; token?: string; headers?: Record<string, string> }> {
+	if (conn.tunnelId) {
+		const { resolveGitHubToken, resolveTunnelUrl, buildTunnelHeaders } = await import("../tunnel/index.js");
+		const githubToken = resolveGitHubToken();
+		const { wssUrl, accessToken } = await resolveTunnelUrl(githubToken, conn.tunnelId, conn.tunnelClusterId);
+		return { url: wssUrl, token: undefined, headers: buildTunnelHeaders(accessToken) };
+	}
+	return { url: conn.url, token: conn.token };
+}
+
 /**
  * Connect to an AHP server, run a callback, then disconnect cleanly.
  *
  * Resolution order for the server:
  *   1. If `server` is a ws:// or wss:// URL, use it directly
- *   2. If `server` is a name, look it up in the connection store
- *   3. If no `server`, use `config.defaultServer`
- *   4. If nothing resolves, throw with a helpful error message
+ *   2. If `server` is a tunnel:// URL, resolve via dev tunnel SDK
+ *   3. If `server` is a name, look it up in the connection store
+ *   4. If no `server`, use `config.defaultServer`
+ *   5. If nothing resolves, throw with a helpful error message
  */
 export async function withConnection(
 	options: WithConnectionOptions,
@@ -40,20 +55,32 @@ export async function withConnection(
 
 	let url: string;
 	let token: string | undefined;
+	let headers: Record<string, string> | undefined;
 	let name: string;
 
 	if (server && isValidWsUrl(server)) {
 		// Direct URL
 		url = server;
 		name = server;
+	} else if (server?.startsWith("tunnel://")) {
+		// tunnel:// URL — resolve dynamically
+		const tunnelId = server.replace("tunnel://", "");
+		const { resolveGitHubToken, resolveTunnelUrl, buildTunnelHeaders } = await import("../tunnel/index.js");
+		const githubToken = resolveGitHubToken();
+		const resolved = await resolveTunnelUrl(githubToken, tunnelId);
+		url = resolved.wssUrl;
+		headers = buildTunnelHeaders(resolved.accessToken);
+		name = `tunnel:${tunnelId}`;
 	} else if (server) {
 		// Named connection
 		const conn = await store.get(server);
 		if (!conn) {
 			throw new Error(`Unknown connection "${server}". Run ${pc.bold("ahpx server list")} to see saved connections.`);
 		}
-		url = conn.url;
-		token = conn.token;
+		const resolved = await resolveProfileUrl(conn);
+		url = resolved.url;
+		token = resolved.token;
+		headers = resolved.headers;
 		name = conn.name;
 	} else if (config.defaultServer) {
 		// Config default
@@ -63,8 +90,10 @@ export async function withConnection(
 				`Default server "${config.defaultServer}" not found in connections. Run ${pc.bold("ahpx server list")} to check.`,
 			);
 		}
-		url = conn.url;
-		token = conn.token;
+		const resolved = await resolveProfileUrl(conn);
+		url = resolved.url;
+		token = resolved.token;
+		headers = resolved.headers;
 		name = conn.name;
 	} else {
 		// Try the connection store's default
@@ -74,8 +103,10 @@ export async function withConnection(
 				`No server specified and no default is set.\nRun ${pc.bold("ahpx server add <name> --url <ws://...> --default")} to save one.`,
 			);
 		}
-		url = def.url;
-		token = def.token;
+		const resolved = await resolveProfileUrl(def);
+		url = resolved.url;
+		token = resolved.token;
+		headers = resolved.headers;
 		name = def.name;
 	}
 
@@ -85,7 +116,7 @@ export async function withConnection(
 	});
 
 	try {
-		await client.connect(url);
+		await client.connect(url, { headers });
 
 		// Upfront auth: authenticate for each protected resource declared by agents
 		const agents = client.state.root?.agents ?? [];
