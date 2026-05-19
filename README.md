@@ -18,7 +18,11 @@ ahpx is a client for the Agent Host Protocol (AHP) — a WebSocket-based JSON-RP
 - 🏗️ **Fleet management** — health checks, status monitoring, and server tagging
 - 💾 **Session persistence** — resume sessions, export/import history
 - 📦 **Use as CLI or Node.js library** with full TypeScript types
-- 🔒 **Configurable permission modes** — approve-all, approve-reads, deny-all
+- 🔒 **Configurable permission modes** — approve-all, approve-reads, deny-all, autopilot
+- 🔑 **Automatic auth** — token resolution from env vars, CLI, or interactive prompt
+- 🌐 **Dev Tunnel support** — connect to remote agent hosts via Dev Tunnels
+- ⚙️ **Session config** — agent-specific settings (auto-approve, isolation, mode)
+- 🧩 **Customizations** — auto-discovered agent and skill files from `.github/`
 
 ## Quick Start
 
@@ -49,9 +53,11 @@ ahpx exec "summarize this repo"
 | `ahpx exec <text>` | One-shot: create a temp session, prompt, dispose |
 | `ahpx cancel` | Cancel the active turn in a session |
 
-Prompt options: `-s <server>`, `-n <session-name>`, `-f <file>`, `--cwd <dir>`, `--approve-all`, `--approve-reads`, `--deny-all`, `--idle-timeout <seconds>`, `--tag <key=value>`, `--forward-webhook <url>`, `--forward-ws <url>`, `--forward-filter <types>`, `--forward-headers <json>`
+Prompt options: `-s <server>`, `-n <session-name>`, `-S <session-id>`, `-f <file>`, `--cwd <dir>`, `--config <key=value>` (repeatable), `--approve-all`, `--approve-reads`, `--deny-all`, `--idle-timeout <seconds>`, `--tag <key=value>`, `--forward-webhook <url>`, `--forward-ws <url>`, `--forward-filter <types>`, `--forward-headers <json>`
 
-`exec` also accepts: `-p <provider>`, `-m <model>`
+Use `-S <session-id>` to target a session by its ID instead of name — useful for scripting and automation.
+
+`exec` also accepts: `-p <provider>`, `-m <model>`, `--config <key=value>`
 
 ### Server Management
 
@@ -64,7 +70,25 @@ Prompt options: `-s <server>`, `-n <session-name>`, `-f <file>`, `--cwd <dir>`, 
 | `ahpx server status` | Health check all saved servers |
 | `ahpx server health <name>` | Detailed health check for a single server |
 
-`server add` options: `--token <token>`, `--default`, `--tag <tag>` (repeatable)
+`server add` options: `--token <token>`, `--default`, `--tag <tag>` (repeatable), `--tunnel <tunnel-id>`
+
+### Dev Tunnels
+
+Connect to remote AHP agent hosts via Dev Tunnels. Discovers tunnels tagged with `protocolv5`. Requires `GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token`.
+
+| Command | Description |
+|---------|-------------|
+| `ahpx tunnel list` | List remote agent hosts |
+| `ahpx tunnel connect <tunnel-id>` | Connect to a remote agent host |
+
+```bash
+# Save a tunnel as a named server connection
+ahpx server add my-remote --tunnel <tunnel-id>
+
+# Use the remote server for sessions
+ahpx session new -s my-remote -n remote-session --cwd C:/Users/me/project
+ahpx prompt -s my-remote -n remote-session "fix the bug"
+```
 
 ### Session Management
 
@@ -76,10 +100,35 @@ Prompt options: `-s <server>`, `-n <session-name>`, `-f <file>`, `--cwd <dir>`, 
 | `ahpx session close [id]` | Close a session (keeps record for history) |
 | `ahpx session history [id]` | Show turn history for a session |
 | `ahpx session active` | Show all active sessions on the server (live query) |
+| `ahpx session config` | View session configuration |
+| `ahpx session config set <key> <value>` | Set a mutable config property |
+| `ahpx session customization list` | List customizations on a session |
+| `ahpx session customization toggle <uri>` | Toggle a customization on/off |
 | `ahpx session export <id>` | Export a session record to JSON |
 | `ahpx session import <file>` | Import a session record from JSON |
 
-`session new` options: `-s <server>`, `-p <provider>`, `-m <model>`, `-n <name>`, `--cwd <dir>`, `-t <timeout>`
+`session new` options: `-s <server>`, `-p <provider>`, `-m <model>`, `-n <name>`, `--cwd <dir>`, `-t <timeout>`, `--config <key=value>` (repeatable), `--no-customizations`
+
+#### Session Config
+
+Set agent-specific configuration at session creation or modify it on an active session.
+
+```bash
+ahpx session new -n my-session --cwd /path/to/repo --config autoApprove=autopilot --config isolation=worktree
+ahpx session config -n my-session              # view config
+ahpx session config set autoApprove autopilot -n my-session   # update config
+```
+
+Available config keys depend on the agent. For `copilotcli`: `autoApprove` (default/autoApprove/autopilot), `isolation` (folder/worktree), `mode` (interactive/plan), `branch`, `permissions`.
+
+#### Customizations
+
+ahpx automatically discovers `.github/agents/*.md` and `.github/skills/*/SKILL.md` files in the workspace and loads them into the agent session. Use `--no-customizations` to skip discovery.
+
+```bash
+ahpx session customization list -n my-session
+ahpx session customization toggle <uri> -n my-session
+```
 
 ### Configuration
 
@@ -261,6 +310,33 @@ ahpx config init
 
 # View resolved config with source annotations
 ahpx config show
+```
+
+## Authentication
+
+ahpx resolves auth tokens automatically, checked in order:
+
+1. Connection profile token (from `ahpx server add --token`)
+2. `AHPX_TOKEN` env var
+3. `GITHUB_TOKEN` env var
+4. `GH_TOKEN` env var
+5. `gh auth token` CLI output
+6. Interactive prompt
+
+No explicit login command is needed — just ensure one of the above is available.
+
+## Approval Flow
+
+When an agent calls a tool, ahpx handles approval based on the tool's confirmation status:
+
+- **Server-confirmed tools** — show `[auto-approved]` and proceed without prompting.
+- **Unconfirmed tools** — show `Allow Tool: ...? (y/N):` and wait for user input.
+
+Override with flags or session config:
+
+```bash
+ahpx exec --approve-all "fix the tests"                         # skip all prompts
+ahpx exec --config autoApprove=autopilot "fix the tests"        # server-side auto-approval
 ```
 
 ## Documentation
