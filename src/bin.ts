@@ -1925,12 +1925,17 @@ const sessionCustomization = session
 sessionCustomization
 	.argument("[id]", "Session ID")
 	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-S, --session <id>", "Target session by ID")
 	.option("-s, --server <name>", "Server name")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
 	.action(
-		async (id: string | undefined, opts: { sessionName?: string; server?: string; timeout: string }, cmd: Command) => {
+		async (
+			id: string | undefined,
+			opts: { sessionName?: string; session?: string; server?: string; timeout: string },
+			cmd: Command,
+		) => {
 			// Default action: list customizations (same as `session customization list`)
-			await listCustomizations(id, opts, cmd);
+			await listCustomizations(opts.session ?? id, opts, cmd);
 		},
 	);
 
@@ -1939,11 +1944,16 @@ sessionCustomization
 	.description("List customizations on a session")
 	.argument("[id]", "Session ID")
 	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-S, --session <id>", "Target session by ID")
 	.option("-s, --server <name>", "Server name")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
 	.action(
-		async (id: string | undefined, opts: { sessionName?: string; server?: string; timeout: string }, cmd: Command) => {
-			await listCustomizations(id, opts, cmd);
+		async (
+			id: string | undefined,
+			opts: { sessionName?: string; session?: string; server?: string; timeout: string },
+			cmd: Command,
+		) => {
+			await listCustomizations(opts.session ?? id, opts, cmd);
 		},
 	);
 
@@ -2011,20 +2021,21 @@ sessionCustomization
 	.argument("<uri>", "Customization URI to toggle")
 	.argument("[id]", "Session ID")
 	.option("-n, --session-name <name>", "Session name (for scoped lookup)")
+	.option("-S, --session <id>", "Target session by ID")
 	.option("-s, --server <name>", "Server name")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
 	.action(
 		async (
 			uri: string,
 			id: string | undefined,
-			opts: { sessionName?: string; server?: string; timeout: string },
+			opts: { sessionName?: string; session?: string; server?: string; timeout: string },
 			cmd: Command,
 		) => {
 			const globalOpts = parseGlobalOpts(cmd);
 			applyGlobalOpts(globalOpts);
 
 			try {
-				const record = await resolveSessionRecord(id, { name: opts.sessionName, server: opts.server });
+				const record = await resolveSessionRecord(opts.session ?? id, { name: opts.sessionName, server: opts.server });
 				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 
 				await withConnection(
