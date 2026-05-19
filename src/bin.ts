@@ -825,7 +825,7 @@ tunnel
 							);
 						}
 					},
-					tunnels,
+					tunnels.map(({ accessToken, ...t }) => t),
 				);
 			} catch (err) {
 				spinner.stop();
