@@ -2307,9 +2307,21 @@ async function runPrompt(
 	},
 	globalOpts: GlobalOpts,
 ): Promise<void> {
-	await requireCwdForRemoteServer(opts.server, opts.cwd);
+	// If a named session is specified but no cwd, look up the existing session's workingDirectory
+	// so we don't require --cwd for remote sessions that already have a stored path
+	let resolvedCwd = opts.cwd;
+	if (!resolvedCwd && opts.sessionName) {
+		const lookupCfg = await loadConfig();
+		const serverName = await resolveServerName(opts.server, lookupCfg);
+		const existingRecord = await sessionStore.getByNameAndServer(opts.sessionName, serverName);
+		if (existingRecord?.workingDirectory) {
+			resolvedCwd = existingRecord.workingDirectory;
+		}
+	}
+
+	await requireCwdForRemoteServer(opts.server, resolvedCwd);
 	const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
-	const cwd = opts.cwd ?? process.cwd();
+	const cwd = resolvedCwd ?? process.cwd();
 	const isRemote = await isRemoteServerTarget(opts.server);
 	const gitRoot = isRemote ? undefined : await findGitRoot(cwd);
 	const permMode = resolvePermissionMode(opts, cfg);
