@@ -31,7 +31,7 @@ async function resolveProfileUrl(
 		const { resolveGitHubToken, resolveTunnelUrl, buildTunnelHeaders } = await import("../tunnel/index.js");
 		const githubToken = resolveGitHubToken();
 		const { wssUrl, accessToken } = await resolveTunnelUrl(githubToken, conn.tunnelId, conn.tunnelClusterId);
-		return { url: wssUrl, token: accessToken, headers: buildTunnelHeaders(accessToken) };
+		return { url: wssUrl, token: undefined, headers: buildTunnelHeaders(accessToken) };
 	}
 	return { url: conn.url, token: conn.token };
 }
@@ -69,7 +69,6 @@ export async function withConnection(
 		const githubToken = resolveGitHubToken();
 		const resolved = await resolveTunnelUrl(githubToken, tunnelId);
 		url = resolved.wssUrl;
-		token = resolved.accessToken;
 		headers = buildTunnelHeaders(resolved.accessToken);
 		name = `tunnel:${tunnelId}`;
 	} else if (server) {

@@ -290,7 +290,7 @@ async function resolveTunnelTarget(
 	const { resolveGitHubToken, resolveTunnelUrl, buildTunnelHeaders } = await import("./tunnel/index.js");
 	const githubToken = resolveGitHubToken();
 	const { wssUrl, accessToken } = await resolveTunnelUrl(githubToken, tunnelId, clusterId);
-	return { url: wssUrl, token: accessToken, headers: buildTunnelHeaders(accessToken) };
+	return { url: wssUrl, token: undefined, headers: buildTunnelHeaders(accessToken) };
 }
 
 /** Print server information after a successful connect (text mode). */
