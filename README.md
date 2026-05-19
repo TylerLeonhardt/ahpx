@@ -7,7 +7,7 @@
 
 ## What is ahpx?
 
-ahpx is a client for the [Agent Host Protocol](https://github.com/anthropics/agent-host-protocol) (AHP) — a WebSocket-based JSON-RPC protocol for managing AI agent sessions. Use ahpx to connect to AHP servers, create sessions, send prompts, stream responses, and handle tool confirmations, either from the command line or programmatically as a Node.js library.
+ahpx is a client for the Agent Host Protocol (AHP) — a WebSocket-based JSON-RPC protocol for managing AI agent sessions. Use ahpx to connect to AHP servers, create sessions, send prompts, stream responses, and handle tool confirmations, either from the command line or programmatically as a Node.js library.
 
 ## Features
 

@@ -372,7 +372,7 @@ hardening. This phase is about **reliability and trust**.
 ## Protocol dependency summary
 
 Several issues are tagged `protocol-feedback` — these require changes to the
-[AHP protocol](https://github.com/anthropics/agent-host-protocol) itself, not
+AHP protocol itself, not
 just ahpx. The table below shows what ahpx can do now vs. what requires
 upstream protocol changes.
 
@@ -434,6 +434,6 @@ To keep scope realistic, these are explicitly deferred:
 - **Multi-language SDKs** — TypeScript/Node.js only. Other language SDKs are a
   separate project.
 - **AHP server implementation** — ahpx is a client. Server-side work belongs
-  to the [AHP protocol](https://github.com/anthropics/agent-host-protocol) repo.
+  to the AHP protocol repo.
 - **Plugin system** — extensibility is valuable but premature. Design for it;
   don't build it yet.

@@ -382,7 +382,7 @@ Then connect: `ahpx connect ws://localhost:8080`
 ## Further reading
 
 The full protocol specification lives in the
-[agent-host-protocol](https://github.com/anthropics/agent-host-protocol)
+agent-host-protocol
 repository:
 
 - `docs/guide/` — conceptual overviews (getting started, state model,
