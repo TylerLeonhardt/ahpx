@@ -1106,23 +1106,32 @@ function applyGlobalOpts(globalOpts: GlobalOpts): void {
 }
 
 /**
+ * Check whether the server target is a remote (non-local) host.
+ * Returns true if the server URL points to a non-localhost address.
+ */
+async function isRemoteServerTarget(server: string | undefined): Promise<boolean> {
+	if (!server) return false;
+
+	let url: string;
+	if (isValidWsUrl(server)) {
+		url = server;
+	} else {
+		const conn = await store.get(server);
+		if (!conn) return false;
+		url = conn.url;
+	}
+
+	return !isLocalUrl(url);
+}
+
+/**
  * Validate that --cwd is provided when targeting a remote server.
  * Throws UsageError if --server points to a non-local host and --cwd is missing.
  */
 async function requireCwdForRemoteServer(server: string | undefined, cwd: string | undefined): Promise<void> {
 	if (!server || cwd) return;
 
-	let url: string;
-	if (isValidWsUrl(server)) {
-		url = server;
-	} else {
-		const store = new ConnectionStore();
-		const conn = await store.get(server);
-		if (!conn) return; // Unknown server — let withConnection() handle the error
-		url = conn.url;
-	}
-
-	if (!isLocalUrl(url)) {
+	if (await isRemoteServerTarget(server)) {
 		throw new UsageError(
 			`--cwd is required when targeting a remote server.\nUse 'ahpx browse --server ${server}' to browse the remote filesystem and find the correct working directory.`,
 		);
@@ -1165,7 +1174,8 @@ session
 				const provider = opts.provider ?? cfg.defaultProvider;
 				const model = opts.model ?? cfg.defaultModel;
 				const cwd = opts.cwd ?? process.cwd();
-				const gitRoot = await findGitRoot(cwd);
+				const isRemote = await isRemoteServerTarget(opts.server);
+				const gitRoot = isRemote ? undefined : await findGitRoot(cwd);
 				const sessionConfig = parseConfigFlags(opts.config);
 
 				await withConnection(
@@ -2283,7 +2293,8 @@ async function runPrompt(
 	await requireCwdForRemoteServer(opts.server, opts.cwd);
 	const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 	const cwd = opts.cwd ?? process.cwd();
-	const gitRoot = await findGitRoot(cwd);
+	const isRemote = await isRemoteServerTarget(opts.server);
+	const gitRoot = isRemote ? undefined : await findGitRoot(cwd);
 	const permMode = resolvePermissionMode(opts, cfg);
 	let formatter: OutputFormatter = formatterFromOpts(globalOpts, opts.tags);
 
