@@ -370,6 +370,79 @@ describe("SessionStore", () => {
 		});
 	});
 
+	describe("getByNameAndServer", () => {
+		it("finds active session by name and server", async () => {
+			await store.save(
+				makeSession({
+					id: "named-remote",
+					serverName: "remote-win",
+					workingDirectory: "C:\\Users\\tyler\\Code\\project",
+					name: "cross-plat",
+				}),
+			);
+
+			const result = await store.getByNameAndServer("cross-plat", "remote-win");
+			expect(result).toBeDefined();
+			expect(result!.id).toBe("named-remote");
+		});
+
+		it("does not require workingDirectory match", async () => {
+			await store.save(
+				makeSession({
+					id: "remote-session",
+					serverName: "remote-win",
+					workingDirectory: "C:\\Users\\tyler\\Code\\project",
+					name: "my-session",
+				}),
+			);
+
+			// On macOS, no local path will match C:\Users\... — but getByNameAndServer should still find it
+			const result = await store.getByNameAndServer("my-session", "remote-win");
+			expect(result).toBeDefined();
+			expect(result!.id).toBe("remote-session");
+		});
+
+		it("skips closed sessions", async () => {
+			await store.save(
+				makeSession({
+					id: "closed-named",
+					serverName: "remote-win",
+					name: "old-session",
+					status: "closed",
+				}),
+			);
+
+			const result = await store.getByNameAndServer("old-session", "remote-win");
+			expect(result).toBeUndefined();
+		});
+
+		it("returns undefined when name does not match", async () => {
+			await store.save(
+				makeSession({
+					id: "other-name",
+					serverName: "remote-win",
+					name: "different",
+				}),
+			);
+
+			const result = await store.getByNameAndServer("cross-plat", "remote-win");
+			expect(result).toBeUndefined();
+		});
+
+		it("returns undefined when server does not match", async () => {
+			await store.save(
+				makeSession({
+					id: "wrong-server",
+					serverName: "local",
+					name: "cross-plat",
+				}),
+			);
+
+			const result = await store.getByNameAndServer("cross-plat", "remote-win");
+			expect(result).toBeUndefined();
+		});
+	});
+
 	describe("file persistence", () => {
 		it("persists as individual JSON files", async () => {
 			await store.save(makeSession({ id: "persist-1" }));

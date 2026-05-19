@@ -1083,13 +1083,19 @@ async function resolveSessionRecord(
 		store: sessionStore,
 	});
 
-	if (!record) {
-		const hint = opts.name ? ` named "${opts.name}"` : "";
-		throw new NoSessionError(
-			`No active session${hint} found for ${pc.bold(serverName)} in ${pc.dim(cwd)}.\nRun ${pc.bold("ahpx session new")} to create one.`,
-		);
+	if (record) return record;
+
+	// Fallback: if name is provided, try direct lookup by name + server
+	// (handles remote sessions where the local cwd won't match the stored remote path)
+	if (opts.name) {
+		const byName = await sessionStore.getByNameAndServer(opts.name, serverName);
+		if (byName) return byName;
 	}
-	return record;
+
+	const hint = opts.name ? ` named "${opts.name}"` : "";
+	throw new NoSessionError(
+		`No active session${hint} found for ${pc.bold(serverName)} in ${pc.dim(cwd)}.\nRun ${pc.bold("ahpx session new")} to create one.`,
+	);
 }
 
 /** Build config overrides from global CLI opts. */

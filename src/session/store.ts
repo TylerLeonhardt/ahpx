@@ -273,4 +273,18 @@ export class SessionStore {
 
 		return records[0]; // Already sorted by createdAt descending
 	}
+
+	/**
+	 * Find a session by name and server, without requiring a workingDirectory match.
+	 * Useful for remote sessions where the local cwd won't match the stored remote path.
+	 * Only returns active sessions.
+	 */
+	async getByNameAndServer(name: string, serverName: string): Promise<SessionRecord | undefined> {
+		const records = await this.list({
+			status: "active",
+			serverName,
+			name,
+		});
+		return records.find((r) => r.name === name);
+	}
 }
