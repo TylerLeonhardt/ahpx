@@ -25,6 +25,8 @@ export type { ConfigPropertySchema, ConfigSchema, SessionConfigPropertySchema, S
  * @see {@link /specification/lifecycle | Lifecycle} for the full handshake flow.
  */
 export interface InitializeParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /**
    * Protocol versions the client is willing to speak, ordered from most
    * preferred to least preferred. Each entry is a [SemVer](https://semver.org)
@@ -95,6 +97,8 @@ export interface InitializeResult {
  * @version 0.1.0
  */
 export interface PingParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
 }
 
 // ─── reconnect ───────────────────────────────────────────────────────────────
@@ -121,6 +125,8 @@ export const enum ReconnectResultType {
  * @see {@link /specification/lifecycle | Lifecycle} for details.
  */
 export interface ReconnectParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /** Client identifier from the original connection */
   clientId: string;
   /** Last `serverSeq` the client received */
@@ -197,7 +203,7 @@ export interface SubscribeResult {
  * `-32003` (`SessionAlreadyExists`).
  *
  * After creation, the client should subscribe to the session URI to receive state
- * updates. The server also broadcasts a `notify/sessionAdded` notification to all
+ * updates. The server also broadcasts a `root/sessionAdded` notification to all
  * clients.
  *
  * @category Commands
@@ -209,7 +215,7 @@ export interface SubscribeResult {
  * ```jsonc
  * // Client → Server
  * { "jsonrpc": "2.0", "id": 2, "method": "createSession",
- *   "params": { "session": "copilot:/<uuid>", "provider": "copilot", "model": "gpt-4o" } }
+ *   "params": { "channel": "ahp-session:/<uuid>", "provider": "copilot", "model": "gpt-4o" } }
  *
  * // Server → Client (success)
  * { "jsonrpc": "2.0", "id": 2, "result": null }
@@ -270,7 +276,7 @@ export interface CreateSessionParams {
 /**
  * Disposes a session and cleans up server-side resources.
  *
- * The server broadcasts a `notify/sessionRemoved` notification to all clients.
+ * The server broadcasts a `root/sessionRemoved` notification to all clients.
  *
  * @category Commands
  * @method disposeSession
@@ -339,7 +345,7 @@ export interface DisposeTerminalParams {
  *
  * The session list is **not** part of the state tree because it can be arbitrarily
  * large. Clients fetch it imperatively and maintain a local cache updated by
- * `notify/sessionAdded` and `notify/sessionRemoved` notifications.
+ * `root/sessionAdded` and `root/sessionRemoved` notifications.
  *
  * @category Commands
  * @method listSessions
@@ -348,6 +354,8 @@ export interface DisposeTerminalParams {
  * @version 1
  */
 export interface ListSessionsParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /** Optional filter criteria */
   filter?: object;
 }
@@ -401,6 +409,8 @@ export const enum ContentEncoding {
  * ```
  */
 export interface ResourceReadParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /** Content URI from a `ContentRef` */
   uri: string;
   /** Preferred encoding for the returned data (default: server-chosen) */
@@ -454,6 +464,8 @@ export interface ResourceReadResult {
  * ```
  */
 export interface ResourceWriteParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /** Target file URI on the server filesystem */
   uri: URI;
   /** Content encoded as a string */
@@ -498,6 +510,8 @@ export interface ResourceWriteResult {
  * @throws `PermissionDenied` (`-32009`) if the client is not permitted to browse the directory.
  */
 export interface ResourceListParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /** Directory URI on the server filesystem */
   uri: URI;
 }
@@ -535,7 +549,7 @@ export interface ResourceListResult {
  * ```jsonc
  * // Client → Server (fetch the 20 most recent turns)
  * { "jsonrpc": "2.0", "id": 8, "method": "fetchTurns",
- *   "params": { "session": "copilot:/<uuid>", "limit": 20 } }
+ *   "params": { "channel": "ahp-session:/<uuid>", "limit": 20 } }
  *
  * // Server → Client
  * { "jsonrpc": "2.0", "id": 8, "result": {
@@ -545,7 +559,7 @@ export interface ResourceListResult {
  *
  * // Client → Server (fetch 20 turns before t1)
  * { "jsonrpc": "2.0", "id": 9, "method": "fetchTurns",
- *   "params": { "session": "copilot:/<uuid>", "before": "t1", "limit": 20 } }
+ *   "params": { "channel": "ahp-session:/<uuid>", "before": "t1", "limit": 20 } }
  * ```
  */
 export interface FetchTurnsParams {
@@ -624,6 +638,8 @@ export interface DispatchActionParams {
  * @throws `AlreadyExists` (`-32010`) if `failIfExists` is set and the destination already exists.
  */
 export interface ResourceCopyParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /** Source URI to copy from */
   source: URI;
   /** Destination URI to copy to */
@@ -657,6 +673,8 @@ export interface ResourceCopyResult {
  * @throws `PermissionDenied` (`-32009`) if the client is not permitted to delete the resource.
  */
 export interface ResourceDeleteParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /** URI of the resource to delete */
   uri: URI;
   /**
@@ -707,6 +725,8 @@ export interface ResourceDeleteResult {
  * @throws `PermissionDenied` (`-32009`) if access is denied.
  */
 export interface ResourceRequestParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /**
    * Resource URI being requested. Typically a `file:` URI on the receiver's
    * filesystem, but any URI scheme that the receiver mediates access to is
@@ -745,6 +765,8 @@ export interface ResourceRequestResult {
  * @throws `AlreadyExists` (`-32010`) if `failIfExists` is set and the destination already exists.
  */
 export interface ResourceMoveParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /** Source URI to move from */
   source: URI;
   /** Destination URI to move to */
@@ -796,6 +818,8 @@ export interface ResourceMoveResult {
  * ```
  */
 export interface AuthenticateParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /**
    * The protected resource identifier. MUST match a `resource` value from
    * `ProtectedResourceMetadata` declared in `AgentInfo.protectedResources`.
@@ -874,6 +898,8 @@ export interface AuthenticateResult {
  * ```
  */
 export interface ResolveSessionConfigParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /** Agent provider ID */
   provider?: string;
   /** Working directory for the session */
@@ -938,6 +964,8 @@ export interface SessionConfigValueItem {
  * ```
  */
 export interface SessionConfigCompletionsParams {
+  /** Channel URI (always `ahp-root://` for connection-level commands) */
+  channel: 'ahp-root://';
   /** Agent provider ID */
   provider?: string;
   /** Working directory for the session */
@@ -993,7 +1021,7 @@ export const enum CompletionItemKind {
  * // User has typed "look at @foo" and the cursor is just after "@foo".
  * // Client → Server
  * { "jsonrpc": "2.0", "id": 12, "method": "completions",
- *   "params": { "kind": "userMessage", "session": "copilot:/<uuid>",
+ *   "params": { "kind": "userMessage", "channel": "ahp-session:/<uuid>",
  *               "text": "look at @foo", "offset": 12 } }
  *
  * // Server → Client
@@ -1017,8 +1045,8 @@ export const enum CompletionItemKind {
 export interface CompletionsParams {
   /** What kind of completion is being requested. */
   kind: CompletionItemKind;
-  /** The session URI the completion is being requested for. */
-  session: URI;
+  /** The channel URI the completion is being requested for. */
+  channel: URI;
   /**
    * The complete text of the input being completed (e.g. the full user
    * message text typed so far).

@@ -67,7 +67,7 @@ describe("ProtocolLayer — incoming requests", () => {
 		protocol.on("request", requestHandler);
 
 		// Send a request (creates a pending entry with id=1)
-		const promise = protocol.request("listSessions", {});
+		const promise = protocol.request("listSessions", { channel: "ahp-root://" });
 
 		// Simulate a response — this should resolve the promise, not emit 'request'
 		mock.receive({ jsonrpc: "2.0", id: 1, result: { sessions: [] } });

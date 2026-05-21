@@ -403,7 +403,7 @@ export interface SessionSummary {
   /** The working directory URI for this session */
   workingDirectory?: URI;
   /** Files changed during this session with diff statistics */
-  diffs?: FileEdit[];
+  changesets?: FileEdit[];
 }
 
 // ─── Config Schema Types ─────────────────────────────────────────────────────

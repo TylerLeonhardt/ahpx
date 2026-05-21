@@ -43,6 +43,7 @@ describe("ProtocolLayer", () => {
 	describe("request/response", () => {
 		it("sends a JSON-RPC request and resolves on success response", async () => {
 			const promise = protocol.request("initialize", {
+				channel: "ahp-root://",
 				protocolVersions: ["0.1.0"],
 				clientId: "test-client",
 			});
@@ -128,6 +129,7 @@ describe("ProtocolLayer", () => {
 			const promise = protocol.request(
 				"initialize",
 				{
+					channel: "ahp-root://",
 					protocolVersions: ["0.1.0"],
 					clientId: "test-client",
 				},
@@ -147,8 +149,8 @@ describe("ProtocolLayer", () => {
 
 		it("auto-increments request IDs", () => {
 			// Fire off two requests (don't await — they'll time out)
-			protocol.request("listSessions", {}).catch(() => {});
-			protocol.request("listSessions", {}).catch(() => {});
+			protocol.request("listSessions", { channel: "ahp-root://" }).catch(() => {});
+			protocol.request("listSessions", { channel: "ahp-root://" }).catch(() => {});
 
 			expect(mock.sent).toHaveLength(2);
 			expect((mock.sent[0] as Record<string, unknown>).id).toBe(1);
@@ -221,6 +223,39 @@ describe("ProtocolLayer", () => {
 			});
 		});
 
+		it("emits 'notification' for top-level notification methods (AHP 0.2.0+)", () => {
+			const handler = vi.fn();
+			protocol.on("notification", handler);
+
+			mock.receive({
+				jsonrpc: "2.0",
+				method: "root/sessionAdded",
+				params: {
+					type: "root/sessionAdded",
+					channel: "ahp-root://",
+					summary: {
+						resource: "ahp-session:/test",
+						provider: "copilot",
+						title: "Test Session",
+						status: "idle",
+						createdAt: 2000,
+						modifiedAt: 2000,
+					},
+				},
+			});
+
+			expect(handler).toHaveBeenCalledOnce();
+			expect(handler.mock.calls[0][0]).toMatchObject({
+				type: "root/sessionAdded",
+				channel: "ahp-root://",
+				summary: {
+					resource: "ahp-session:/test",
+					provider: "copilot",
+					title: "Test Session",
+				},
+			});
+		});
+
 		it("ignores unrecognized messages", () => {
 			const handler = vi.fn();
 			protocol.on("action", handler);
@@ -236,8 +271,8 @@ describe("ProtocolLayer", () => {
 
 	describe("cancelAll", () => {
 		it("rejects all pending requests", async () => {
-			const p1 = protocol.request("listSessions", {});
-			const p2 = protocol.request("listSessions", {});
+			const p1 = protocol.request("listSessions", { channel: "ahp-root://" });
+			const p2 = protocol.request("listSessions", { channel: "ahp-root://" });
 
 			protocol.cancelAll("shutting down");
 
@@ -249,6 +284,7 @@ describe("ProtocolLayer", () => {
 	describe("resource commands", () => {
 		it("sends resourceWrite with correct params", async () => {
 			const promise = protocol.request("resourceWrite", {
+				channel: "ahp-root://",
 				uri: "file:///workspace/hello.txt",
 				data: "SGVsbG8=",
 				encoding: ContentEncoding.Base64,
@@ -271,6 +307,7 @@ describe("ProtocolLayer", () => {
 
 		it("sends resourceCopy with correct params", async () => {
 			const promise = protocol.request("resourceCopy", {
+				channel: "ahp-root://",
 				source: "file:///a.txt",
 				destination: "file:///b.txt",
 				failIfExists: true,
@@ -291,6 +328,7 @@ describe("ProtocolLayer", () => {
 
 		it("sends resourceDelete with correct params", async () => {
 			const promise = protocol.request("resourceDelete", {
+				channel: "ahp-root://",
 				uri: "file:///workspace/old.txt",
 				recursive: true,
 			});
@@ -309,6 +347,7 @@ describe("ProtocolLayer", () => {
 
 		it("sends resourceMove with correct params", async () => {
 			const promise = protocol.request("resourceMove", {
+				channel: "ahp-root://",
 				source: "file:///old.txt",
 				destination: "file:///new.txt",
 			});
