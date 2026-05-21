@@ -128,10 +128,10 @@ export function isActionKnownToVersion(action: StateAction, clientVersion: strin
  * Versions are SemVer `MAJOR.MINOR.PATCH` strings (see `PROTOCOL_VERSION`).
  */
 export const NOTIFICATION_INTRODUCED_IN: { readonly [K in ProtocolNotification['type']]: string } = {
-  [NotificationType.SessionAdded]: '0.1.0',
-  [NotificationType.SessionRemoved]: '0.1.0',
-  [NotificationType.SessionSummaryChanged]: '0.1.0',
-  [NotificationType.AuthRequired]: '0.1.0',
+  [NotificationType.SessionAdded]: '0.2.0',
+  [NotificationType.SessionRemoved]: '0.2.0',
+  [NotificationType.SessionSummaryChanged]: '0.2.0',
+  [NotificationType.AuthRequired]: '0.2.0',
 };
 
 /**

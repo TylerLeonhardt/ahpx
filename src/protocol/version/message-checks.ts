@@ -54,11 +54,16 @@ type _ExpectedClientNotifications =
 /** All server → client notification methods. */
 type _ExpectedServerNotifications =
   | 'action'
-  | 'notification';
+  | 'root/sessionAdded'
+  | 'root/sessionRemoved'
+  | 'root/sessionSummaryChanged'
+  | 'auth/required';
 
 /** All server → client request methods. */
 type _ExpectedServerCommands =
-  | 'resourceRequest';
+  | 'resourceRequest'
+  | 'resourceRead'
+  | 'resourceList';
 
 // ─── Assertions ──────────────────────────────────────────────────────────────
 

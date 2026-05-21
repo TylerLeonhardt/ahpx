@@ -186,11 +186,14 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 		},
 		sendNotification(notification) {
 			if (!activeWs || activeWs.readyState !== WebSocket.OPEN) return;
+			// AHP 0.2.0+: notifications are top-level methods
+			const notif = notification as Record<string, unknown>;
+			const method = notif.type as string;
 			activeWs.send(
 				JSON.stringify({
 					jsonrpc: "2.0",
-					method: "notification",
-					params: { notification },
+					method,
+					params: notification,
 				}),
 			);
 		},
