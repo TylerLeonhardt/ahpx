@@ -252,7 +252,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 
 		// Generate session URI
 		const sessionId = randomUUID();
-		const sessionUri = `${provider}:/${sessionId}`;
+		const sessionUri = `ahp-session:/${sessionId}`;
 
 		// Create + subscribe
 		await this.createSession(sessionUri, provider, model, workingDirectory, config, activeClient);
