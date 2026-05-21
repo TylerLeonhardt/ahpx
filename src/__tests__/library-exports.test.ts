@@ -29,7 +29,7 @@ describe("library exports", () => {
 		it("AhpClient is instantiable with options", () => {
 			const client = new ahpx.AhpClient({
 				clientId: "test-client",
-				initialSubscriptions: ["agenthost:/root"],
+				initialSubscriptions: ["ahp-root://"],
 			});
 			expect(client.clientId).toBe("test-client");
 		});
@@ -323,16 +323,16 @@ describe("library exports", () => {
 			const _rootState: ahpx.RootState = { agents: [] };
 			expect(_rootState.agents).toEqual([]);
 
-			const _uri: ahpx.URI = "agenthost:/root";
-			expect(_uri).toBe("agenthost:/root");
+			const _uri: ahpx.URI = "ahp-root://";
+			expect(_uri).toBe("ahp-root://");
 		});
 
 		it("exports action types", () => {
 			const envelope: ahpx.ActionEnvelope = {
+				channel: "copilot:/test",
 				serverSeq: 1,
 				action: {
 					type: ahpx.ActionType.SessionDelta,
-					session: "copilot:/test",
 					turnId: "t1",
 					partId: "p1",
 					content: "hello",

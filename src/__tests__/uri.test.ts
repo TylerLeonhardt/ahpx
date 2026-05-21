@@ -66,7 +66,7 @@ describe("ensureFileUri", () => {
 		});
 
 		it("returns agenthost URIs unchanged", () => {
-			expect(ensureFileUri("agenthost:/root")).toBe("agenthost:/root");
+			expect(ensureFileUri("ahp-root://")).toBe("ahp-root://");
 		});
 	});
 

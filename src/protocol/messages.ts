@@ -156,7 +156,10 @@ export interface ServerCommandMap {
 
 // ─── Notification Maps ───────────────────────────────────────────────────────
 
-/** Params for the server → client `notification` method. */
+/**
+ * @deprecated The `notification` wrapper method is removed in AHP 0.2.0+.
+ * Each notification is now a top-level method in {@link ServerNotificationMap}.
+ */
 export interface NotificationMethodParams {
   notification: ProtocolNotification;
 }
@@ -174,11 +177,16 @@ export interface ClientNotificationMap {
 /**
  * Registry mapping each server → client notification method to its params type.
  *
+ * In AHP 0.2.0+, each notification is a top-level method.
+ *
  * @category Notifications
  */
 export interface ServerNotificationMap {
   'action': { params: ActionEnvelope };
-  'notification': { params: NotificationMethodParams };
+  'root/sessionAdded': { params: import('./notifications.js').SessionAddedNotification };
+  'root/sessionRemoved': { params: import('./notifications.js').SessionRemovedNotification };
+  'root/sessionSummaryChanged': { params: import('./notifications.js').SessionSummaryChangedNotification };
+  'auth/required': { params: import('./notifications.js').AuthRequiredNotification };
 }
 
 /** Combined notification map for all directions. */

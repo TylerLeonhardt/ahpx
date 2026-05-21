@@ -2,8 +2,9 @@
  * Notification Types — Source of truth for all AHP notification definitions.
  *
  * @module notifications
- * @description Notifications are ephemeral broadcasts that are **not** part of the
- * state tree. They are not processed by reducers and are not replayed on reconnection.
+ * @description In the channel-based protocol (0.2.0+), notifications are
+ * top-level JSON-RPC methods, not wrapped in a `notification` envelope.
+ * Each notification carries a `channel` field identifying its scope.
  */
 
 import type { URI, SessionSummary } from './state.js';
@@ -20,170 +21,82 @@ export const enum AuthRequiredReason {
   Expired = 'expired',
 }
 
-// ─── Protocol Notifications ──────────────────────────────────────────────────
+// ─── Notification Method Names ───────────────────────────────────────────────
 
 /**
- * Discriminant values for all protocol notifications.
+ * Top-level JSON-RPC method names for protocol notifications.
+ *
+ * In AHP 0.2.0+, each notification is a top-level method rather than
+ * being wrapped in a `notification` envelope.
  *
  * @category Protocol Notifications
  */
 export const enum NotificationType {
-  SessionAdded = 'notify/sessionAdded',
-  SessionRemoved = 'notify/sessionRemoved',
-  SessionSummaryChanged = 'notify/sessionSummaryChanged',
-  AuthRequired = 'notify/authRequired',
+  SessionAdded = 'root/sessionAdded',
+  SessionRemoved = 'root/sessionRemoved',
+  SessionSummaryChanged = 'root/sessionSummaryChanged',
+  AuthRequired = 'auth/required',
 }
 
+// ─── Notification Params ─────────────────────────────────────────────────────
+
 /**
- * Broadcast to all connected clients when a new session is created.
+ * Params for `root/sessionAdded` — broadcast when a new session is created.
  *
  * @category Protocol Notifications
- * @version 1
- * @example
- * ```json
- * {
- *   "jsonrpc": "2.0",
- *   "method": "notification",
- *   "params": {
- *     "notification": {
- *       "type": "notify/sessionAdded",
- *       "summary": {
- *         "resource": "copilot:/<uuid>",
- *         "provider": "copilot",
- *         "title": "New Session",
- *         "status": 1,
- *         "createdAt": 1710000000000,
- *         "modifiedAt": 1710000000000
- *       }
- *     }
- *   }
- * }
- * ```
+ * @version 2
  */
 export interface SessionAddedNotification {
   type: NotificationType.SessionAdded;
+  /** Channel URI (always `ahp-root://` for root notifications) */
+  channel: URI;
   /** Summary of the new session */
   summary: SessionSummary;
 }
 
 /**
- * Broadcast to all connected clients when a session is disposed.
+ * Params for `root/sessionRemoved` — broadcast when a session is disposed.
  *
  * @category Protocol Notifications
- * @version 1
- * @example
- * ```json
- * {
- *   "jsonrpc": "2.0",
- *   "method": "notification",
- *   "params": {
- *     "notification": {
- *       "type": "notify/sessionRemoved",
- *       "session": "copilot:/<uuid>"
- *     }
- *   }
- * }
- * ```
+ * @version 2
  */
 export interface SessionRemovedNotification {
   type: NotificationType.SessionRemoved;
+  /** Channel URI (always `ahp-root://` for root notifications) */
+  channel: URI;
   /** URI of the removed session */
   session: URI;
 }
 
 /**
- * Broadcast to all connected clients when an existing session's summary
- * changes (title, status, `modifiedAt`, model, working directory, read/done
- * state, or diff statistics).
- *
- * This notification lets clients that maintain a cached session list — for
- * example, the result of a previous `listSessions()` call — stay in sync with
- * in-flight sessions without having to subscribe to every session URI
- * individually. It is complementary to, not a replacement for,
- * `notify/sessionAdded` and `notify/sessionRemoved`: those signal lifecycle
- * (creation/disposal), while this signals summary-level mutations on an
- * already-known session.
- *
- * Semantics:
- *
- * - Only fields present in `changes` have new values; omitted fields are
- *   unchanged on the client's cached summary.
- * - Identity fields (`resource`, `provider`, `createdAt`) never change and
- *   are not carried.
- * - Like all protocol notifications, this is ephemeral: it is **not**
- *   replayed on reconnect. On reconnect, clients should re-fetch the full
- *   catalog via `listSessions()` as usual.
- * - The server SHOULD emit this notification whenever any mutable field on
- *   {@link SessionSummary | `SessionSummary`} changes for a session the
- *   server has surfaced via `listSessions()` or `notify/sessionAdded`.
- *   Servers MAY coalesce or debounce updates for noisy fields (for example,
- *   `modifiedAt` bumps while a turn is streaming, or rapidly changing
- *   `diffs`) at their discretion.
- * - Clients that have no cached entry for `session` MAY ignore the
- *   notification; it is not a substitute for `notify/sessionAdded`.
+ * Params for `root/sessionSummaryChanged` — broadcast when a session's
+ * summary mutates.
  *
  * @category Protocol Notifications
- * @version 1
- * @example
- * ```json
- * {
- *   "jsonrpc": "2.0",
- *   "method": "notification",
- *   "params": {
- *     "notification": {
- *       "type": "notify/sessionSummaryChanged",
- *       "session": "copilot:/<uuid>",
- *       "changes": {
- *         "title": "Refactor auth middleware",
- *         "status": 8,
- *         "modifiedAt": 1710000123456
- *       }
- *     }
- *   }
- * }
- * ```
+ * @version 2
  */
 export interface SessionSummaryChangedNotification {
   type: NotificationType.SessionSummaryChanged;
+  /** Channel URI (always `ahp-root://` for root notifications) */
+  channel: URI;
   /** URI of the session whose summary changed */
   session: URI;
   /**
    * Mutable summary fields that changed; omitted fields are unchanged.
-   *
-   * Identity fields (`resource`, `provider`, `createdAt`) never change and
-   * MUST be omitted by senders; receivers SHOULD ignore them if present.
    */
   changes: Partial<SessionSummary>;
 }
 
 /**
- * Sent by the server when a protected resource requires (re-)authentication.
- *
- * This notification is sent when a previously valid token expires or is
- * revoked, or when the server discovers a new authentication requirement.
- * Clients should obtain a fresh token and push it via the `authenticate`
- * command.
+ * Params for `auth/required` — sent when a resource requires (re-)authentication.
  *
  * @category Protocol Notifications
- * @version 1
- * @see {@link /specification/authentication | Authentication}
- * @example
- * ```json
- * {
- *   "jsonrpc": "2.0",
- *   "method": "notification",
- *   "params": {
- *     "notification": {
- *       "type": "notify/authRequired",
- *       "resource": "https://api.github.com",
- *       "reason": "expired"
- *     }
- *   }
- * }
- * ```
+ * @version 2
  */
 export interface AuthRequiredNotification {
   type: NotificationType.AuthRequired;
+  /** Channel URI (always `ahp-root://` for auth notifications) */
+  channel: URI;
   /** The protected resource identifier that requires authentication */
   resource: string;
   /** Why authentication is required */
@@ -191,7 +104,11 @@ export interface AuthRequiredNotification {
 }
 
 /**
- * Discriminated union of all protocol notifications.
+ * Union of all notification params types.
+ *
+ * In AHP 0.2.0+, each notification is delivered as a top-level JSON-RPC
+ * method. This union is kept for code that handles multiple notification
+ * types generically.
  */
 export type ProtocolNotification =
   | SessionAddedNotification

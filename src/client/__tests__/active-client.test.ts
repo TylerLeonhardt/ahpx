@@ -29,10 +29,12 @@ function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 function createMockClient() {
 	const emitter = new EventEmitter();
 	const dispatched: StateAction[] = [];
+	const dispatchedChannels: string[] = [];
 	const sessionStates = new Map<string, SessionState>();
 
 	const client = Object.assign(emitter, {
-		dispatchAction(action: StateAction) {
+		dispatchAction(channel: string, action: StateAction) {
+			dispatchedChannels.push(channel);
 			dispatched.push(action);
 		},
 		state: {

@@ -26,12 +26,12 @@ The state is addressed by URI. Two resource types exist:
 
 | URI | Type | Contents |
 |-----|------|----------|
-| `agenthost:/root` | Root state | Available agents, models, active session count |
+| `ahp-root://` | Root state | Available agents, models, active session count |
 | `<provider>:/<uuid>` | Session state | Turns, tool calls, permissions, streaming text |
 
 **Root state:**
 ```
-agenthost:/root
+ahp-root://
 ├── agents: IAgentInfo[]
 │   ├── provider: string          (e.g. "copilot")
 │   ├── displayName: string
@@ -76,7 +76,7 @@ subscribes to initial resources.
   "params": {
     "protocolVersion": 1,
     "clientId": "<unique-client-id>",
-    "initialSubscriptions": ["agenthost:/root"]
+    "initialSubscriptions": ["ahp-root://"]
   }
 }
 ```
@@ -91,7 +91,7 @@ subscriptions, and optional `defaultDirectory`.
   "jsonrpc": "2.0",
   "id": 2,
   "method": "subscribe",
-  "params": { "resource": "agenthost:/root" }
+  "params": { "resource": "ahp-root://" }
 }
 ```
 
@@ -192,7 +192,7 @@ If the connection drops, use `reconnect` instead of `initialize`:
   "params": {
     "clientId": "<same-client-id>",
     "lastSeenServerSeq": 42,
-    "subscriptions": ["agenthost:/root", "copilot:/<uuid>"]
+    "subscriptions": ["ahp-root://", "copilot:/<uuid>"]
   }
 }
 ```

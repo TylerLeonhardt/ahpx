@@ -46,7 +46,7 @@ import type { OutputFormat, OutputFormatter } from "./output/index.js";
 import { PermissionHandler } from "./permissions/index.js";
 import type { PermissionMode } from "./permissions/index.js";
 import { TurnController } from "./prompt/index.js";
-import { ActionType } from "./protocol/actions.js";
+import { type ActionEnvelope, ActionType } from "./protocol/actions.js";
 import { ResponsePartKind, SessionStatus } from "./protocol/state.js";
 import type { SessionActiveClient, Turn } from "./protocol/state.js";
 import { SessionPersistence, SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
@@ -395,7 +395,7 @@ program
 
 		const client = new AhpClient({
 			connectTimeout: Number.parseInt(opts.timeout, 10),
-			initialSubscriptions: ["agenthost:/root"],
+			initialSubscriptions: ["ahp-root://"],
 		});
 
 		try {
@@ -593,7 +593,7 @@ server
 
 		const client = new AhpClient({
 			connectTimeout: Number.parseInt(opts.timeout, 10),
-			initialSubscriptions: ["agenthost:/root"],
+			initialSubscriptions: ["ahp-root://"],
 		});
 
 		try {
@@ -855,7 +855,7 @@ tunnel
 
 			const client = new AhpClient({
 				connectTimeout: Number.parseInt(opts.timeout, 10),
-				initialSubscriptions: ["agenthost:/root"],
+				initialSubscriptions: ["ahp-root://"],
 			});
 
 			try {
@@ -1279,9 +1279,8 @@ session
 
 							// Dispatch activeClient so the session state mirror gets customizations
 							if (activeClientParam) {
-								client.dispatchAction({
+								client.dispatchAction(sessionUri, {
 									type: ActionType.SessionActiveClientChanged,
-									session: sessionUri,
 									activeClient: activeClientParam,
 								});
 							}
@@ -1303,10 +1302,10 @@ session
 
 									client.on("action", (envelope) => {
 										const action = envelope.action;
-										if (action.type === ActionType.SessionReady && action.session === sessionUri) {
+										if (action.type === ActionType.SessionReady && envelope.channel === sessionUri) {
 											clearTimeout(timeout);
 											resolve(true);
-										} else if (action.type === ActionType.SessionCreationFailed && action.session === sessionUri) {
+										} else if (action.type === ActionType.SessionCreationFailed && envelope.channel === sessionUri) {
 											clearTimeout(timeout);
 											resolve(false);
 										}
@@ -1896,9 +1895,8 @@ sessionConfig
 							);
 						}
 
-						client.dispatchAction({
+						client.dispatchAction(record.sessionUri, {
 							type: ActionType.SessionConfigChanged,
-							session: record.sessionUri,
 							config: { [key]: coerced },
 						});
 
@@ -2057,9 +2055,8 @@ sessionCustomization
 						}
 
 						const newEnabled = !target.enabled;
-						client.dispatchAction({
+						client.dispatchAction(record.sessionUri, {
 							type: ActionType.SessionCustomizationToggled,
-							session: record.sessionUri,
 							uri,
 							enabled: newEnabled,
 						});
@@ -2494,9 +2491,8 @@ async function createTempSession(
 
 	// Dispatch activeClient so the session state mirror gets customizations
 	if (activeClient) {
-		client.dispatchAction({
+		client.dispatchAction(sessionUri, {
 			type: ActionType.SessionActiveClientChanged,
-			session: sessionUri,
 			activeClient,
 		});
 	}
@@ -2586,9 +2582,8 @@ async function resolveOrCreateSession(
 
 		// Dispatch activeClient so the session state mirror gets customizations
 		if (activeClient) {
-			client.dispatchAction({
+			client.dispatchAction(sessionUri, {
 				type: ActionType.SessionActiveClientChanged,
-				session: sessionUri,
 				activeClient,
 			});
 		}
@@ -2633,12 +2628,12 @@ function waitForReady(client: AhpClient, sessionUri: string): Promise<void> {
 			reject(new TimeoutError("Timed out waiting for session to be ready"));
 		}, 30_000);
 
-		const onAction = (envelope: { action: { type: string; session?: string } }) => {
+		const onAction = (envelope: ActionEnvelope) => {
 			const action = envelope.action;
-			if (action.type === ActionType.SessionReady && action.session === sessionUri) {
+			if (action.type === ActionType.SessionReady && envelope.channel === sessionUri) {
 				cleanup();
 				resolve();
-			} else if (action.type === ActionType.SessionCreationFailed && action.session === sessionUri) {
+			} else if (action.type === ActionType.SessionCreationFailed && envelope.channel === sessionUri) {
 				cleanup();
 				const sessionState = client.state.getSession(sessionUri);
 				const errMsg = sessionState?.creationError?.message ?? "Unknown error";
@@ -2856,9 +2851,8 @@ program
 					return;
 				}
 
-				client.dispatchAction({
+				client.dispatchAction(record.sessionUri, {
 					type: ActionType.SessionTurnCancelled,
-					session: record.sessionUri,
 					turnId: sessionState.activeTurn.id,
 				});
 				outputResult(globalOpts, () => console.log(pc.green("✓"), "Cancellation dispatched."), {
@@ -3028,9 +3022,8 @@ program
 			await withConnection({ server: opts.server, config: cfg }, async (client) => {
 				await client.subscribe(record.sessionUri);
 
-				client.dispatchAction({
+				client.dispatchAction(record.sessionUri, {
 					type: ActionType.SessionModelChanged,
-					session: record.sessionUri,
 					model: { id: modelId },
 				});
 

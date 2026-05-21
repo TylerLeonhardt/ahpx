@@ -100,8 +100,8 @@ export class TurnController {
 			const onAction = (envelope: ActionEnvelope) => {
 				const action = envelope.action;
 
-				// Only handle actions for our session
-				if (!("session" in action) || (action as { session: URI }).session !== this.sessionUri) {
+				// Only handle actions for our session (by channel)
+				if (envelope.channel !== this.sessionUri) {
 					return;
 				}
 
@@ -193,18 +193,16 @@ export class TurnController {
 							if (this.cancelled) return;
 
 							if (approved) {
-								this.client.dispatchAction({
+								this.client.dispatchAction(this.sessionUri, {
 									type: ActionType.SessionToolCallConfirmed,
-									session: this.sessionUri,
 									turnId,
 									toolCallId: a.toolCallId,
 									approved: true,
 									confirmed: ToolCallConfirmationReason.UserAction,
 								});
 							} else {
-								this.client.dispatchAction({
+								this.client.dispatchAction(this.sessionUri, {
 									type: ActionType.SessionToolCallConfirmed,
-									session: this.sessionUri,
 									turnId,
 									toolCallId: a.toolCallId,
 									approved: false,
@@ -309,9 +307,8 @@ export class TurnController {
 			this.client.on("action", onAction);
 
 			// Dispatch turn start
-			this.client.dispatchAction({
+			this.client.dispatchAction(this.sessionUri, {
 				type: ActionType.SessionTurnStarted,
-				session: this.sessionUri,
 				turnId,
 				userMessage: {
 					text,
@@ -330,9 +327,8 @@ export class TurnController {
 	async cancel(): Promise<void> {
 		if (!this.activeTurnId) return;
 		this.cancelled = true;
-		this.client.dispatchAction({
+		this.client.dispatchAction(this.sessionUri, {
 			type: ActionType.SessionTurnCancelled,
-			session: this.sessionUri,
 			turnId: this.activeTurnId,
 		});
 	}

@@ -101,9 +101,9 @@ function createMockClient() {
 
 	return {
 		client,
-		emitAction(action: StateAction) {
+		emitAction(action: StateAction, channel = SESSION_URI) {
 			seq++;
-			const envelope: ActionEnvelope = { action, serverSeq: seq, origin: undefined };
+			const envelope: ActionEnvelope = { channel, action, serverSeq: seq, origin: undefined };
 			emitter.emit("action", envelope);
 		},
 		setSessionState(uri: string, state: SessionState) {
@@ -127,7 +127,6 @@ describe("SessionWatcher", () => {
 		// Simulate server streaming
 		emitAction({
 			type: ActionType.SessionDelta,
-			session: SESSION_URI,
 			turnId: "t1",
 			partId: "part-1",
 			content: "Hello world",
@@ -135,7 +134,6 @@ describe("SessionWatcher", () => {
 
 		emitAction({
 			type: ActionType.SessionToolCallStart,
-			session: SESSION_URI,
 			turnId: "t1",
 			toolCallId: "tc1",
 			toolName: "readFile",
@@ -253,13 +251,15 @@ describe("SessionWatcher", () => {
 		const watchPromise = watcher.watch();
 		await tick();
 
-		emitAction({
-			type: ActionType.SessionDelta,
-			session: "copilot:/other-session",
-			turnId: "t1",
-			partId: "part-1",
-			content: "Wrong session",
-		});
+		emitAction(
+			{
+				type: ActionType.SessionDelta,
+				turnId: "t1",
+				partId: "part-1",
+				content: "Wrong session",
+			},
+			"copilot:/other-session",
+		);
 
 		watcher.stop();
 		await watchPromise;
@@ -290,20 +290,17 @@ describe("SessionWatcher", () => {
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId: "t2",
 		});
 
 		emitAction({
 			type: ActionType.SessionError,
-			session: SESSION_URI,
 			turnId: "t3",
 			error: { errorType: "runtime", message: "Something went wrong" },
 		});
 
 		emitAction({
 			type: ActionType.SessionTurnCancelled,
-			session: SESSION_URI,
 			turnId: "t4",
 		});
 

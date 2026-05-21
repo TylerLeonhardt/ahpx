@@ -61,7 +61,7 @@ function createMockClient() {
 
 	const client = Object.assign(emitter, {
 		clientId: "test-client-id",
-		dispatchAction(action: StateAction) {
+		dispatchAction(_channel: string, action: StateAction) {
 			dispatched.push(action);
 		},
 		state: {
@@ -75,9 +75,10 @@ function createMockClient() {
 		client,
 		dispatched,
 		/** Simulate an action envelope arriving from the server. */
-		emitAction(action: StateAction) {
+		emitAction(action: StateAction, channel = "copilot:/test-session") {
 			seq++;
 			const envelope: ActionEnvelope = {
+				channel,
 				action,
 				serverSeq: seq,
 				origin: undefined,
@@ -112,7 +113,6 @@ describe("TurnController", () => {
 		// Simulate server streaming
 		emitAction({
 			type: ActionType.SessionDelta,
-			session: SESSION_URI,
 			turnId,
 			partId: "part-1",
 			content: "Hi there!",
@@ -120,7 +120,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -145,7 +144,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionError,
-			session: SESSION_URI,
 			turnId,
 			error: { errorType: "runtime", message: "model overloaded" },
 		});
@@ -169,7 +167,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionTurnCancelled,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -191,7 +188,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionReasoning,
-			session: SESSION_URI,
 			turnId,
 			partId: "reason-1",
 			content: "analyzing...",
@@ -199,7 +195,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionDelta,
-			session: SESSION_URI,
 			turnId,
 			partId: "part-1",
 			content: "Here's the answer.",
@@ -207,7 +202,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -231,14 +225,12 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionUsage,
-			session: SESSION_URI,
 			turnId,
 			usage: { inputTokens: 100, outputTokens: 50, model: "gpt-4o" },
 		});
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -261,7 +253,6 @@ describe("TurnController", () => {
 		// Tool call start
 		emitAction({
 			type: ActionType.SessionToolCallStart,
-			session: SESSION_URI,
 			turnId,
 			toolCallId: "tc1",
 			toolName: "shell",
@@ -271,7 +262,6 @@ describe("TurnController", () => {
 		// Tool call complete
 		emitAction({
 			type: ActionType.SessionToolCallComplete,
-			session: SESSION_URI,
 			turnId,
 			toolCallId: "tc1",
 			result: { success: true, pastTenseMessage: "Ran npm test" },
@@ -279,7 +269,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -327,7 +316,6 @@ describe("TurnController", () => {
 		// Emit toolCallReady without auto-confirm
 		emitAction({
 			type: ActionType.SessionToolCallReady,
-			session: SESSION_URI,
 			turnId,
 			toolCallId: "tc1",
 			invocationMessage: "npm test --reporter=verbose",
@@ -343,7 +331,6 @@ describe("TurnController", () => {
 		// Complete the turn
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -362,17 +349,18 @@ describe("TurnController", () => {
 		const turnId = (dispatched[0] as { turnId: string }).turnId;
 
 		// Action for a different session — should be ignored
-		emitAction({
-			type: ActionType.SessionDelta,
-			session: "copilot:/other-session",
-			turnId,
-			partId: "part-1",
-			content: "wrong session",
-		});
+		emitAction(
+			{
+				type: ActionType.SessionDelta,
+				turnId,
+				partId: "part-1",
+				content: "wrong session",
+			},
+			"copilot:/other-session",
+		);
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -395,7 +383,6 @@ describe("TurnController", () => {
 		// Action for a different turn — should be ignored
 		emitAction({
 			type: ActionType.SessionDelta,
-			session: SESSION_URI,
 			turnId: "different-turn-id",
 			partId: "part-1",
 			content: "wrong turn",
@@ -403,7 +390,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -432,7 +418,6 @@ describe("TurnController", () => {
 		// Simulate server acknowledging cancellation
 		emitAction({
 			type: ActionType.SessionTurnCancelled,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -479,7 +464,6 @@ describe("TurnController", () => {
 		// Tool call ready with confirmed set — client-provided tool
 		emitAction({
 			type: ActionType.SessionToolCallReady,
-			session: SESSION_URI,
 			turnId,
 			toolCallId: "tc1",
 			invocationMessage: "Read file.ts",
@@ -498,7 +482,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -543,7 +526,6 @@ describe("TurnController", () => {
 		// Server tool auto-confirmed — permission handler should be skipped entirely
 		emitAction({
 			type: ActionType.SessionToolCallReady,
-			session: SESSION_URI,
 			turnId,
 			toolCallId: "tc1",
 			invocationMessage: "npm test",
@@ -562,7 +544,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -607,7 +588,6 @@ describe("TurnController", () => {
 		// Server tool auto-confirmed, user has approve-all
 		emitAction({
 			type: ActionType.SessionToolCallReady,
-			session: SESSION_URI,
 			turnId,
 			toolCallId: "tc1",
 			invocationMessage: "Read config.json",
@@ -625,7 +605,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -671,7 +650,6 @@ describe("TurnController", () => {
 		// Auto-confirmed but toolClientId doesn't match → treated as server tool, auto-approved
 		emitAction({
 			type: ActionType.SessionToolCallReady,
-			session: SESSION_URI,
 			turnId,
 			toolCallId: "tc1",
 			invocationMessage: "Do something",
@@ -689,7 +667,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -725,7 +702,6 @@ describe("TurnController", () => {
 			await new Promise((r) => setTimeout(r, 30));
 			emitAction({
 				type: ActionType.SessionDelta,
-				session: SESSION_URI,
 				turnId,
 				partId: "part-1",
 				content: `chunk ${i}`,
@@ -735,7 +711,6 @@ describe("TurnController", () => {
 		// Complete before idle timeout fires
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 
@@ -760,7 +735,6 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.SessionTurnComplete,
-			session: SESSION_URI,
 			turnId,
 		});
 

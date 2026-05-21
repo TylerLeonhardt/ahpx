@@ -25,7 +25,7 @@ function makeSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
 
 /** Create a mock AhpClient with controllable behavior. */
 function createMockClient(opts: {
-	subscribeResult?: { snapshot: { resource: string; state: unknown } };
+	subscribeResult?: { snapshot?: { resource: string; state: unknown } };
 	subscribeError?: Error;
 	listSessionsResult?: {
 		items: Array<{

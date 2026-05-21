@@ -94,10 +94,7 @@ export class StateMirror {
 					if (env.serverSeq > snapshot.fromSeq) {
 						const current = this.sessions.get(snapshot.resource);
 						if (current) {
-							this.sessions.set(
-								snapshot.resource,
-								sessionReducer(current, env.action as SessionAction & { session?: URI }),
-							);
+							this.sessions.set(snapshot.resource, sessionReducer(current, env.action as SessionAction));
 						}
 					}
 				}
@@ -114,10 +111,7 @@ export class StateMirror {
 					if (env.serverSeq > snapshot.fromSeq) {
 						const current = this.terminals.get(snapshot.resource);
 						if (current) {
-							this.terminals.set(
-								snapshot.resource,
-								terminalReducer(current, env.action as TerminalAction & { terminal?: URI }),
-							);
+							this.terminals.set(snapshot.resource, terminalReducer(current, env.action as TerminalAction));
 						}
 					}
 				}
@@ -132,40 +126,38 @@ export class StateMirror {
 		this.serverSeq = envelope.serverSeq;
 
 		const action = envelope.action;
+		const channel = envelope.channel;
 
 		if (ROOT_ACTION_TYPES.has(action.type)) {
 			this.rootState = rootReducer(this.rootState, action as RootAction);
 		} else if (action.type.startsWith(TERMINAL_ACTION_PREFIX)) {
-			const terminalAction = action as TerminalAction & { terminal?: URI };
-			const terminalUri = terminalAction.terminal;
-			if (terminalUri) {
-				const current = this.terminals.get(terminalUri);
+			const terminalAction = action as TerminalAction;
+			if (channel) {
+				const current = this.terminals.get(channel);
 				if (current) {
-					this.terminals.set(terminalUri, terminalReducer(current, terminalAction));
+					this.terminals.set(channel, terminalReducer(current, terminalAction));
 				} else {
 					// Terminal not yet registered — buffer for replay after applySnapshot
-					let buffer = this.pendingActions.get(terminalUri);
+					let buffer = this.pendingActions.get(channel);
 					if (!buffer) {
 						buffer = [];
-						this.pendingActions.set(terminalUri, buffer);
+						this.pendingActions.set(channel, buffer);
 					}
 					buffer.push(envelope);
 				}
 			}
 		} else {
-			// Session action — find the session by URI
-			const sessionAction = action as SessionAction & { session?: URI };
-			const sessionUri = sessionAction.session;
-			if (sessionUri) {
-				const current = this.sessions.get(sessionUri);
+			// Session action — route by channel URI
+			if (channel) {
+				const current = this.sessions.get(channel);
 				if (current) {
-					this.sessions.set(sessionUri, sessionReducer(current, sessionAction));
+					this.sessions.set(channel, sessionReducer(current, action as SessionAction));
 				} else {
 					// Session not yet registered — buffer for replay after applySnapshot
-					let buffer = this.pendingActions.get(sessionUri);
+					let buffer = this.pendingActions.get(channel);
 					if (!buffer) {
 						buffer = [];
-						this.pendingActions.set(sessionUri, buffer);
+						this.pendingActions.set(channel, buffer);
 					}
 					buffer.push(envelope);
 				}

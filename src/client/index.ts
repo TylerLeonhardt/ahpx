@@ -166,9 +166,10 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 
 		// Send initialize
 		const initParams = {
+			channel: "ahp-root://" as const,
 			protocolVersions: [PROTOCOL_VERSION],
 			clientId: this._clientId,
-			initialSubscriptions: this.options.initialSubscriptions ?? ["agenthost:/root"],
+			initialSubscriptions: this.options.initialSubscriptions ?? ["ahp-root://"],
 		};
 
 		// DEBUG: Log initialize params
@@ -300,7 +301,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	): Promise<null> {
 		this.ensureConnected();
 		return this.protocol!.request("createSession", {
-			session: sessionUri,
+			channel: sessionUri,
 			provider,
 			model: model ? { id: model } : undefined,
 			workingDirectory,
@@ -316,17 +317,19 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 * JSON Schema describing what configuration properties are available
 	 * given the current context (provider, working directory, partial config).
 	 */
-	async resolveSessionConfig(params: ResolveSessionConfigParams): Promise<ResolveSessionConfigResult> {
+	async resolveSessionConfig(params: Omit<ResolveSessionConfigParams, "channel">): Promise<ResolveSessionConfigResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resolveSessionConfig", params);
+		return this.protocol!.request("resolveSessionConfig", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
 	 * Query the server for allowed values of a dynamic session config property.
 	 */
-	async sessionConfigCompletions(params: SessionConfigCompletionsParams): Promise<SessionConfigCompletionsResult> {
+	async sessionConfigCompletions(
+		params: Omit<SessionConfigCompletionsParams, "channel">,
+	): Promise<SessionConfigCompletionsResult> {
 		this.ensureConnected();
-		return this.protocol!.request("sessionConfigCompletions", params);
+		return this.protocol!.request("sessionConfigCompletions", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
@@ -335,7 +338,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	async disposeSession(sessionUri: URI): Promise<null> {
 		this.ensureConnected();
 		const result = await this.protocol!.request("disposeSession", {
-			session: sessionUri,
+			channel: sessionUri,
 		});
 		this._state.removeSession(sessionUri);
 		// Remove tracked handle if one exists (may not if using low-level API)
@@ -353,7 +356,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	): Promise<null> {
 		this.ensureConnected();
 		return this.protocol!.request("createTerminal", {
-			terminal: terminalUri,
+			channel: terminalUri,
 			claim,
 			...options,
 		});
@@ -365,7 +368,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	async disposeTerminal(terminalUri: string): Promise<null> {
 		this.ensureConnected();
 		const result = await this.protocol!.request("disposeTerminal", {
-			terminal: terminalUri,
+			channel: terminalUri,
 		});
 		this._state.removeTerminal(terminalUri);
 		return result;
@@ -376,27 +379,29 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async listSessions(): Promise<ListSessionsResult> {
 		this.ensureConnected();
-		return this.protocol!.request("listSessions", {});
+		return this.protocol!.request("listSessions", { channel: "ahp-root://" as const });
 	}
 
 	/**
 	 * Subscribe to a state resource URI.
 	 */
-	async subscribe(resourceUri: URI): Promise<SubscribeResult> {
+	async subscribe(channelUri: URI): Promise<SubscribeResult> {
 		this.ensureConnected();
 		const result = await this.protocol!.request("subscribe", {
-			resource: resourceUri,
+			channel: channelUri,
 		});
-		this._state.applySnapshot(result.snapshot);
+		if (result.snapshot) {
+			this._state.applySnapshot(result.snapshot);
+		}
 		return result;
 	}
 
 	/**
-	 * Unsubscribe from a state resource URI.
+	 * Unsubscribe from a channel URI.
 	 */
-	unsubscribe(resourceUri: URI): void {
+	unsubscribe(channelUri: URI): void {
 		this.ensureConnected();
-		this.protocol!.notify("unsubscribe", { resource: resourceUri });
+		this.protocol!.notify("unsubscribe", { channel: channelUri });
 	}
 
 	/**
@@ -405,7 +410,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	async fetchTurns(sessionUri: URI, before?: string, limit?: number): Promise<FetchTurnsResult> {
 		this.ensureConnected();
 		return this.protocol!.request("fetchTurns", {
-			session: sessionUri,
+			channel: sessionUri,
 			before,
 			limit,
 		});
@@ -416,15 +421,19 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async resourceRead(uri: string, encoding?: ContentEncoding): Promise<ResourceReadResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceRead", { uri, ...(encoding ? { encoding } : {}) });
+		return this.protocol!.request("resourceRead", {
+			channel: "ahp-root://" as const,
+			uri,
+			...(encoding ? { encoding } : {}),
+		});
 	}
 
 	/**
 	 * Write content to a file on the server's filesystem.
 	 */
-	async resourceWrite(params: ResourceWriteParams): Promise<ResourceWriteResult> {
+	async resourceWrite(params: Omit<ResourceWriteParams, "channel">): Promise<ResourceWriteResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceWrite", params);
+		return this.protocol!.request("resourceWrite", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
@@ -432,40 +441,41 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async resourceList(uri: URI): Promise<ResourceListResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceList", { uri });
+		return this.protocol!.request("resourceList", { channel: "ahp-root://" as const, uri });
 	}
 
 	/**
 	 * Copy a resource from one URI to another.
 	 */
-	async resourceCopy(params: ResourceCopyParams): Promise<ResourceCopyResult> {
+	async resourceCopy(params: Omit<ResourceCopyParams, "channel">): Promise<ResourceCopyResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceCopy", params);
+		return this.protocol!.request("resourceCopy", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
 	 * Delete a resource at a URI.
 	 */
-	async resourceDelete(params: ResourceDeleteParams): Promise<ResourceDeleteResult> {
+	async resourceDelete(params: Omit<ResourceDeleteParams, "channel">): Promise<ResourceDeleteResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceDelete", params);
+		return this.protocol!.request("resourceDelete", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
 	 * Move (rename) a resource from one URI to another.
 	 */
-	async resourceMove(params: ResourceMoveParams): Promise<ResourceMoveResult> {
+	async resourceMove(params: Omit<ResourceMoveParams, "channel">): Promise<ResourceMoveResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceMove", params);
+		return this.protocol!.request("resourceMove", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
 	 * Dispatch a client-originated action to the server.
 	 */
-	dispatchAction(action: StateAction): void {
+	dispatchAction(channel: URI, action: StateAction): void {
 		this.ensureConnected();
 		this._clientSeq++;
 		this.protocol!.notify("dispatchAction", {
+			channel,
 			clientSeq: this._clientSeq,
 			action,
 		});
@@ -476,7 +486,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async authenticate(resource: string, token: string): Promise<void> {
 		this.ensureConnected();
-		await this.protocol!.request("authenticate", { resource, token });
+		await this.protocol!.request("authenticate", { channel: "ahp-root://" as const, resource, token });
 	}
 
 	private ensureConnected(): void {

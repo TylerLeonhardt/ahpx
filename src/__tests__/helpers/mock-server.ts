@@ -43,6 +43,7 @@ type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification;
 
 /** Action envelope sent from server to client */
 interface ActionEnvelope {
+	channel: string;
 	action: Record<string, unknown>;
 	serverSeq: number;
 	origin?: { clientId: string; clientSeq: number };
@@ -163,8 +164,15 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 	const context: MockServerContext = {
 		sendAction(action, origin) {
 			if (!activeWs || activeWs.readyState !== WebSocket.OPEN) return;
+			// Derive channel from action's session/terminal field, or default to root
+			const channel = (action.session ?? action.terminal ?? "ahp-root://") as string;
+			// Remove session/terminal from action payload (channel-based model)
+			const cleanAction = { ...action };
+			cleanAction.session = undefined;
+			cleanAction.terminal = undefined;
 			const envelope: ActionEnvelope = {
-				action,
+				channel,
+				action: cleanAction,
 				serverSeq: nextSeq(),
 				origin,
 			};
@@ -178,11 +186,14 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 		},
 		sendNotification(notification) {
 			if (!activeWs || activeWs.readyState !== WebSocket.OPEN) return;
+			// AHP 0.2.0+: notifications are top-level methods
+			const notif = notification as Record<string, unknown>;
+			const method = notif.type as string;
 			activeWs.send(
 				JSON.stringify({
 					jsonrpc: "2.0",
-					method: "notification",
-					params: { notification },
+					method,
+					params: notification,
 				}),
 			);
 		},
@@ -245,7 +256,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 
 	function makeRootSnapshot() {
 		return {
-			resource: "agenthost:/root",
+			resource: "ahp-root://",
 			fromSeq: serverSeq,
 			state: {
 				agents: agents.map((a) => ({
@@ -303,7 +314,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 
 				const initialSubs = (params.initialSubscriptions ?? []) as string[];
 				const snapshots = initialSubs.map((uri) => {
-					if (uri === "agenthost:/root") return makeRootSnapshot();
+					if (uri === "ahp-root://") return makeRootSnapshot();
 					const session = sessions.get(uri);
 					if (session) return makeSessionSnapshot(session);
 					return { resource: uri, fromSeq: serverSeq, state: {} };
@@ -318,7 +329,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			}
 
 			case "createSession": {
-				const sessionUri = params.session as string;
+				const sessionUri = (params.channel ?? params.session) as string;
 				const provider = (params.provider ?? agents[0]?.provider ?? "mock-agent") as string;
 				const model = params.model as { id: string } | undefined;
 				const workingDirectory = params.workingDirectory as string | undefined;
@@ -364,19 +375,19 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			}
 
 			case "subscribe": {
-				const resource = params.resource as string;
+				const channel = params.channel as string;
 
 				if (scenario.onSubscribe) {
 					sendResponse(ws, req.id, scenario.onSubscribe(params));
 					return;
 				}
 
-				if (resource === "agenthost:/root") {
+				if (channel === "ahp-root://") {
 					sendResponse(ws, req.id, { snapshot: makeRootSnapshot() });
 					return;
 				}
 
-				const session = sessions.get(resource);
+				const session = sessions.get(channel);
 				if (session) {
 					sendResponse(ws, req.id, {
 						snapshot: makeSessionSnapshot(session),
@@ -384,14 +395,14 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 					return;
 				}
 
-				// Unknown resource — return empty snapshot
+				// Unknown channel — return empty snapshot
 				sendResponse(ws, req.id, {
 					snapshot: {
-						resource,
+						resource: channel,
 						fromSeq: serverSeq,
 						state: {
 							summary: {
-								resource,
+								resource: channel,
 								provider: "mock-agent",
 								title: "Unknown Session",
 								status: "idle",
@@ -407,7 +418,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			}
 
 			case "disposeSession": {
-				const sessionUri = params.session as string;
+				const sessionUri = (params.channel ?? params.session) as string;
 				if (!sessions.has(sessionUri)) {
 					sendError(ws, req.id, -32001, "Session not found");
 					return;
@@ -485,7 +496,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 				clientId = params.clientId as string;
 				const subscriptions = (params.subscriptions ?? []) as string[];
 				const snapshots = subscriptions.map((uri) => {
-					if (uri === "agenthost:/root") return makeRootSnapshot();
+					if (uri === "ahp-root://") return makeRootSnapshot();
 					const session = sessions.get(uri);
 					if (session) return makeSessionSnapshot(session);
 					return { resource: uri, fromSeq: serverSeq, state: {} };
@@ -514,10 +525,22 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			const params = (notification.params ?? {}) as Record<string, unknown>;
 			const action = params.action as Record<string, unknown>;
 			const clientSeqVal = params.clientSeq as number;
+			const channel = params.channel as string;
+
+			// Inject channel back into action as session/terminal for scenario handlers
+			// (scenario handlers expect the old-style action with session/terminal)
+			const actionForScenario = { ...action };
+			if (channel && !actionForScenario.session && !actionForScenario.terminal) {
+				if (typeof action.type === "string" && action.type.startsWith("terminal/")) {
+					actionForScenario.terminal = channel;
+				} else if (typeof action.type === "string" && action.type.startsWith("session/")) {
+					actionForScenario.session = channel;
+				}
+			}
 
 			// Echo the action back as an ActionEnvelope (server acknowledges)
 			if (clientId) {
-				context.sendAction(action, {
+				context.sendAction(actionForScenario, {
 					clientId,
 					clientSeq: clientSeqVal,
 				});
@@ -525,7 +548,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 
 			// Delegate to scenario
 			if (scenario.onDispatchAction) {
-				scenario.onDispatchAction(params, context);
+				scenario.onDispatchAction({ ...params, action: actionForScenario }, context);
 			}
 		}
 		// unsubscribe — no-op for mock

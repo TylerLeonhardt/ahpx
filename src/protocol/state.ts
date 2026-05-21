@@ -7,7 +7,7 @@
 
 // ─── Type Aliases ────────────────────────────────────────────────────────────
 
-/** A URI string (e.g. `agenthost:/root` or `copilot:/<uuid>`). */
+/** A URI string (e.g. `ahp-root://` or `ahp-session:/<uuid>`). */
 export type URI = string;
 
 /**
@@ -142,7 +142,7 @@ export const enum PolicyState {
 }
 
 /**
- * Global state shared with every client subscribed to `agenthost:/root`.
+ * Global state shared with every client subscribed to `ahp-root://`.
  *
  * @category Root State
  */
@@ -403,7 +403,7 @@ export interface SessionSummary {
   /** The working directory URI for this session */
   workingDirectory?: URI;
   /** Files changed during this session with diff statistics */
-  diffs?: FileEdit[];
+  changesets?: FileEdit[];
 }
 
 // ─── Config Schema Types ─────────────────────────────────────────────────────
@@ -1862,7 +1862,7 @@ export interface ErrorInfo {
  * @category Common Types
  */
 export interface Snapshot {
-  /** The subscribed resource URI (e.g. `agenthost:/root` or `copilot:/<uuid>`) */
+  /** The subscribed resource URI (e.g. `ahp-root://` or `ahp-session:/<uuid>`) */
   resource: URI;
   /** The current state of the resource */
   state: RootState | SessionState | TerminalState;

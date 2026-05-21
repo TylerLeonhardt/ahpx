@@ -28,13 +28,14 @@ function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 	};
 }
 
-function envelope(action: ActionEnvelope["action"], seq = 1): ActionEnvelope {
-	return { action, serverSeq: seq, origin: undefined };
+function envelope(action: ActionEnvelope["action"], seq = 1, channel = SESSION_URI): ActionEnvelope {
+	return { channel, action, serverSeq: seq, origin: undefined };
 }
 
 function createMockClient() {
 	const emitter = new EventEmitter();
 	const dispatched: StateAction[] = [];
+	const dispatchChannels: string[] = [];
 	const sessionStates = new Map<string, SessionState>();
 	let connected = true;
 
@@ -42,7 +43,8 @@ function createMockClient() {
 		get connected() {
 			return connected;
 		},
-		dispatchAction(action: StateAction) {
+		dispatchAction(channel: string, action: StateAction) {
+			dispatchChannels.push(channel);
 			dispatched.push(action);
 		},
 		state: {
@@ -56,6 +58,7 @@ function createMockClient() {
 	return {
 		client,
 		dispatched,
+		dispatchChannels,
 		setSessionState(uri: string, state: SessionState) {
 			sessionStates.set(uri, state);
 		},
@@ -124,7 +127,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId: "t1",
 					partId: "part-1",
 					content: "hello",
@@ -133,21 +135,28 @@ describe("SessionHandle", () => {
 
 			// Action for another session — should NOT emit
 			emitAction(
-				envelope({
-					type: ActionType.SessionDelta,
-					session: OTHER_SESSION_URI,
-					turnId: "t2",
-					partId: "part-1",
-					content: "world",
-				}),
+				envelope(
+					{
+						type: ActionType.SessionDelta,
+						turnId: "t2",
+						partId: "part-1",
+						content: "world",
+					},
+					1,
+					OTHER_SESSION_URI,
+				),
 			);
 
 			// Root action (no session) — should NOT emit
 			emitAction(
-				envelope({
-					type: ActionType.RootAgentsChanged,
-					agents: [],
-				}),
+				envelope(
+					{
+						type: ActionType.RootAgentsChanged,
+						agents: [],
+					},
+					1,
+					"ahp-root://",
+				),
 			);
 
 			expect(handler).toHaveBeenCalledOnce();
@@ -173,7 +182,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionTurnComplete,
-					session: SESSION_URI,
 					turnId: "turn-1",
 				}),
 			);
@@ -192,7 +200,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionError,
-					session: SESSION_URI,
 					turnId: "t1",
 					error: { errorType: "error", message: "Something went wrong" },
 				}),
@@ -232,7 +239,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId: "t1",
 					partId: "part-1",
 					content: "for session 1",
@@ -241,13 +247,16 @@ describe("SessionHandle", () => {
 
 			// Action for session 2
 			emitAction(
-				envelope({
-					type: ActionType.SessionDelta,
-					session: OTHER_SESSION_URI,
-					turnId: "t2",
-					partId: "part-1",
-					content: "for session 2",
-				}),
+				envelope(
+					{
+						type: ActionType.SessionDelta,
+						turnId: "t2",
+						partId: "part-1",
+						content: "for session 2",
+					},
+					1,
+					OTHER_SESSION_URI,
+				),
 			);
 
 			expect(handler1).toHaveBeenCalledOnce();
@@ -297,7 +306,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionReady,
-					session: SESSION_URI,
 				}),
 			);
 
@@ -322,7 +330,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionCreationFailed,
-					session: SESSION_URI,
 					error: { errorType: "error", message: "Model not found" },
 				}),
 			);
@@ -381,7 +388,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionTurnComplete,
-					session: SESSION_URI,
 					turnId: (dispatched[0] as { turnId: string }).turnId,
 				}),
 			);
@@ -398,7 +404,7 @@ describe("SessionHandle", () => {
 			await expect(handle.sendPrompt("hello")).rejects.toThrow("Session is not ready");
 		});
 		it("dispatches turnStarted and resolves on turnComplete", async () => {
-			const { client, dispatched, emitAction, setSessionState } = createMockClient();
+			const { client, dispatched, dispatchChannels, emitAction, setSessionState } = createMockClient();
 			setSessionState(SESSION_URI, makeSessionState());
 			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
 
@@ -407,8 +413,8 @@ describe("SessionHandle", () => {
 			// Should have dispatched turnStarted
 			expect(dispatched).toHaveLength(1);
 			expect(dispatched[0].type).toBe(ActionType.SessionTurnStarted);
-			const startAction = dispatched[0] as { session: string; turnId: string; userMessage: { text: string } };
-			expect(startAction.session).toBe(SESSION_URI);
+			const startAction = dispatched[0] as { turnId: string; userMessage: { text: string } };
+			expect(dispatchChannels[0]).toBe(SESSION_URI);
 			expect(startAction.userMessage.text).toBe("Hello");
 
 			const turnId = startAction.turnId;
@@ -417,7 +423,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId,
 					partId: "part-1",
 					content: "Hi ",
@@ -426,7 +431,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId,
 					partId: "part-1",
 					content: "there!",
@@ -435,7 +439,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionTurnComplete,
-					session: SESSION_URI,
 					turnId,
 				}),
 			);
@@ -457,7 +460,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionToolCallStart,
-					session: SESSION_URI,
 					turnId,
 					toolCallId: "tc-1",
 					toolName: "readFile",
@@ -467,7 +469,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionToolCallStart,
-					session: SESSION_URI,
 					turnId,
 					toolCallId: "tc-2",
 					toolName: "writeFile",
@@ -477,7 +478,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionTurnComplete,
-					session: SESSION_URI,
 					turnId,
 				}),
 			);
@@ -497,7 +497,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionUsage,
-					session: SESSION_URI,
 					turnId,
 					usage: { inputTokens: 100, outputTokens: 50, model: "gpt-4" },
 				}),
@@ -505,7 +504,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionTurnComplete,
-					session: SESSION_URI,
 					turnId,
 				}),
 			);
@@ -528,7 +526,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionError,
-					session: SESSION_URI,
 					turnId,
 					error: { errorType: "error", message: "Rate limited" },
 				}),
@@ -550,7 +547,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionTurnCancelled,
-					session: SESSION_URI,
 					turnId,
 				}),
 			);
@@ -571,7 +567,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId: "different-turn",
 					partId: "part-1",
 					content: "stale data",
@@ -582,7 +577,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId,
 					partId: "part-1",
 					content: "correct",
@@ -591,7 +585,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionTurnComplete,
-					session: SESSION_URI,
 					turnId,
 				}),
 			);
@@ -662,7 +655,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId,
 					partId: "part-1",
 					content: "partial ",
@@ -691,7 +683,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId,
 					partId: "part-1",
 					content: "Hello, ",
@@ -700,7 +691,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId,
 					partId: "part-1",
 					content: "I am working on ",
@@ -709,7 +699,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId,
 					partId: "part-1",
 					content: "your request",
@@ -760,7 +749,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId,
 					partId: "part-1",
 					content: "All done!",
@@ -769,7 +757,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionTurnComplete,
-					session: SESSION_URI,
 					turnId,
 				}),
 			);
@@ -815,7 +802,7 @@ describe("SessionHandle", () => {
 
 	describe("dispatchAction", () => {
 		it("auto-injects session URI", () => {
-			const { client, dispatched } = createMockClient();
+			const { client, dispatched, dispatchChannels } = createMockClient();
 			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
 
 			handle.dispatchAction({
@@ -824,7 +811,7 @@ describe("SessionHandle", () => {
 			});
 
 			expect(dispatched).toHaveLength(1);
-			expect((dispatched[0] as { session: string }).session).toBe(SESSION_URI);
+			expect(dispatchChannels[0]).toBe(SESSION_URI);
 			expect((dispatched[0] as unknown as { model: { id: string } }).model).toEqual({ id: "claude-3" });
 		});
 
@@ -856,7 +843,6 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope({
 					type: ActionType.SessionDelta,
-					session: SESSION_URI,
 					turnId: "t1",
 					partId: "part-1",
 					content: "late",

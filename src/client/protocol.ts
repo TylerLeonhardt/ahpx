@@ -202,7 +202,16 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 		if ("method" in msg && typeof msg.method === "string") {
 			if (msg.method === "action") {
 				this.emit("action", msg.params as ActionEnvelope);
+			} else if (
+				msg.method === "root/sessionAdded" ||
+				msg.method === "root/sessionRemoved" ||
+				msg.method === "root/sessionSummaryChanged" ||
+				msg.method === "auth/required"
+			) {
+				// Top-level notification methods (AHP 0.2.0+)
+				this.emit("notification", msg.params as ProtocolNotification);
 			} else if (msg.method === "notification") {
+				// Legacy wrapper format (pre-0.2.0 compat)
 				const params = msg.params as { notification: ProtocolNotification };
 				this.emit("notification", params.notification);
 			}

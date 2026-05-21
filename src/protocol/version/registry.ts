@@ -16,7 +16,7 @@ import { NotificationType } from '../notifications.js';
  *
  * Formatted as a [SemVer](https://semver.org) `MAJOR.MINOR.PATCH` string.
  */
-export const PROTOCOL_VERSION = '0.1.0';
+export const PROTOCOL_VERSION = '0.2.0';
 
 // ─── SemVer Comparison ───────────────────────────────────────────────────────
 
@@ -93,7 +93,7 @@ export const ACTION_INTRODUCED_IN: { readonly [K in StateAction['type']]: string
   [ActionType.SessionIsReadChanged]: '0.1.0',
   [ActionType.SessionIsArchivedChanged]: '0.1.0',
   [ActionType.SessionActivityChanged]: '0.1.0',
-  [ActionType.SessionDiffsChanged]: '0.1.0',
+  [ActionType.SessionChangesetsChanged]: '0.1.0',
   [ActionType.SessionConfigChanged]: '0.1.0',
   [ActionType.SessionMetaChanged]: '0.1.0',
   [ActionType.RootTerminalsChanged]: '0.1.0',
@@ -128,10 +128,10 @@ export function isActionKnownToVersion(action: StateAction, clientVersion: strin
  * Versions are SemVer `MAJOR.MINOR.PATCH` strings (see `PROTOCOL_VERSION`).
  */
 export const NOTIFICATION_INTRODUCED_IN: { readonly [K in ProtocolNotification['type']]: string } = {
-  [NotificationType.SessionAdded]: '0.1.0',
-  [NotificationType.SessionRemoved]: '0.1.0',
-  [NotificationType.SessionSummaryChanged]: '0.1.0',
-  [NotificationType.AuthRequired]: '0.1.0',
+  [NotificationType.SessionAdded]: '0.2.0',
+  [NotificationType.SessionRemoved]: '0.2.0',
+  [NotificationType.SessionSummaryChanged]: '0.2.0',
+  [NotificationType.AuthRequired]: '0.2.0',
 };
 
 /**
