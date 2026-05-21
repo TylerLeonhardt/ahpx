@@ -329,7 +329,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			}
 
 			case "createSession": {
-				const sessionUri = params.session as string;
+				const sessionUri = (params.channel ?? params.session) as string;
 				const provider = (params.provider ?? agents[0]?.provider ?? "mock-agent") as string;
 				const model = params.model as { id: string } | undefined;
 				const workingDirectory = params.workingDirectory as string | undefined;
@@ -418,7 +418,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			}
 
 			case "disposeSession": {
-				const sessionUri = params.session as string;
+				const sessionUri = (params.channel ?? params.session) as string;
 				if (!sessions.has(sessionUri)) {
 					sendError(ws, req.id, -32001, "Session not found");
 					return;

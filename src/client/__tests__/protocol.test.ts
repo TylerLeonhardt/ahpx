@@ -72,7 +72,7 @@ describe("ProtocolLayer", () => {
 
 		it("sends workingDirectory in createSession request params", async () => {
 			const promise = protocol.request("createSession", {
-				session: "copilot:/test-session",
+				channel: "ahp-session:/test-session",
 				provider: "copilot",
 				model: { id: "gpt-4o" },
 				workingDirectory: "/tmp/my-project",
@@ -82,7 +82,7 @@ describe("ProtocolLayer", () => {
 			const sent = mock.sent[0] as Record<string, unknown>;
 			expect(sent.method).toBe("createSession");
 			const params = sent.params as Record<string, unknown>;
-			expect(params.session).toBe("copilot:/test-session");
+			expect(params.channel).toBe("ahp-session:/test-session");
 			expect(params.workingDirectory).toBe("/tmp/my-project");
 
 			mock.receive({ jsonrpc: "2.0", id: 1, result: null });
@@ -92,7 +92,7 @@ describe("ProtocolLayer", () => {
 
 		it("omits workingDirectory from createSession when not provided", async () => {
 			const promise = protocol.request("createSession", {
-				session: "copilot:/test-session",
+				channel: "ahp-session:/test-session",
 				provider: "copilot",
 			});
 
@@ -106,7 +106,7 @@ describe("ProtocolLayer", () => {
 
 		it("rejects with RpcError on error response", async () => {
 			const promise = protocol.request("createSession", {
-				session: "copilot:/test",
+				channel: "ahp-session:/test",
 			});
 
 			mock.receive({

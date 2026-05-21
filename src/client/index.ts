@@ -300,7 +300,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	): Promise<null> {
 		this.ensureConnected();
 		return this.protocol!.request("createSession", {
-			session: sessionUri,
+			channel: sessionUri,
 			provider,
 			model: model ? { id: model } : undefined,
 			workingDirectory,
@@ -335,7 +335,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	async disposeSession(sessionUri: URI): Promise<null> {
 		this.ensureConnected();
 		const result = await this.protocol!.request("disposeSession", {
-			session: sessionUri,
+			channel: sessionUri,
 		});
 		this._state.removeSession(sessionUri);
 		// Remove tracked handle if one exists (may not if using low-level API)
@@ -353,7 +353,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	): Promise<null> {
 		this.ensureConnected();
 		return this.protocol!.request("createTerminal", {
-			terminal: terminalUri,
+			channel: terminalUri,
 			claim,
 			...options,
 		});
@@ -365,7 +365,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	async disposeTerminal(terminalUri: string): Promise<null> {
 		this.ensureConnected();
 		const result = await this.protocol!.request("disposeTerminal", {
-			terminal: terminalUri,
+			channel: terminalUri,
 		});
 		this._state.removeTerminal(terminalUri);
 		return result;
@@ -407,7 +407,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	async fetchTurns(sessionUri: URI, before?: string, limit?: number): Promise<FetchTurnsResult> {
 		this.ensureConnected();
 		return this.protocol!.request("fetchTurns", {
-			session: sessionUri,
+			channel: sessionUri,
 			before,
 			limit,
 		});

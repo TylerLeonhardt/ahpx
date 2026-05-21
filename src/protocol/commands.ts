@@ -236,8 +236,8 @@ export interface SessionForkSource {
 }
 
 export interface CreateSessionParams {
-  /** Session URI (client-chosen, e.g. `copilot:/<uuid>`) */
-  session: URI;
+  /** Session channel URI (client-chosen, e.g. `ahp-session:/<uuid>`) */
+  channel: URI;
   /** Agent provider ID */
   provider?: string;
   /** Model selection (ID and optional model-specific configuration) */
@@ -279,8 +279,8 @@ export interface CreateSessionParams {
  * @version 1
  */
 export interface DisposeSessionParams {
-  /** Session URI to dispose */
-  session: URI;
+  /** Session channel URI to dispose */
+  channel: URI;
 }
 
 // ─── createTerminal ──────────────────────────────────────────────────────────
@@ -299,8 +299,8 @@ export interface DisposeSessionParams {
  * @version 1
  */
 export interface CreateTerminalParams {
-  /** Terminal URI (client-chosen) */
-  terminal: URI;
+  /** Terminal channel URI (client-chosen) */
+  channel: URI;
   /** Initial owner of the terminal */
   claim: TerminalClaim;
   /** Human-readable terminal name */
@@ -328,8 +328,8 @@ export interface CreateTerminalParams {
  * @version 1
  */
 export interface DisposeTerminalParams {
-  /** Terminal URI to dispose */
-  terminal: URI;
+  /** Terminal channel URI to dispose */
+  channel: URI;
 }
 
 // ─── listSessions ────────────────────────────────────────────────────────────
@@ -549,8 +549,8 @@ export interface ResourceListResult {
  * ```
  */
 export interface FetchTurnsParams {
-  /** Session URI */
-  session: URI;
+  /** Session channel URI */
+  channel: URI;
   /** Turn ID to fetch before (exclusive). Omit to fetch from the most recent turn. */
   before?: string;
   /** Maximum number of turns to return. Server MAY impose its own upper bound. */
