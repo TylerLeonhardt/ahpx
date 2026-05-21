@@ -8,7 +8,7 @@
  * ```ts
  * import { AhpClient } from '@tylerl0706/ahpx';
  *
- * const client = new AhpClient({ initialSubscriptions: ['agenthost:/root'] });
+ * const client = new AhpClient({ initialSubscriptions: ['ahp-root://'] });
  * const result = await client.connect('ws://localhost:8082');
  * console.log('Agents:', result.agents);
  * ```

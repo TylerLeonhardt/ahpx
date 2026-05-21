@@ -168,7 +168,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		const initParams = {
 			protocolVersions: [PROTOCOL_VERSION],
 			clientId: this._clientId,
-			initialSubscriptions: this.options.initialSubscriptions ?? ["agenthost:/root"],
+			initialSubscriptions: this.options.initialSubscriptions ?? ["ahp-root://"],
 		};
 
 		// DEBUG: Log initialize params

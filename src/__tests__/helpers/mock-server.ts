@@ -245,7 +245,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 
 	function makeRootSnapshot() {
 		return {
-			resource: "agenthost:/root",
+			resource: "ahp-root://",
 			fromSeq: serverSeq,
 			state: {
 				agents: agents.map((a) => ({
@@ -303,7 +303,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 
 				const initialSubs = (params.initialSubscriptions ?? []) as string[];
 				const snapshots = initialSubs.map((uri) => {
-					if (uri === "agenthost:/root") return makeRootSnapshot();
+					if (uri === "ahp-root://") return makeRootSnapshot();
 					const session = sessions.get(uri);
 					if (session) return makeSessionSnapshot(session);
 					return { resource: uri, fromSeq: serverSeq, state: {} };
@@ -371,7 +371,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 					return;
 				}
 
-				if (resource === "agenthost:/root") {
+				if (resource === "ahp-root://") {
 					sendResponse(ws, req.id, { snapshot: makeRootSnapshot() });
 					return;
 				}
@@ -485,7 +485,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 				clientId = params.clientId as string;
 				const subscriptions = (params.subscriptions ?? []) as string[];
 				const snapshots = subscriptions.map((uri) => {
-					if (uri === "agenthost:/root") return makeRootSnapshot();
+					if (uri === "ahp-root://") return makeRootSnapshot();
 					const session = sessions.get(uri);
 					if (session) return makeSessionSnapshot(session);
 					return { resource: uri, fromSeq: serverSeq, state: {} };

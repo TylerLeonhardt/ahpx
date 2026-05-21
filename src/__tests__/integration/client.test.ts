@@ -68,7 +68,7 @@ describe("AhpClient integration", () => {
 
 			expect(result.protocolVersion).toBe("0.1.0");
 			expect(result.snapshots).toHaveLength(1);
-			expect(result.snapshots[0].resource).toBe("agenthost:/root");
+			expect(result.snapshots[0].resource).toBe("ahp-root://");
 			expect(client.connected).toBe(true);
 		});
 

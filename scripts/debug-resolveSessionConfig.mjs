@@ -73,7 +73,7 @@ async function main() {
 	const initId = sendRequest(ws, "initialize", {
 		protocolVersions: ["0.1.0"],
 		clientId: `debug-test-${Date.now()}`,
-		initialSubscriptions: ["agenthost:/root"],
+		initialSubscriptions: ["ahp-root://"],
 	});
 	const initResp = await waitForResponse(ws, initId);
 
@@ -88,7 +88,7 @@ async function main() {
 	console.log(`  Snapshots: ${initResp.result?.snapshots?.length ?? 0}`);
 
 	// Extract available agents from root state
-	const rootSnapshot = initResp.result?.snapshots?.find((s) => s.resource === "agenthost:/root");
+	const rootSnapshot = initResp.result?.snapshots?.find((s) => s.resource === "ahp-root://");
 	const agents = rootSnapshot?.state?.agents ?? [];
 	console.log(`  Agents: ${agents.map((a) => a.provider).join(", ") || "(none)"}`);
 

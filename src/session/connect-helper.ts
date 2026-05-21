@@ -112,7 +112,7 @@ export async function withConnection(
 
 	const client = new AhpClient({
 		connectTimeout: timeout ?? (config.timeout ? config.timeout * 1000 : 10_000),
-		initialSubscriptions: ["agenthost:/root"],
+		initialSubscriptions: ["ahp-root://"],
 	});
 
 	try {

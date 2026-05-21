@@ -64,7 +64,7 @@ describe("ReconnectManager", () => {
 		});
 
 		// Run reconnect in the background
-		const promise = manager.reconnect(client as unknown as AhpClient, 5, ["agenthost:/root", "copilot:/session1"]);
+		const promise = manager.reconnect(client as unknown as AhpClient, 5, ["ahp-root://", "copilot:/session1"]);
 
 		// Advance through the backoff timer
 		await vi.advanceTimersByTimeAsync(100);
@@ -72,7 +72,7 @@ describe("ReconnectManager", () => {
 		const result = await promise;
 
 		expect(result).toBe("snapshot");
-		expect(subscribedUris).toContain("agenthost:/root");
+		expect(subscribedUris).toContain("ahp-root://");
 		expect(subscribedUris).toContain("copilot:/session1");
 		expect(cap.text()).toContain("Reconnecting (1/3)");
 		expect(cap.text()).toContain("Reconnected successfully");
@@ -88,7 +88,7 @@ describe("ReconnectManager", () => {
 			statusOut: cap.out,
 		});
 
-		const promise = manager.reconnect(client as unknown as AhpClient, 5, ["agenthost:/root"]);
+		const promise = manager.reconnect(client as unknown as AhpClient, 5, ["ahp-root://"]);
 
 		// Advance timers enough for all retries
 		for (let i = 0; i < 10; i++) {
@@ -114,7 +114,7 @@ describe("ReconnectManager", () => {
 			statusOut: cap.out,
 		});
 
-		const promise = manager.reconnect(client as unknown as AhpClient, 5, ["agenthost:/root"]);
+		const promise = manager.reconnect(client as unknown as AhpClient, 5, ["ahp-root://"]);
 
 		// Advance timers enough for all retries
 		for (let i = 0; i < 20; i++) {
@@ -139,7 +139,7 @@ describe("ReconnectManager", () => {
 			statusOut: cap.out,
 		});
 
-		const promise = manager.reconnect(client as unknown as AhpClient, 5, ["agenthost:/root"]);
+		const promise = manager.reconnect(client as unknown as AhpClient, 5, ["ahp-root://"]);
 
 		// Let first attempt start
 		await vi.advanceTimersByTimeAsync(50);

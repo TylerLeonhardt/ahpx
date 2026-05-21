@@ -395,7 +395,7 @@ program
 
 		const client = new AhpClient({
 			connectTimeout: Number.parseInt(opts.timeout, 10),
-			initialSubscriptions: ["agenthost:/root"],
+			initialSubscriptions: ["ahp-root://"],
 		});
 
 		try {
@@ -593,7 +593,7 @@ server
 
 		const client = new AhpClient({
 			connectTimeout: Number.parseInt(opts.timeout, 10),
-			initialSubscriptions: ["agenthost:/root"],
+			initialSubscriptions: ["ahp-root://"],
 		});
 
 		try {
@@ -855,7 +855,7 @@ tunnel
 
 			const client = new AhpClient({
 				connectTimeout: Number.parseInt(opts.timeout, 10),
-				initialSubscriptions: ["agenthost:/root"],
+				initialSubscriptions: ["ahp-root://"],
 			});
 
 			try {

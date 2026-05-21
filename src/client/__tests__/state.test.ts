@@ -37,7 +37,7 @@ describe("StateMirror", () => {
 		it("applies a root snapshot", () => {
 			const mirror = new StateMirror();
 			const snapshot: Snapshot = {
-				resource: "agenthost:/root",
+				resource: "ahp-root://",
 				state: {
 					agents: [
 						{

@@ -161,7 +161,7 @@ describe("ProtocolLayer", () => {
 
 	describe("notifications", () => {
 		it("sends a notification (no id)", () => {
-			protocol.notify("unsubscribe", { resource: "agenthost:/root" });
+			protocol.notify("unsubscribe", { resource: "ahp-root://" });
 
 			expect(mock.sent).toHaveLength(1);
 			const sent = mock.sent[0] as Record<string, unknown>;
