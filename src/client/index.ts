@@ -382,21 +382,23 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Subscribe to a state resource URI.
 	 */
-	async subscribe(resourceUri: URI): Promise<SubscribeResult> {
+	async subscribe(channelUri: URI): Promise<SubscribeResult> {
 		this.ensureConnected();
 		const result = await this.protocol!.request("subscribe", {
-			resource: resourceUri,
+			channel: channelUri,
 		});
-		this._state.applySnapshot(result.snapshot);
+		if (result.snapshot) {
+			this._state.applySnapshot(result.snapshot);
+		}
 		return result;
 	}
 
 	/**
-	 * Unsubscribe from a state resource URI.
+	 * Unsubscribe from a channel URI.
 	 */
-	unsubscribe(resourceUri: URI): void {
+	unsubscribe(channelUri: URI): void {
 		this.ensureConnected();
-		this.protocol!.notify("unsubscribe", { resource: resourceUri });
+		this.protocol!.notify("unsubscribe", { channel: channelUri });
 	}
 
 	/**

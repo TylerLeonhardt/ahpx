@@ -174,16 +174,18 @@ export type ReconnectResult = ReconnectReplayResult | ReconnectSnapshotResult;
  * @see {@link /specification/subscriptions | Subscriptions}
  */
 export interface SubscribeParams {
-  /** URI to subscribe to */
-  resource: URI;
+  /** Channel URI to subscribe to */
+  channel: URI;
 }
 
 /**
  * Result of the `subscribe` command.
+ *
+ * Stateful channels return a snapshot; stateless channels return `{}`.
  */
 export interface SubscribeResult {
-  /** Snapshot of the subscribed resource */
-  snapshot: Snapshot;
+  /** Snapshot of the subscribed channel (absent for stateless channels) */
+  snapshot?: Snapshot;
 }
 
 // ─── createSession ───────────────────────────────────────────────────────────
@@ -578,8 +580,8 @@ export interface FetchTurnsResult {
  * @see {@link /specification/subscriptions | Subscriptions}
  */
 export interface UnsubscribeParams {
-  /** URI to unsubscribe from */
-  resource: URI;
+  /** Channel URI to unsubscribe from */
+  channel: URI;
 }
 
 // ─── dispatchAction ──────────────────────────────────────────────────────────

@@ -364,19 +364,19 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			}
 
 			case "subscribe": {
-				const resource = params.resource as string;
+				const channel = params.channel as string;
 
 				if (scenario.onSubscribe) {
 					sendResponse(ws, req.id, scenario.onSubscribe(params));
 					return;
 				}
 
-				if (resource === "ahp-root://") {
+				if (channel === "ahp-root://") {
 					sendResponse(ws, req.id, { snapshot: makeRootSnapshot() });
 					return;
 				}
 
-				const session = sessions.get(resource);
+				const session = sessions.get(channel);
 				if (session) {
 					sendResponse(ws, req.id, {
 						snapshot: makeSessionSnapshot(session),
@@ -384,14 +384,14 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 					return;
 				}
 
-				// Unknown resource — return empty snapshot
+				// Unknown channel — return empty snapshot
 				sendResponse(ws, req.id, {
 					snapshot: {
-						resource,
+						resource: channel,
 						fromSeq: serverSeq,
 						state: {
 							summary: {
-								resource,
+								resource: channel,
 								provider: "mock-agent",
 								title: "Unknown Session",
 								status: "idle",
