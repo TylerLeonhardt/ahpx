@@ -149,7 +149,7 @@ export type {
   SessionIsReadChangedAction,
   SessionIsArchivedChangedAction,
   SessionActivityChangedAction,
-  SessionDiffsChangedAction,
+  SessionChangesetsChangedAction,
   SessionConfigChangedAction,
   StateAction,
   RootTerminalsChangedAction,

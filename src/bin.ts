@@ -46,7 +46,7 @@ import type { OutputFormat, OutputFormatter } from "./output/index.js";
 import { PermissionHandler } from "./permissions/index.js";
 import type { PermissionMode } from "./permissions/index.js";
 import { TurnController } from "./prompt/index.js";
-import { ActionType, type ActionEnvelope } from "./protocol/actions.js";
+import { type ActionEnvelope, ActionType } from "./protocol/actions.js";
 import { ResponsePartKind, SessionStatus } from "./protocol/state.js";
 import type { SessionActiveClient, Turn } from "./protocol/state.js";
 import { SessionPersistence, SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";

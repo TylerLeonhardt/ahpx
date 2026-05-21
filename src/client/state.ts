@@ -94,10 +94,7 @@ export class StateMirror {
 					if (env.serverSeq > snapshot.fromSeq) {
 						const current = this.sessions.get(snapshot.resource);
 						if (current) {
-							this.sessions.set(
-								snapshot.resource,
-								sessionReducer(current, env.action as SessionAction),
-							);
+							this.sessions.set(snapshot.resource, sessionReducer(current, env.action as SessionAction));
 						}
 					}
 				}
@@ -114,10 +111,7 @@ export class StateMirror {
 					if (env.serverSeq > snapshot.fromSeq) {
 						const current = this.terminals.get(snapshot.resource);
 						if (current) {
-							this.terminals.set(
-								snapshot.resource,
-								terminalReducer(current, env.action as TerminalAction),
-							);
+							this.terminals.set(snapshot.resource, terminalReducer(current, env.action as TerminalAction));
 						}
 					}
 				}

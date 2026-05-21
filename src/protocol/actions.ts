@@ -78,7 +78,7 @@ export const enum ActionType {
   SessionIsReadChanged = 'session/isReadChanged',
   SessionIsArchivedChanged = 'session/isArchivedChanged',
   SessionActivityChanged = 'session/activityChanged',
-  SessionDiffsChanged = 'session/diffsChanged',
+  SessionChangesetsChanged = 'session/changesetsChanged',
   SessionConfigChanged = 'session/configChanged',
   SessionMetaChanged = 'session/metaChanged',
   RootTerminalsChanged = 'root/terminalsChanged',
@@ -613,18 +613,18 @@ export interface SessionActivityChangedAction {
 }
 
 /**
- * The file diffs for the session changed.
+ * The changesets for the session changed.
  *
- * Full-replacement semantics: the `diffs` array replaces the previous
- * `summary.diffs` entirely.
+ * Full-replacement semantics: the `changesets` array replaces the previous
+ * set entirely.
  *
  * @category Session Actions
- * @version 1
+ * @version 2
  */
-export interface SessionDiffsChangedAction {
-  type: ActionType.SessionDiffsChanged;
-  /** Updated file diffs for the session */
-  diffs: FileEdit[];
+export interface SessionChangesetsChangedAction {
+  type: ActionType.SessionChangesetsChanged;
+  /** Updated changesets for the session */
+  changesets: FileEdit[];
 }
 
 /**
@@ -1152,7 +1152,7 @@ export type StateAction =
   | SessionIsReadChangedAction
   | SessionIsArchivedChangedAction
   | SessionActivityChangedAction
-  | SessionDiffsChangedAction
+  | SessionChangesetsChangedAction
   | SessionConfigChangedAction
   | SessionMetaChangedAction
   | TerminalDataAction

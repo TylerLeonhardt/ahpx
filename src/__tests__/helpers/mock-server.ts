@@ -168,8 +168,8 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			const channel = (action.session ?? action.terminal ?? "ahp-root://") as string;
 			// Remove session/terminal from action payload (channel-based model)
 			const cleanAction = { ...action };
-			delete cleanAction.session;
-			delete cleanAction.terminal;
+			cleanAction.session = undefined;
+			cleanAction.terminal = undefined;
 			const envelope: ActionEnvelope = {
 				channel,
 				action: cleanAction,

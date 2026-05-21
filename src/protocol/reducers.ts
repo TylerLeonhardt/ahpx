@@ -584,10 +584,10 @@ export function sessionReducer(state: SessionState, action: SessionAction, log?:
         summary: { ...state.summary, activity: action.activity },
       };
 
-    case ActionType.SessionDiffsChanged:
+    case ActionType.SessionChangesetsChanged:
       return {
         ...state,
-        summary: { ...state.summary, diffs: action.diffs },
+        summary: { ...state.summary, diffs: action.changesets },
       };
 
     case ActionType.SessionConfigChanged:

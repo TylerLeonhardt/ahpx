@@ -217,7 +217,7 @@ export type {
 	SessionIsArchivedChangedAction,
 	SessionActivityChangedAction,
 	SessionConfigChangedAction,
-	SessionDiffsChangedAction,
+	SessionChangesetsChangedAction,
 	RootTerminalsChangedAction,
 	RootConfigChangedAction,
 	TerminalAction,

@@ -42,7 +42,7 @@ import type {
   SessionIsReadChangedAction,
   SessionIsArchivedChangedAction,
   SessionActivityChangedAction,
-  SessionDiffsChangedAction,
+  SessionChangesetsChangedAction,
   SessionConfigChangedAction,
   SessionMetaChangedAction,
   TerminalDataAction,
@@ -119,7 +119,7 @@ export type SessionAction =
   | SessionIsReadChangedAction
   | SessionIsArchivedChangedAction
   | SessionActivityChangedAction
-  | SessionDiffsChangedAction
+  | SessionChangesetsChangedAction
   | SessionConfigChangedAction
   | SessionMetaChangedAction
 ;
@@ -166,7 +166,7 @@ export type ServerSessionAction =
   | SessionCustomizationsChangedAction
   | SessionCustomizationUpdatedAction
   | SessionActivityChangedAction
-  | SessionDiffsChangedAction
+  | SessionChangesetsChangedAction
   | SessionMetaChangedAction
 ;
 
@@ -250,7 +250,7 @@ export const IS_CLIENT_DISPATCHABLE: { readonly [K in StateAction['type']]: bool
   [ActionType.SessionIsReadChanged]: true,
   [ActionType.SessionIsArchivedChanged]: true,
   [ActionType.SessionActivityChanged]: false,
-  [ActionType.SessionDiffsChanged]: false,
+  [ActionType.SessionChangesetsChanged]: false,
   [ActionType.SessionConfigChanged]: true,
   [ActionType.SessionMetaChanged]: false,
   [ActionType.TerminalData]: false,
