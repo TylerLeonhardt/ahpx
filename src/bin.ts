@@ -2478,7 +2478,7 @@ async function createTempSession(
 		throw new UsageError("No agent provider available. Specify one with --provider.");
 	}
 	const sessionId = randomUUID();
-	const sessionUri = `ahp-session:/${sessionId}`;
+	const sessionUri = `${provider}:/${sessionId}`;
 	await client.createSession(
 		sessionUri,
 		provider,
@@ -2566,7 +2566,7 @@ async function resolveOrCreateSession(
 		throw new UsageError("No agent provider available. Specify one with --provider.");
 	}
 	const sessionId = randomUUID();
-	const sessionUri = `ahp-session:/${sessionId}`;
+	const sessionUri = `${provider}:/${sessionId}`;
 
 	const spinner = startSpinner(`Creating session on ${serverInfo.name}...`, spinnersEnabled(globalOpts));
 	try {

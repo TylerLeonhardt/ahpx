@@ -127,7 +127,7 @@ describe("AhpClient integration", () => {
 			const handle = await client.openSession({ provider: "mock-agent" });
 
 			expect(handle).toBeDefined();
-			expect(handle.uri).toContain("ahp-session:/");
+			expect(handle.uri).toContain("mock-agent:/");
 			expect(handle.isReady).toBe(true);
 		});
 
