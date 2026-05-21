@@ -78,10 +78,10 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 
 		// Filter client actions to only this session's events
 		this._onAction = (envelope: ActionEnvelope) => {
-			const action = envelope.action;
-			if (!("session" in action) || (action as { session: URI }).session !== this.uri) {
+			if (envelope.channel !== this.uri) {
 				return;
 			}
+			const action = envelope.action;
 			this.emit("action", envelope);
 
 			// Emit higher-level events
@@ -326,9 +326,8 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 			this.on("error", onError);
 
 			// Dispatch turn start
-			this.client.dispatchAction({
+			this.client.dispatchAction(this.uri, {
 				type: ActionType.SessionTurnStarted,
-				session: this.uri,
 				turnId,
 				userMessage: {
 					text,
@@ -345,9 +344,8 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 		this.ensureNotDisposed();
 		if (!this._activeTurnId) return;
 
-		this.client.dispatchAction({
+		this.client.dispatchAction(this.uri, {
 			type: ActionType.SessionTurnCancelled,
-			session: this.uri,
 			turnId: this._activeTurnId,
 		});
 	}
@@ -362,10 +360,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 	 */
 	dispatchAction(action: Record<string, unknown> & { type: string }): void {
 		this.ensureNotDisposed();
-		this.client.dispatchAction({
-			...action,
-			session: this.uri,
-		} as StateAction);
+		this.client.dispatchAction(this.uri, action as StateAction);
 	}
 
 	private ensureNotDisposed(): void {

@@ -464,10 +464,11 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Dispatch a client-originated action to the server.
 	 */
-	dispatchAction(action: StateAction): void {
+	dispatchAction(channel: URI, action: StateAction): void {
 		this.ensureConnected();
 		this._clientSeq++;
 		this.protocol!.notify("dispatchAction", {
+			channel,
 			clientSeq: this._clientSeq,
 			action,
 		});

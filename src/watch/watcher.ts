@@ -165,7 +165,7 @@ export class SessionWatcher {
 	private handleAction(envelope: ActionEnvelope): void {
 		const action = envelope.action;
 		// Only handle actions for our session
-		if (!("session" in action) || (action as { session: URI }).session !== this.sessionUri) {
+		if (envelope.channel !== this.sessionUri) {
 			return;
 		}
 

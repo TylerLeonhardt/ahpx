@@ -43,6 +43,7 @@ type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification;
 
 /** Action envelope sent from server to client */
 interface ActionEnvelope {
+	channel: string;
 	action: Record<string, unknown>;
 	serverSeq: number;
 	origin?: { clientId: string; clientSeq: number };
@@ -163,8 +164,15 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 	const context: MockServerContext = {
 		sendAction(action, origin) {
 			if (!activeWs || activeWs.readyState !== WebSocket.OPEN) return;
+			// Derive channel from action's session/terminal field, or default to root
+			const channel = (action.session ?? action.terminal ?? "ahp-root://") as string;
+			// Remove session/terminal from action payload (channel-based model)
+			const cleanAction = { ...action };
+			delete cleanAction.session;
+			delete cleanAction.terminal;
 			const envelope: ActionEnvelope = {
-				action,
+				channel,
+				action: cleanAction,
 				serverSeq: nextSeq(),
 				origin,
 			};
@@ -514,10 +522,22 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			const params = (notification.params ?? {}) as Record<string, unknown>;
 			const action = params.action as Record<string, unknown>;
 			const clientSeqVal = params.clientSeq as number;
+			const channel = params.channel as string;
+
+			// Inject channel back into action as session/terminal for scenario handlers
+			// (scenario handlers expect the old-style action with session/terminal)
+			const actionForScenario = { ...action };
+			if (channel && !actionForScenario.session && !actionForScenario.terminal) {
+				if (typeof action.type === "string" && action.type.startsWith("terminal/")) {
+					actionForScenario.terminal = channel;
+				} else if (typeof action.type === "string" && action.type.startsWith("session/")) {
+					actionForScenario.session = channel;
+				}
+			}
 
 			// Echo the action back as an ActionEnvelope (server acknowledges)
 			if (clientId) {
-				context.sendAction(action, {
+				context.sendAction(actionForScenario, {
 					clientId,
 					clientSeq: clientSeqVal,
 				});
@@ -525,7 +545,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 
 			// Delegate to scenario
 			if (scenario.onDispatchAction) {
-				scenario.onDispatchAction(params, context);
+				scenario.onDispatchAction({ ...params, action: actionForScenario }, context);
 			}
 		}
 		// unsubscribe — no-op for mock

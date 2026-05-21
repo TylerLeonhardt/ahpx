@@ -28,8 +28,12 @@ function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 	};
 }
 
-function envelope(action: ActionEnvelope["action"], seq: number): ActionEnvelope {
-	return { action, serverSeq: seq, origin: undefined };
+function envelope(
+	action: ActionEnvelope["action"],
+	seq: number,
+	channel = action.type.startsWith("root/") ? "ahp-root://" : "copilot:/s1",
+): ActionEnvelope {
+	return { channel, action, serverSeq: seq, origin: undefined };
 }
 
 describe("StateMirror", () => {
@@ -132,7 +136,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionReady,
-						session: "copilot:/s1",
 					},
 					1,
 				),
@@ -156,7 +159,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionTurnStarted,
-						session: "copilot:/s1",
 						turnId: "t1",
 						userMessage: { text: "Hello" },
 					},
@@ -169,7 +171,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionDelta,
-						session: "copilot:/s1",
 						turnId: "t1",
 						partId: "part-1",
 						content: "First words",
@@ -195,7 +196,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionTurnStarted,
-						session: "copilot:/s1",
 						turnId: "t1",
 						userMessage: { text: "Hello" },
 					},
@@ -208,7 +208,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionResponsePart,
-						session: "copilot:/s1",
 						turnId: "t1",
 						part: { kind: ResponsePartKind.Markdown, id: "part-1", content: "" },
 					},
@@ -224,7 +223,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionDelta,
-						session: "copilot:/s1",
 						turnId: "t1",
 						partId: "part-1",
 						content: "Hello world",
@@ -254,7 +252,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionTurnStarted,
-						session: "copilot:/s1",
 						turnId: "t1",
 						userMessage: { text: "Hello" },
 					},
@@ -272,7 +269,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionResponsePart,
-						session: "copilot:/s1",
 						turnId: "t1",
 						part: { kind: ResponsePartKind.Markdown, id: "part-1", content: "" },
 					},
@@ -285,7 +281,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionDelta,
-						session: "copilot:/s1",
 						turnId: "t1",
 						partId: "part-1",
 						content: "Hi there!",
@@ -322,7 +317,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionTurnComplete,
-						session: "copilot:/s1",
 						turnId: "t1",
 					},
 					3,
@@ -351,7 +345,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionTitleChanged,
-						session: "copilot:/s1",
 						title: "New Title",
 					},
 					1,
@@ -382,7 +375,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionToolCallStart,
-						session: "copilot:/s1",
 						turnId: "t1",
 						toolCallId: "tc1",
 						toolName: "readFile",
@@ -415,7 +407,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Steering,
 							id: "s1",
 							userMessage: { text: "steer this" },
@@ -442,7 +433,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q1",
 							userMessage: { text: "queued msg" },
@@ -468,7 +458,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q1",
 							userMessage: { text: "first" },
@@ -480,7 +469,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q2",
 							userMessage: { text: "second" },
@@ -505,7 +493,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q1",
 							userMessage: { text: "original" },
@@ -517,7 +504,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q1",
 							userMessage: { text: "updated" },
@@ -543,7 +529,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Steering,
 							id: "s1",
 							userMessage: { text: "steer" },
@@ -555,7 +540,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageRemoved,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Steering,
 							id: "s1",
 						},
@@ -579,7 +563,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q1",
 							userMessage: { text: "first" },
@@ -591,7 +574,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q2",
 							userMessage: { text: "second" },
@@ -603,7 +585,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageRemoved,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q1",
 						},
@@ -628,7 +609,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Steering,
 							id: "s1",
 							userMessage: { text: "steer" },
@@ -640,7 +620,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageRemoved,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Steering,
 							id: "s2",
 						},
@@ -664,7 +643,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q1",
 							userMessage: { text: "first" },
@@ -676,7 +654,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q2",
 							userMessage: { text: "second" },
@@ -688,7 +665,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q3",
 							userMessage: { text: "third" },
@@ -700,7 +676,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionQueuedMessagesReordered,
-							session: "copilot:/s1",
 							order: ["q3", "q1", "q2"],
 						},
 						4,
@@ -723,7 +698,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q1",
 							userMessage: { text: "first" },
@@ -735,7 +709,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q2",
 							userMessage: { text: "second" },
@@ -747,7 +720,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionPendingMessageSet,
-							session: "copilot:/s1",
 							kind: PendingMessageKind.Queued,
 							id: "q3",
 							userMessage: { text: "third" },
@@ -759,7 +731,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionQueuedMessagesReordered,
-							session: "copilot:/s1",
 							order: ["q2"],
 						},
 						4,
@@ -784,7 +755,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationsChanged,
-							session: "copilot:/s1",
 							customizations: [
 								{ customization: { uri: "https://example.com/plugin", displayName: "Test Plugin" }, enabled: true },
 							],
@@ -810,7 +780,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationsChanged,
-							session: "copilot:/s1",
 							customizations: [{ customization: { uri: "https://example.com/a", displayName: "A" }, enabled: true }],
 						},
 						1,
@@ -820,7 +789,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationsChanged,
-							session: "copilot:/s1",
 							customizations: [
 								{ customization: { uri: "https://example.com/b", displayName: "B" }, enabled: false },
 								{ customization: { uri: "https://example.com/c", displayName: "C" }, enabled: true },
@@ -848,7 +816,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationsChanged,
-							session: "copilot:/s1",
 							customizations: [
 								{ customization: { uri: "https://example.com/plugin", displayName: "Test Plugin" }, enabled: true },
 							],
@@ -860,7 +827,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationToggled,
-							session: "copilot:/s1",
 							uri: "https://example.com/plugin",
 							enabled: false,
 						},
@@ -884,7 +850,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationsChanged,
-							session: "copilot:/s1",
 							customizations: [
 								{ customization: { uri: "https://example.com/plugin", displayName: "Test Plugin" }, enabled: true },
 							],
@@ -896,7 +861,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationToggled,
-							session: "copilot:/s1",
 							uri: "https://example.com/unknown",
 							enabled: false,
 						},
@@ -920,7 +884,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationToggled,
-							session: "copilot:/s1",
 							uri: "https://example.com/plugin",
 							enabled: false,
 						},
@@ -964,7 +927,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionTruncated,
-							session: "copilot:/s1",
 						},
 						1,
 					),
@@ -1013,7 +975,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionTruncated,
-							session: "copilot:/s1",
 							turnId: "t2",
 						},
 						1,
@@ -1055,7 +1016,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionTruncated,
-							session: "copilot:/s1",
 						},
 						1,
 					),
@@ -1096,7 +1056,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionTruncated,
-							session: "copilot:/s1",
 							turnId: "nonexistent",
 						},
 						1,
@@ -1139,7 +1098,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionToolCallReady,
-							session: "copilot:/s1",
 							turnId: "t1",
 							toolCallId: "tc1",
 							confirmed: undefined,
@@ -1178,7 +1136,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionTurnStarted,
-							session: "copilot:/s1",
 							turnId: "t1",
 							userMessage: { text: "steer" },
 							queuedMessageId: "s1",
@@ -1209,7 +1166,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionTurnStarted,
-							session: "copilot:/s1",
 							turnId: "t1",
 							userMessage: { text: "first" },
 							queuedMessageId: "q1",
@@ -1239,7 +1195,6 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionTurnStarted,
-							session: "copilot:/s1",
 							turnId: "t1",
 							userMessage: { text: "hello" },
 						},
@@ -1263,7 +1218,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionReady,
-						session: "copilot:/s1",
 					},
 					2,
 				),
@@ -1293,7 +1247,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionTurnStarted,
-						session: "copilot:/s1",
 						turnId: "t1",
 						userMessage: { text: "Hello" },
 					},
@@ -1304,7 +1257,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionResponsePart,
-						session: "copilot:/s1",
 						turnId: "t1",
 						part: { kind: ResponsePartKind.Markdown, id: "part-1", content: "" },
 					},
@@ -1315,7 +1267,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionDelta,
-						session: "copilot:/s1",
 						turnId: "t1",
 						partId: "part-1",
 						content: "Hello world",
@@ -1349,7 +1300,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionReady,
-						session: "copilot:/s1",
 					},
 					1,
 				),
@@ -1375,7 +1325,6 @@ describe("StateMirror", () => {
 				envelope(
 					{
 						type: ActionType.SessionReady,
-						session: "copilot:/s1",
 					},
 					2,
 				),

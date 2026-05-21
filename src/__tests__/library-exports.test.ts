@@ -329,10 +329,10 @@ describe("library exports", () => {
 
 		it("exports action types", () => {
 			const envelope: ahpx.ActionEnvelope = {
+				channel: "copilot:/test",
 				serverSeq: 1,
 				action: {
 					type: ahpx.ActionType.SessionDelta,
-					session: "copilot:/test",
 					turnId: "t1",
 					partId: "p1",
 					content: "hello",

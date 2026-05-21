@@ -598,6 +598,8 @@ export interface UnsubscribeParams {
  * @see {@link /guide/actions | Actions} for the full list of client-dispatchable actions.
  */
 export interface DispatchActionParams {
+  /** Channel URI to dispatch the action to */
+  channel: URI;
   /** Client sequence number */
   clientSeq: number;
   /** The action to dispatch */

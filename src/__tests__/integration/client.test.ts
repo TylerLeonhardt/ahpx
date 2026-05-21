@@ -259,15 +259,13 @@ describe("AhpClient integration", () => {
 			client.on("action", (envelope) => {
 				const action = envelope.action as unknown as {
 					type: string;
-					session?: string;
 					turnId?: string;
 					toolCallId?: string;
 					confirmed?: string;
 				};
 				if (action.type === "session/toolCallReady" && !action.confirmed) {
-					client.dispatchAction({
+					client.dispatchAction(envelope.channel, {
 						type: ActionType.SessionToolCallConfirmed,
-						session: action.session!,
 						turnId: action.turnId!,
 						toolCallId: action.toolCallId!,
 						approved: true,
@@ -293,15 +291,13 @@ describe("AhpClient integration", () => {
 			client.on("action", (envelope) => {
 				const action = envelope.action as unknown as {
 					type: string;
-					session?: string;
 					turnId?: string;
 					toolCallId?: string;
 					confirmed?: string;
 				};
 				if (action.type === "session/toolCallReady" && !action.confirmed) {
-					client.dispatchAction({
+					client.dispatchAction(envelope.channel, {
 						type: ActionType.SessionToolCallConfirmed,
-						session: action.session!,
 						turnId: action.turnId!,
 						toolCallId: action.toolCallId!,
 						approved: false,
@@ -555,7 +551,7 @@ describe("AhpClient integration", () => {
 			client = new AhpClient();
 
 			// Not connected — should throw
-			expect(() => client.dispatchAction({ type: "test" } as never)).toThrow("Client is not connected");
+			expect(() => client.dispatchAction("ahp-root://", { type: "test" } as never)).toThrow("Client is not connected");
 
 			await expect(client.listSessions()).rejects.toThrow("Client is not connected");
 		});

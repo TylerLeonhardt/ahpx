@@ -34,9 +34,8 @@ export class ActiveClientManager {
 			tools,
 		};
 
-		this.client.dispatchAction({
+		this.client.dispatchAction(sessionUri, {
 			type: ActionType.SessionActiveClientChanged,
-			session: sessionUri,
 			activeClient,
 		});
 
@@ -48,9 +47,8 @@ export class ActiveClientManager {
 	 * Dispatches `session/activeClientChanged` with `null`.
 	 */
 	async releaseActiveClient(sessionUri: URI): Promise<void> {
-		this.client.dispatchAction({
+		this.client.dispatchAction(sessionUri, {
 			type: ActionType.SessionActiveClientChanged,
-			session: sessionUri,
 			activeClient: null,
 		});
 
@@ -72,9 +70,8 @@ export class ActiveClientManager {
 	 * Only valid when this client is the active client.
 	 */
 	async registerTools(sessionUri: URI, tools: ToolDefinition[]): Promise<void> {
-		this.client.dispatchAction({
+		this.client.dispatchAction(sessionUri, {
 			type: ActionType.SessionActiveClientToolsChanged,
-			session: sessionUri,
 			tools,
 		});
 	}
@@ -89,9 +86,8 @@ export class ActiveClientManager {
 		toolCallId: string,
 		result: { success: boolean; pastTenseMessage: string; content?: Array<{ type: "text"; text: string }> },
 	): void {
-		this.client.dispatchAction({
+		this.client.dispatchAction(sessionUri, {
 			type: ActionType.SessionToolCallComplete,
-			session: sessionUri,
 			turnId,
 			toolCallId,
 			result: {
