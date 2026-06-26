@@ -31,7 +31,7 @@ import type {
 	SubscribeResult,
 } from "@microsoft/agent-host-protocol";
 import type { SessionActiveClient, TerminalClaim, URI } from "@microsoft/agent-host-protocol";
-import { PROTOCOL_VERSION } from "@microsoft/agent-host-protocol";
+import { SUPPORTED_PROTOCOL_VERSIONS } from "@microsoft/agent-host-protocol";
 import type { ProtocolNotification } from "../notifications.js";
 import { FileServingHandler } from "./file-serving.js";
 import { ProtocolLayer, type ProtocolLayerOptions } from "./protocol.js";
@@ -167,7 +167,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		// Send initialize
 		const initParams = {
 			channel: "ahp-root://" as const,
-			protocolVersions: [PROTOCOL_VERSION],
+			protocolVersions: [...SUPPORTED_PROTOCOL_VERSIONS],
 			clientId: this._clientId,
 			initialSubscriptions: this.options.initialSubscriptions ?? ["ahp-root://"],
 		};

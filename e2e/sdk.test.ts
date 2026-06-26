@@ -51,9 +51,9 @@ function autoApproveToolCalls(handle: SessionHandle): void {
 		const { action } = envelope;
 
 		// Approve tool calls that need user confirmation
-		if (action.type === ActionType.SessionToolCallReady && !action.confirmed) {
+		if (action.type === ActionType.ChatToolCallReady && !action.confirmed) {
 			handle.dispatchAction({
-				type: ActionType.SessionToolCallConfirmed,
+				type: ActionType.ChatToolCallConfirmed,
 				turnId: action.turnId,
 				toolCallId: action.toolCallId,
 				approved: true,
@@ -62,9 +62,9 @@ function autoApproveToolCalls(handle: SessionHandle): void {
 		}
 
 		// Approve tool results that need confirmation
-		if (action.type === ActionType.SessionToolCallComplete && action.requiresResultConfirmation) {
+		if (action.type === ActionType.ChatToolCallComplete && action.requiresResultConfirmation) {
 			handle.dispatchAction({
-				type: ActionType.SessionToolCallResultConfirmed,
+				type: ActionType.ChatToolCallResultConfirmed,
 				turnId: action.turnId,
 				toolCallId: action.toolCallId,
 				approved: true,
@@ -144,7 +144,7 @@ describe.runIf(serverAvailable)("SDK E2E: Live AHP Server", () => {
 		const steeringId = randomUUID();
 		let steeringActionObserved = false;
 		const steeringObserver = (envelope: IActionEnvelope) => {
-			if (envelope.action.type === ActionType.SessionPendingMessageSet && envelope.action.id === steeringId) {
+			if (envelope.action.type === ActionType.ChatPendingMessageSet && envelope.action.id === steeringId) {
 				steeringActionObserved = true;
 			}
 		};
@@ -156,9 +156,9 @@ describe.runIf(serverAvailable)("SDK E2E: Live AHP Server", () => {
 		});
 
 		// Wait until the first delta arrives, proving the turn is actively streaming
-		await waitForAction(session, ActionType.SessionDelta, 30_000);
+		await waitForAction(session, ActionType.ChatDelta, 30_000);
 		session.dispatchAction({
-			type: ActionType.SessionPendingMessageSet,
+			type: ActionType.ChatPendingMessageSet,
 			kind: PendingMessageKind.Steering,
 			id: steeringId,
 			userMessage: { text: "Actually, make it about dogs instead." },
@@ -193,7 +193,7 @@ describe.runIf(serverAvailable)("SDK E2E: Live AHP Server", () => {
 		const observations: Array<{ hasActiveTurn: boolean; responsePartCount: number }> = [];
 
 		const observer = (envelope: IActionEnvelope) => {
-			if (envelope.action.type === ActionType.SessionDelta) {
+			if (envelope.action.type === ActionType.ChatDelta) {
 				const state = session.state;
 				const activeTurn = session.activeTurn;
 
