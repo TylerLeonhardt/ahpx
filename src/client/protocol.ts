@@ -6,9 +6,9 @@
  */
 
 import { EventEmitter } from "node:events";
-import type { ActionEnvelope } from "../protocol/actions.js";
-import type { CommandMap, JsonRpcErrorResponse } from "../protocol/messages.js";
-import type { ProtocolNotification } from "../protocol/notifications.js";
+import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
+import type { CommandMap, JsonRpcErrorResponse } from "@microsoft/agent-host-protocol";
+import type { ProtocolNotification } from "../notifications.js";
 import type { Transport } from "./transport.js";
 
 /** Error thrown when a JSON-RPC request receives an error response. */
@@ -208,8 +208,11 @@ export class ProtocolLayer extends EventEmitter<ProtocolLayerEvents> {
 				msg.method === "root/sessionSummaryChanged" ||
 				msg.method === "auth/required"
 			) {
-				// Top-level notification methods (AHP 0.2.0+)
-				this.emit("notification", msg.params as ProtocolNotification);
+				// Top-level notification methods (AHP 0.2.0+). The official param
+				// types carry no discriminator, so tag them with the method name
+				// (matching `NotificationType`) for downstream `switch` handling.
+				const params = { ...(msg.params as Record<string, unknown>), type: msg.method };
+				this.emit("notification", params as unknown as ProtocolNotification);
 			} else if (msg.method === "notification") {
 				// Legacy wrapper format (pre-0.2.0 compat)
 				const params = msg.params as { notification: ProtocolNotification };

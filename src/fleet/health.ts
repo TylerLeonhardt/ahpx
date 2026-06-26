@@ -5,8 +5,8 @@
  * Stateless per-check — no long-lived connections.
  */
 
+import type { InitializeResult } from "@microsoft/agent-host-protocol";
 import { AhpClient } from "../client/index.js";
-import type { InitializeResult } from "../protocol/commands.js";
 
 export interface ServerHealth {
 	name: string;

@@ -16,9 +16,9 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { ProtectedResourceMetadata } from "@microsoft/agent-host-protocol";
 import type { AhpClient } from "../client/index.js";
 import { createLogger } from "../logger.js";
-import type { ProtectedResourceMetadata } from "../protocol/state.js";
 
 const log = createLogger("auth");
 

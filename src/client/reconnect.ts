@@ -6,8 +6,8 @@
  * and `snapshot` (reset state) recovery modes.
  */
 
+import type { URI } from "@microsoft/agent-host-protocol";
 import pc from "picocolors";
-import type { URI } from "../protocol/state.js";
 import type { AhpClient } from "./index.js";
 
 export interface ReconnectOptions {

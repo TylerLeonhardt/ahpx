@@ -6,25 +6,25 @@
  * streaming state) and clean exit on session dispose or SIGINT.
  */
 
+import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
+import { ActionType } from "@microsoft/agent-host-protocol";
+import type {
+	ChatDeltaAction,
+	ChatErrorAction,
+	ChatReasoningAction,
+	ChatToolCallCompleteAction,
+	ChatToolCallDeltaAction,
+	ChatToolCallReadyAction,
+	ChatToolCallStartAction,
+	ChatUsageAction,
+	SessionTitleChangedAction,
+} from "@microsoft/agent-host-protocol";
+import type { ChatState, URI } from "@microsoft/agent-host-protocol";
+import { ResponsePartKind, ToolCallStatus } from "@microsoft/agent-host-protocol";
 import pc from "picocolors";
 import type { AhpClient } from "../client/index.js";
 import type { OutputFormatter } from "../output/format.js";
 import type { ToolCallInfo } from "../output/renderer.js";
-import type { ActionEnvelope } from "../protocol/actions.js";
-import { ActionType } from "../protocol/actions.js";
-import type {
-	SessionDeltaAction,
-	SessionErrorAction,
-	SessionReasoningAction,
-	SessionTitleChangedAction,
-	SessionToolCallCompleteAction,
-	SessionToolCallDeltaAction,
-	SessionToolCallReadyAction,
-	SessionToolCallStartAction,
-	SessionUsageAction,
-} from "../protocol/actions.js";
-import type { SessionState, URI } from "../protocol/state.js";
-import { ResponsePartKind, ToolCallStatus } from "../protocol/state.js";
 
 /** Writable stream interface for status output. */
 export interface StatusOutput {
@@ -94,8 +94,8 @@ export class SessionWatcher {
 				throw new Error(`Session ${this.sessionUri} not found after subscribe`);
 			}
 
-			// Show current state if there's an active turn
-			this.showCurrentState(sessionState);
+			// Show current state if there's an active turn (turns live on the chat)
+			this.showCurrentState(this.client.state.getChat(this.sessionUri));
 		} catch (err) {
 			this.cleanup();
 			throw err;
@@ -114,8 +114,8 @@ export class SessionWatcher {
 	/**
 	 * Show the current in-progress state when joining mid-turn.
 	 */
-	private showCurrentState(state: SessionState): void {
-		const turn = state.activeTurn;
+	private showCurrentState(state: ChatState | undefined): void {
+		const turn = state?.activeTurn;
 		if (!turn) return;
 
 		this.statusOut.write(pc.dim("[watch] Joining turn in progress...\n"));
@@ -170,39 +170,39 @@ export class SessionWatcher {
 		}
 
 		switch (action.type) {
-			case ActionType.SessionDelta: {
-				const a = action as SessionDeltaAction;
+			case ActionType.ChatDelta: {
+				const a = action as ChatDeltaAction;
 				this.formatter.onDelta(a.content);
 				break;
 			}
 
-			case ActionType.SessionReasoning: {
-				const a = action as SessionReasoningAction;
+			case ActionType.ChatReasoning: {
+				const a = action as ChatReasoningAction;
 				this.formatter.onReasoning(a.content);
 				break;
 			}
 
-			case ActionType.SessionTurnStarted: {
+			case ActionType.ChatTurnStarted: {
 				// Show who started the turn
 				const origin = this.getOriginLabel(envelope);
 				this.statusOut.write(pc.dim(`[watch] Turn started${origin}\n`));
 				break;
 			}
 
-			case ActionType.SessionToolCallStart: {
-				const a = action as SessionToolCallStartAction;
+			case ActionType.ChatToolCallStart: {
+				const a = action as ChatToolCallStartAction;
 				this.formatter.onToolCallStart(a.toolCallId, a.displayName);
 				break;
 			}
 
-			case ActionType.SessionToolCallDelta: {
-				const a = action as SessionToolCallDeltaAction;
+			case ActionType.ChatToolCallDelta: {
+				const a = action as ChatToolCallDeltaAction;
 				this.formatter.onToolCallDelta(a.toolCallId, a.content);
 				break;
 			}
 
-			case ActionType.SessionToolCallReady: {
-				const a = action as SessionToolCallReadyAction;
+			case ActionType.ChatToolCallReady: {
+				const a = action as ChatToolCallReadyAction;
 				const info: ToolCallInfo = {
 					toolCallId: a.toolCallId,
 					toolName: a.toolCallId,
@@ -212,9 +212,9 @@ export class SessionWatcher {
 				};
 
 				// Try to get actual names from state
-				const session = this.client.state.getSession(this.sessionUri);
-				if (session?.activeTurn) {
-					for (const part of session.activeTurn.responseParts) {
+				const chat = this.client.state.getChat(this.sessionUri);
+				if (chat?.activeTurn) {
+					for (const part of chat.activeTurn.responseParts) {
 						if (part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === a.toolCallId) {
 							info.toolName = part.toolCall.toolName;
 							info.displayName = part.toolCall.displayName;
@@ -227,14 +227,14 @@ export class SessionWatcher {
 				break;
 			}
 
-			case ActionType.SessionToolCallComplete: {
-				const a = action as SessionToolCallCompleteAction;
+			case ActionType.ChatToolCallComplete: {
+				const a = action as ChatToolCallCompleteAction;
 				this.formatter.onToolCallComplete(a.toolCallId, a.result);
 				break;
 			}
 
-			case ActionType.SessionUsage: {
-				const a = action as SessionUsageAction;
+			case ActionType.ChatUsage: {
+				const a = action as ChatUsageAction;
 				this.formatter.onUsage(a.usage);
 				break;
 			}
@@ -245,9 +245,9 @@ export class SessionWatcher {
 				break;
 			}
 
-			case ActionType.SessionTurnComplete: {
-				const session = this.client.state.getSession(this.sessionUri);
-				const lastTurn = session?.turns[session.turns.length - 1];
+			case ActionType.ChatTurnComplete: {
+				const chat = this.client.state.getChat(this.sessionUri);
+				const lastTurn = chat?.turns[chat.turns.length - 1];
 				// Derive response text from markdown response parts
 				let responseText = "";
 				if (lastTurn) {
@@ -261,13 +261,13 @@ export class SessionWatcher {
 				break;
 			}
 
-			case ActionType.SessionError: {
-				const a = action as SessionErrorAction;
+			case ActionType.ChatError: {
+				const a = action as ChatErrorAction;
 				this.formatter.onTurnError(a.error);
 				break;
 			}
 
-			case ActionType.SessionTurnCancelled: {
+			case ActionType.ChatTurnCancelled: {
 				this.formatter.onTurnCancelled();
 				break;
 			}

@@ -6,11 +6,11 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { ActionType } from "@microsoft/agent-host-protocol";
+import type { ChatToolCallApprovedAction, ChatToolCallDeniedAction } from "@microsoft/agent-host-protocol";
+import { ToolCallCancellationReason, ToolCallConfirmationReason } from "@microsoft/agent-host-protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AhpClient } from "../../client/index.js";
-import { ActionType } from "../../protocol/actions.js";
-import type { SessionToolCallApprovedAction, SessionToolCallDeniedAction } from "../../protocol/actions.js";
-import { ToolCallCancellationReason, ToolCallConfirmationReason } from "../../protocol/state.js";
 import { type MockServer, createMockServer, echoScenario, toolCallScenario } from "../helpers/mock-server.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ describe("AhpClient integration", () => {
 
 			const result = await client.connect(server.url);
 
-			expect(result.protocolVersion).toBe("0.1.0");
+			expect(result.protocolVersion).toBe("0.4.0");
 			expect(result.snapshots).toHaveLength(1);
 			expect(result.snapshots[0].resource).toBe("ahp-root://");
 			expect(client.connected).toBe(true);
@@ -235,14 +235,14 @@ describe("AhpClient integration", () => {
 			const actions: string[] = [];
 			client.on("action", (envelope) => {
 				const action = envelope.action as unknown as { type: string };
-				if (action.type.startsWith("session/")) actions.push(action.type);
+				if (action.type.startsWith("chat/")) actions.push(action.type);
 			});
 
 			await handle.sendPrompt("hello");
 
-			expect(actions).toContain("session/turnStarted");
-			expect(actions).toContain("session/delta");
-			expect(actions).toContain("session/turnComplete");
+			expect(actions).toContain("chat/turnStarted");
+			expect(actions).toContain("chat/delta");
+			expect(actions).toContain("chat/turnComplete");
 		});
 	});
 
@@ -263,14 +263,14 @@ describe("AhpClient integration", () => {
 					toolCallId?: string;
 					confirmed?: string;
 				};
-				if (action.type === "session/toolCallReady" && !action.confirmed) {
+				if (action.type === "chat/toolCallReady" && !action.confirmed) {
 					client.dispatchAction(envelope.channel, {
-						type: ActionType.SessionToolCallConfirmed,
+						type: ActionType.ChatToolCallConfirmed,
 						turnId: action.turnId!,
 						toolCallId: action.toolCallId!,
 						approved: true,
 						confirmed: ToolCallConfirmationReason.UserAction,
-					} as SessionToolCallApprovedAction);
+					} as ChatToolCallApprovedAction);
 				}
 			});
 
@@ -295,14 +295,14 @@ describe("AhpClient integration", () => {
 					toolCallId?: string;
 					confirmed?: string;
 				};
-				if (action.type === "session/toolCallReady" && !action.confirmed) {
+				if (action.type === "chat/toolCallReady" && !action.confirmed) {
 					client.dispatchAction(envelope.channel, {
-						type: ActionType.SessionToolCallConfirmed,
+						type: ActionType.ChatToolCallConfirmed,
 						turnId: action.turnId!,
 						toolCallId: action.toolCallId!,
 						approved: false,
 						reason: ToolCallCancellationReason.Denied,
-					} as SessionToolCallDeniedAction);
+					} as ChatToolCallDeniedAction);
 				}
 			});
 
@@ -340,8 +340,8 @@ describe("AhpClient integration", () => {
 			const result = await handle.sendPrompt("run tool", { timeout: 500 });
 
 			// Should have received toolCallStart and toolCallReady with confirmed
-			expect(actions).toContain("session/toolCallStart");
-			expect(actions).toContain("session/toolCallReady");
+			expect(actions).toContain("chat/toolCallStart");
+			expect(actions).toContain("chat/toolCallReady");
 			// Turn times out because auto-confirmed client tools don't
 			// trigger toolCallConfirmed, and the mock only completes on that
 			expect(result.state).toBe("error");
@@ -367,8 +367,8 @@ describe("AhpClient integration", () => {
 			// Use timeout so the prompt cleanly resolves instead of hanging
 			const result = await handle.sendPrompt("run tool", { timeout: 500 });
 
-			expect(actions).toContain("session/toolCallStart");
-			expect(actions).toContain("session/toolCallReady");
+			expect(actions).toContain("chat/toolCallStart");
+			expect(actions).toContain("chat/toolCallReady");
 			expect(result.state).toBe("error");
 		});
 	});
@@ -580,7 +580,7 @@ describe("AhpClient integration", () => {
 			server = await createMockServer({
 				onDispatchAction(params, ctx) {
 					const action = params.action as Record<string, unknown>;
-					if (action.type === "session/turnStarted") {
+					if (action.type === "chat/turnStarted") {
 						const sessionUri = action.session as string;
 						const turnId = action.turnId as string;
 
@@ -593,14 +593,14 @@ describe("AhpClient integration", () => {
 
 						// Send response
 						ctx.sendAction({
-							type: "session/responsePart",
+							type: "chat/responsePart",
 							session: sessionUri,
 							turnId,
 							part: { kind: "markdown", id: "p1", content: "" },
 						});
 
 						ctx.sendAction({
-							type: "session/delta",
+							type: "chat/delta",
 							session: sessionUri,
 							turnId,
 							partId: "p1",
@@ -608,7 +608,7 @@ describe("AhpClient integration", () => {
 						});
 
 						ctx.sendAction({
-							type: "session/turnComplete",
+							type: "chat/turnComplete",
 							session: sessionUri,
 							turnId,
 						});
@@ -631,7 +631,7 @@ describe("AhpClient integration", () => {
 					turns: [
 						{
 							id: "turn-1",
-							userMessage: { text: "hello" },
+							message: { text: "hello", origin: { kind: "user" } },
 							responseParts: [{ kind: "markdown", id: "p1", content: "Hi there" }],
 						},
 					],

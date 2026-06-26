@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import type { CustomizationRef } from "../protocol/state.js";
+import type { CustomizationRef } from "./types.js";
 
 /** Maximum directory depth for SKILL.md scanning. */
 const SKILL_MAX_DEPTH = 3;

@@ -14,7 +14,7 @@ controller, the renderer, and the permission handler.
 ## AHP tool call state machine
 
 Every tool call progresses through a series of states tracked by `ToolCallStatus`
-(in `src/protocol/state.ts`):
+(from `@microsoft/agent-host-protocol`):
 
 ```
 Streaming → PendingConfirmation → Running → Completed
@@ -33,17 +33,19 @@ Streaming → PendingConfirmation → Running → Completed
 
 ## Protocol action types
 
-Actions are defined in `src/protocol/actions.ts` under `ActionType`:
+Actions are defined in `@microsoft/agent-host-protocol` under `ActionType`.
+Tool-call actions are chat-scoped (`chat/*` wire values) and travel on the chat
+channel:
 
 | Action | Direction | Purpose |
 |--------|-----------|---------|
-| `SessionToolCallStart` | Server → Client | Tool call begins; carries `toolName`, `displayName`. State becomes `Streaming`. |
-| `SessionToolCallDelta` | Server → Client | Incremental parameter JSON while streaming. |
-| `SessionToolCallReady` | Server → Client | Parameters complete. Carries `invocationMessage`, optional `confirmed` field. State becomes `PendingConfirmation` (or `Running` if pre-confirmed). |
-| `SessionToolCallConfirmed` | Client → Server | User approved or denied the tool call. |
-| `SessionToolCallComplete` | Server → Client | Tool execution finished. Carries `ToolCallResult` with `success`, `pastTenseMessage`, optional `content`. |
-| `SessionToolCallResultConfirmed` | Client → Server | **Not yet handled by the controller.** For acknowledging results in `PendingResultConfirmation` state. |
-| `SessionToolCallContentChanged` | Server → Client | **Not yet handled by the controller.** Signals that tool output content was updated while running. |
+| `ChatToolCallStart` | Server → Client | Tool call begins; carries `toolName`, `displayName`. State becomes `Streaming`. |
+| `ChatToolCallDelta` | Server → Client | Incremental parameter JSON while streaming. |
+| `ChatToolCallReady` | Server → Client | Parameters complete. Carries `invocationMessage`, optional `confirmed` field. State becomes `PendingConfirmation` (or `Running` if pre-confirmed). |
+| `ChatToolCallConfirmed` | Client → Server | User approved or denied the tool call. |
+| `ChatToolCallComplete` | Server → Client | Tool execution finished. Carries `ToolCallResult` with `success`, `pastTenseMessage`, optional `content`. |
+| `ChatToolCallResultConfirmed` | Client → Server | **Not yet handled by the controller.** For acknowledging results in `PendingResultConfirmation` state. |
+| `ChatToolCallContentChanged` | Server → Client | **Not yet handled by the controller.** Signals that tool output content was updated while running. |
 
 ## Server-confirmed vs client-provided tools
 
@@ -56,26 +58,26 @@ shell, file editor). The full flow is:
 Start → Delta* → Ready → user confirms → Confirmed → Complete
 ```
 
-1. `SessionToolCallStart` — controller calls `renderer.onToolCallStart(id, displayName)`.
-2. `SessionToolCallDelta` — controller calls `renderer.onToolCallDelta(id, content)`.
-3. `SessionToolCallReady` — controller calls `renderer.onToolCallReady(id, callInfo)`,
+1. `ChatToolCallStart` — controller calls `renderer.onToolCallStart(id, displayName)`.
+2. `ChatToolCallDelta` — controller calls `renderer.onToolCallDelta(id, content)`.
+3. `ChatToolCallReady` — controller calls `renderer.onToolCallReady(id, callInfo)`,
    then invokes `permissionHandler.handleToolConfirmation(callInfo)`.
-4. On approval, controller dispatches `SessionToolCallConfirmed` with `approved: true`.
-5. `SessionToolCallComplete` — controller calls `renderer.onToolCallComplete(id, result)`.
+4. On approval, controller dispatches `ChatToolCallConfirmed` with `approved: true`.
+5. `ChatToolCallComplete` — controller calls `renderer.onToolCallComplete(id, result)`.
 
 ### Client-provided tools
 
-These are tools registered by the connecting client (identified by matching
-`toolClientId === client.clientId`). The server sets `confirmed` on the Ready
-action because the owning client handles execution directly — no user
-confirmation is needed.
+These are tools registered by the connecting client (identified by the tool
+call's `contributor` being a client contributor whose `clientId` matches
+`client.clientId`). The server sets `confirmed` on the Ready action because the
+owning client handles execution directly — no user confirmation is needed.
 
 ```
 Start → Ready(confirmed='not-needed') → [client executes] → Complete
 ```
 
 **Key difference:** The controller detects `isClientTool` in the
-`SessionToolCallReady` handler and `break`s early — it never calls
+`ChatToolCallReady` handler and `break`s early — it never calls
 `renderer.onToolCallReady` or `permissionHandler.handleToolConfirmation`.
 This means the **only** renderer output for client tools comes from
 `onToolCallStart` (showing `[tool] Name (running)`) and `onToolCallComplete`.
@@ -88,12 +90,12 @@ methods:
 
 | ActionType | Controller behavior |
 |------------|-------------------|
-| `SessionToolCallStart` | Increments `toolCallCount`, calls `renderer.onToolCallStart`. |
-| `SessionToolCallDelta` | Calls `renderer.onToolCallDelta`. |
-| `SessionToolCallReady` | Looks up `toolClientId` from session state. If client tool → break early. Otherwise calls `renderer.onToolCallReady`, then async `permissionHandler.handleToolConfirmation`. On result dispatches `SessionToolCallConfirmed`. |
-| `SessionToolCallComplete` | Calls `renderer.onToolCallComplete`. |
-| `SessionToolCallResultConfirmed` | **Not handled** — falls through to default case. |
-| `SessionToolCallContentChanged` | **Not handled** — falls through to default case. |
+| `ChatToolCallStart` | Increments `toolCallCount`, calls `renderer.onToolCallStart`. |
+| `ChatToolCallDelta` | Calls `renderer.onToolCallDelta`. |
+| `ChatToolCallReady` | Looks up the tool call's `contributor` from chat state (via `getChat()`). If it is a client contributor (`{ kind: "client", clientId }`) → break early. Otherwise calls `renderer.onToolCallReady`, then async `permissionHandler.handleToolConfirmation`. On result dispatches `ChatToolCallConfirmed`. |
+| `ChatToolCallComplete` | Calls `renderer.onToolCallComplete`. |
+| `ChatToolCallResultConfirmed` | **Not handled** — falls through to default case. |
+| `ChatToolCallContentChanged` | **Not handled** — falls through to default case. |
 
 ## Renderer display (`src/output/renderer.ts`)
 
@@ -149,9 +151,9 @@ field (mirrors MCP `ToolAnnotations`). The controller looks this up from
 Two tool call action types exist in the protocol but are **not yet handled** by
 the controller:
 
-1. **`SessionToolCallResultConfirmed`** — For the `PendingResultConfirmation`
+1. **`ChatToolCallResultConfirmed`** — For the `PendingResultConfirmation`
    state where tool results need user review before being sent to the model.
-2. **`SessionToolCallContentChanged`** — Signals that a tool's output content
+2. **`ChatToolCallContentChanged`** — Signals that a tool's output content
    was updated while it's still running (e.g., streaming tool output).
 
 Both fall through to the `default` case in the controller's action switch and

@@ -133,9 +133,9 @@ describe("library exports", () => {
 
 	describe("protocol types — enums", () => {
 		it("exports ActionType enum", () => {
-			expect(ahpx.ActionType.SessionDelta).toBe("session/delta");
-			expect(ahpx.ActionType.SessionTurnStarted).toBe("session/turnStarted");
-			expect(ahpx.ActionType.SessionTurnComplete).toBe("session/turnComplete");
+			expect(ahpx.ActionType.ChatDelta).toBe("chat/delta");
+			expect(ahpx.ActionType.ChatTurnStarted).toBe("chat/turnStarted");
+			expect(ahpx.ActionType.ChatTurnComplete).toBe("chat/turnComplete");
 		});
 
 		it("exports SessionLifecycle enum", () => {
@@ -249,10 +249,10 @@ describe("library exports", () => {
 				"ToolCallStatus",
 				"PendingMessageKind",
 				"ResponsePartKind",
-				"SessionInputAnswerState",
-				"SessionInputAnswerValueKind",
-				"SessionInputQuestionKind",
-				"SessionInputResponseKind",
+				"ChatInputAnswerState",
+				"ChatInputAnswerValueKind",
+				"ChatInputQuestionKind",
+				"ChatInputResponseKind",
 				"TerminalClaimKind",
 			];
 
@@ -332,7 +332,7 @@ describe("library exports", () => {
 				channel: "copilot:/test",
 				serverSeq: 1,
 				action: {
-					type: ahpx.ActionType.SessionDelta,
+					type: ahpx.ActionType.ChatDelta,
 					turnId: "t1",
 					partId: "p1",
 					content: "hello",

@@ -18,6 +18,9 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { type ActionEnvelope, ActionType } from "@microsoft/agent-host-protocol";
+import { ResponsePartKind, SessionStatus } from "@microsoft/agent-host-protocol";
+import type { SessionActiveClient, Turn } from "@microsoft/agent-host-protocol";
 import { Command } from "commander";
 import pc from "picocolors";
 import { AhpClient, RpcError } from "./client/index.js";
@@ -34,6 +37,7 @@ import {
 } from "./config/index.js";
 import type { AhpxConfig, ConfigSource } from "./config/index.js";
 import { discoverCustomizations } from "./customizations/discovery.js";
+import { toClientCustomization } from "./customizations/types.js";
 import { AhpxError, ExitCode, NoSessionError, TimeoutError, UsageError } from "./errors.js";
 import type { EventForwarder } from "./events/forwarder.js";
 import { ForwardingFormatter } from "./events/forwarding-formatter.js";
@@ -46,9 +50,6 @@ import type { OutputFormat, OutputFormatter } from "./output/index.js";
 import { PermissionHandler } from "./permissions/index.js";
 import type { PermissionMode } from "./permissions/index.js";
 import { TurnController } from "./prompt/index.js";
-import { type ActionEnvelope, ActionType } from "./protocol/actions.js";
-import { ResponsePartKind, SessionStatus } from "./protocol/state.js";
-import type { SessionActiveClient, Turn } from "./protocol/state.js";
 import { SessionPersistence, SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
 import type { SessionRecord } from "./session/index.js";
 import { ensureFileUri } from "./uri.js";
@@ -1259,7 +1260,7 @@ session
 									activeClientParam = {
 										clientId: client.clientId,
 										tools: [],
-										customizations: discovered,
+										customizations: discovered.map(toClientCustomization),
 									};
 								}
 							}
@@ -1676,7 +1677,7 @@ session
 									for (const turn of result.turns) {
 										formatTurnEntry({
 											id: turn.id,
-											userMessage: turn.userMessage.text,
+											userMessage: turn.message.text,
 											responsePreview: turnResponseText(turn) || "(no response)",
 											toolCalls: turnToolCallCount(turn),
 											usage: turn.usage,
@@ -1689,7 +1690,7 @@ session
 									hasMore: result.hasMore,
 									turns: result.turns.map((t) => ({
 										id: t.id,
-										userMessage: t.userMessage.text,
+										userMessage: t.message.text,
 										responseText: turnResponseText(t),
 										toolCalls: turnToolCallCount(t),
 										usage: t.usage,
@@ -1986,8 +1987,8 @@ async function listCustomizations(
 				outputResult(
 					globalOpts,
 					() => {
-						const uriW = Math.max(3, ...customizations.map((c) => c.customization.uri.length));
-						const nameW = Math.max(4, ...customizations.map((c) => c.customization.displayName.length));
+						const uriW = Math.max(3, ...customizations.map((c) => c.uri.length));
+						const nameW = Math.max(4, ...customizations.map((c) => c.name.length));
 						const enabledW = 7;
 						const statusW = 8;
 
@@ -1997,10 +1998,11 @@ async function listCustomizations(
 						console.log(`  ${"─".repeat(uriW)}  ${"─".repeat(nameW)}  ${"─".repeat(enabledW)}  ${"─".repeat(statusW)}`);
 
 						for (const c of customizations) {
-							const enabled = c.enabled ? pc.green("yes") : pc.red("no");
-							const status = c.status ?? pc.dim("—");
+							const isEnabled = "enabled" in c ? c.enabled : true;
+							const enabled = isEnabled ? pc.green("yes") : pc.red("no");
+							const status = "load" in c && c.load ? c.load.kind : pc.dim("—");
 							console.log(
-								`  ${c.customization.uri.padEnd(uriW)}  ${c.customization.displayName.padEnd(nameW)}  ${String(enabled).padEnd(enabledW + 10)}  ${String(status).padEnd(statusW)}`,
+								`  ${c.uri.padEnd(uriW)}  ${c.name.padEnd(nameW)}  ${String(enabled).padEnd(enabledW + 10)}  ${String(status).padEnd(statusW)}`,
 							);
 						}
 					},
@@ -2047,17 +2049,17 @@ sessionCustomization
 						const sessionState = client.state.getSession(record.sessionUri);
 						const customizations = sessionState?.customizations ?? [];
 
-						const target = customizations.find((c) => c.customization.uri === uri);
+						const target = customizations.find((c) => c.uri === uri);
 						if (!target) {
 							throw new UsageError(
-								`Customization "${uri}" not found on this session.${customizations.length > 0 ? ` Available: ${customizations.map((c) => c.customization.uri).join(", ")}` : ""}`,
+								`Customization "${uri}" not found on this session.${customizations.length > 0 ? ` Available: ${customizations.map((c) => c.uri).join(", ")}` : ""}`,
 							);
 						}
 
-						const newEnabled = !target.enabled;
+						const newEnabled = !("enabled" in target ? target.enabled : true);
 						client.dispatchAction(record.sessionUri, {
 							type: ActionType.SessionCustomizationToggled,
-							uri,
+							id: target.id,
 							enabled: newEnabled,
 						});
 
@@ -2066,9 +2068,9 @@ sessionCustomization
 							() =>
 								console.log(
 									pc.green("✓"),
-									`${pc.bold(target.customization.displayName)} ${newEnabled ? pc.green("enabled") : pc.red("disabled")}`,
+									`${pc.bold(target.name)} ${newEnabled ? pc.green("enabled") : pc.red("disabled")}`,
 								),
-							{ uri, enabled: newEnabled, displayName: target.customization.displayName },
+							{ uri, enabled: newEnabled, displayName: target.name },
 						);
 					},
 				);
@@ -2353,7 +2355,7 @@ async function runPrompt(
 					activeClientParam = {
 						clientId: client.clientId,
 						tools: [],
-						customizations: discovered,
+						customizations: discovered.map(toClientCustomization),
 					};
 				}
 			}
@@ -2842,9 +2844,9 @@ program
 			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 			await withConnection({ server: opts.server, config: cfg }, async (client) => {
 				await client.subscribe(record.sessionUri);
-				const sessionState = client.state.getSession(record.sessionUri);
+				const chatState = client.state.getChat(record.sessionUri);
 
-				if (!sessionState?.activeTurn) {
+				if (!chatState?.activeTurn) {
 					if (globalOpts.format === "text") {
 						console.log(pc.dim("No active turn. Nothing to cancel."));
 					}
@@ -2852,8 +2854,8 @@ program
 				}
 
 				client.dispatchAction(record.sessionUri, {
-					type: ActionType.SessionTurnCancelled,
-					turnId: sessionState.activeTurn.id,
+					type: ActionType.ChatTurnCancelled,
+					turnId: chatState.activeTurn.id,
 				});
 				outputResult(globalOpts, () => console.log(pc.green("✓"), "Cancellation dispatched."), {
 					cancelled: true,

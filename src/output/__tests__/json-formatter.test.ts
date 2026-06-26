@@ -1,5 +1,5 @@
+import type { ToolCallResult, UsageInfo } from "@microsoft/agent-host-protocol";
 import { describe, expect, it } from "vitest";
-import type { ToolCallResult, UsageInfo } from "../../protocol/state.js";
 import { JsonFormatter } from "../json-formatter.js";
 import type { JsonEnvelope } from "../json-formatter.js";
 import type { WritableOutput } from "../renderer.js";

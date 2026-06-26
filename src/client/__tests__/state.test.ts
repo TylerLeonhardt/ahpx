@@ -1,15 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { ActionType } from "../../protocol/actions.js";
-import type { ActionEnvelope } from "../../protocol/actions.js";
+import { ActionType } from "@microsoft/agent-host-protocol";
+import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
 import {
+	MessageKind,
 	PendingMessageKind,
 	ResponsePartKind,
 	SessionLifecycle,
 	SessionStatus,
 	ToolCallStatus,
 	TurnState,
-} from "../../protocol/state.js";
-import type { SessionState, Snapshot } from "../../protocol/state.js";
+} from "@microsoft/agent-host-protocol";
+import type { ChatState, Message, SessionState, Snapshot } from "@microsoft/agent-host-protocol";
+import { describe, expect, it } from "vitest";
 import { StateMirror } from "../state.js";
 
 function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
@@ -23,9 +24,35 @@ function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 			modifiedAt: 1000,
 		},
 		lifecycle: SessionLifecycle.Creating,
+		chats: [],
+		...overrides,
+	};
+}
+
+function message(text: string): Message {
+	return { text, origin: { kind: MessageKind.User } };
+}
+
+function makeChatState(overrides: Partial<ChatState> = {}): ChatState {
+	return {
+		resource: "copilot:/s1",
+		title: "Test Session",
+		status: SessionStatus.Idle,
+		modifiedAt: "2026-01-01T00:00:00.000Z",
 		turns: [],
 		...overrides,
 	};
+}
+
+type Customization = NonNullable<SessionState["customizations"]>[number];
+
+function pluginCustomization(
+	id: string,
+	name: string,
+	enabled: boolean,
+	uri = `https://example.com/${id}`,
+): Customization {
+	return { id, type: "plugin", uri, name, enabled } as Customization;
 }
 
 function envelope(
@@ -158,9 +185,9 @@ describe("StateMirror", () => {
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionTurnStarted,
+						type: ActionType.ChatTurnStarted,
 						turnId: "t1",
-						userMessage: { text: "Hello" },
+						message: message("Hello"),
 					},
 					1,
 				),
@@ -170,7 +197,7 @@ describe("StateMirror", () => {
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionDelta,
+						type: ActionType.ChatDelta,
 						turnId: "t1",
 						partId: "part-1",
 						content: "First words",
@@ -179,7 +206,7 @@ describe("StateMirror", () => {
 				),
 			);
 
-			const session = mirror.getSession("copilot:/s1")!;
+			const session = mirror.getChat("copilot:/s1")!;
 			// No part should be created — delta targeting nonexistent partId is a no-op
 			expect(session.activeTurn!.responseParts).toHaveLength(0);
 		});
@@ -195,9 +222,9 @@ describe("StateMirror", () => {
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionTurnStarted,
+						type: ActionType.ChatTurnStarted,
 						turnId: "t1",
-						userMessage: { text: "Hello" },
+						message: message("Hello"),
 					},
 					1,
 				),
@@ -207,7 +234,7 @@ describe("StateMirror", () => {
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionResponsePart,
+						type: ActionType.ChatResponsePart,
 						turnId: "t1",
 						part: { kind: ResponsePartKind.Markdown, id: "part-1", content: "" },
 					},
@@ -215,14 +242,14 @@ describe("StateMirror", () => {
 				),
 			);
 
-			let session = mirror.getSession("copilot:/s1")!;
+			let session = mirror.getChat("copilot:/s1")!;
 			expect(session.activeTurn!.responseParts).toHaveLength(1);
 
 			// Now delta appends to the existing part
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionDelta,
+						type: ActionType.ChatDelta,
 						turnId: "t1",
 						partId: "part-1",
 						content: "Hello world",
@@ -231,7 +258,7 @@ describe("StateMirror", () => {
 				),
 			);
 
-			session = mirror.getSession("copilot:/s1")!;
+			session = mirror.getChat("copilot:/s1")!;
 			const mdPart = session.activeTurn!.responseParts.find(
 				(p) => p.kind === ResponsePartKind.Markdown && p.id === "part-1",
 			);
@@ -251,24 +278,24 @@ describe("StateMirror", () => {
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionTurnStarted,
+						type: ActionType.ChatTurnStarted,
 						turnId: "t1",
-						userMessage: { text: "Hello" },
+						message: message("Hello"),
 					},
 					1,
 				),
 			);
 
-			let session = mirror.getSession("copilot:/s1")!;
+			let session = mirror.getChat("copilot:/s1")!;
 			expect(session.activeTurn).toBeDefined();
 			expect(session.activeTurn!.id).toBe("t1");
-			expect(session.summary.status).toBe(SessionStatus.InProgress);
+			expect(session.status).toBe(SessionStatus.InProgress);
 
 			// Add a markdown response part
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionResponsePart,
+						type: ActionType.ChatResponsePart,
 						turnId: "t1",
 						part: { kind: ResponsePartKind.Markdown, id: "part-1", content: "" },
 					},
@@ -280,7 +307,7 @@ describe("StateMirror", () => {
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionDelta,
+						type: ActionType.ChatDelta,
 						turnId: "t1",
 						partId: "part-1",
 						content: "Hi there!",
@@ -289,7 +316,7 @@ describe("StateMirror", () => {
 				),
 			);
 
-			session = mirror.getSession("copilot:/s1")!;
+			session = mirror.getChat("copilot:/s1")!;
 			const mdPart = session.activeTurn!.responseParts.find(
 				(p) => p.kind === ResponsePartKind.Markdown && p.id === "part-1",
 			);
@@ -301,11 +328,10 @@ describe("StateMirror", () => {
 			const mirror = new StateMirror();
 			mirror.applySnapshot({
 				resource: "copilot:/s1",
-				state: makeSessionState({
-					lifecycle: SessionLifecycle.Ready,
+				state: makeChatState({
 					activeTurn: {
 						id: "t1",
-						userMessage: { text: "Hello" },
+						message: message("Hello"),
 						responseParts: [{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" }],
 						usage: undefined,
 					},
@@ -316,21 +342,21 @@ describe("StateMirror", () => {
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionTurnComplete,
+						type: ActionType.ChatTurnComplete,
 						turnId: "t1",
 					},
 					3,
 				),
 			);
 
-			const session = mirror.getSession("copilot:/s1")!;
+			const session = mirror.getChat("copilot:/s1")!;
 			expect(session.activeTurn).toBeUndefined();
 			expect(session.turns).toHaveLength(1);
 			expect(session.turns[0].id).toBe("t1");
 			const mdParts = session.turns[0].responseParts.filter((p) => p.kind === ResponsePartKind.Markdown);
 			expect(mdParts).toHaveLength(1);
 			expect((mdParts[0] as { content: string }).content).toBe("Hi there!");
-			expect(session.summary.status).toBe(SessionStatus.Idle);
+			expect(session.status).toBe(SessionStatus.Idle);
 		});
 
 		it("handles SessionTitleChanged", () => {
@@ -359,11 +385,10 @@ describe("StateMirror", () => {
 			const mirror = new StateMirror();
 			mirror.applySnapshot({
 				resource: "copilot:/s1",
-				state: makeSessionState({
-					lifecycle: SessionLifecycle.Ready,
+				state: makeChatState({
 					activeTurn: {
 						id: "t1",
-						userMessage: { text: "Run a tool" },
+						message: message("Run a tool"),
 						responseParts: [],
 						usage: undefined,
 					},
@@ -374,7 +399,7 @@ describe("StateMirror", () => {
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionToolCallStart,
+						type: ActionType.ChatToolCallStart,
 						turnId: "t1",
 						toolCallId: "tc1",
 						toolName: "readFile",
@@ -384,7 +409,7 @@ describe("StateMirror", () => {
 				),
 			);
 
-			const session = mirror.getSession("copilot:/s1")!;
+			const session = mirror.getChat("copilot:/s1")!;
 			const tcPart = session.activeTurn!.responseParts.find(
 				(p) => p.kind === ResponsePartKind.ToolCall && p.toolCall.toolCallId === "tc1",
 			);
@@ -406,19 +431,19 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Steering,
 							id: "s1",
-							userMessage: { text: "steer this" },
+							message: message("steer this"),
 						},
 						1,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.steeringMessage).toBeDefined();
 				expect(session.steeringMessage!.id).toBe("s1");
-				expect(session.steeringMessage!.userMessage.text).toBe("steer this");
+				expect(session.steeringMessage!.message.text).toBe("steer this");
 			});
 
 			it("sets a queued message", () => {
@@ -432,16 +457,16 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q1",
-							userMessage: { text: "queued msg" },
+							message: message("queued msg"),
 						},
 						1,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.queuedMessages).toHaveLength(1);
 				expect(session.queuedMessages![0].id).toBe("q1");
 			});
@@ -457,10 +482,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q1",
-							userMessage: { text: "first" },
+							message: message("first"),
 						},
 						1,
 					),
@@ -468,16 +493,16 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q2",
-							userMessage: { text: "second" },
+							message: message("second"),
 						},
 						2,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.queuedMessages).toHaveLength(2);
 			});
 
@@ -492,10 +517,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q1",
-							userMessage: { text: "original" },
+							message: message("original"),
 						},
 						1,
 					),
@@ -503,18 +528,18 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q1",
-							userMessage: { text: "updated" },
+							message: message("updated"),
 						},
 						2,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.queuedMessages).toHaveLength(1);
-				expect(session.queuedMessages![0].userMessage.text).toBe("updated");
+				expect(session.queuedMessages![0].message.text).toBe("updated");
 			});
 
 			it("removes a steering message", () => {
@@ -528,10 +553,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Steering,
 							id: "s1",
-							userMessage: { text: "steer" },
+							message: message("steer"),
 						},
 						1,
 					),
@@ -539,7 +564,7 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageRemoved,
+							type: ActionType.ChatPendingMessageRemoved,
 							kind: PendingMessageKind.Steering,
 							id: "s1",
 						},
@@ -547,7 +572,7 @@ describe("StateMirror", () => {
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.steeringMessage).toBeUndefined();
 			});
 
@@ -562,10 +587,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q1",
-							userMessage: { text: "first" },
+							message: message("first"),
 						},
 						1,
 					),
@@ -573,10 +598,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q2",
-							userMessage: { text: "second" },
+							message: message("second"),
 						},
 						2,
 					),
@@ -584,7 +609,7 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageRemoved,
+							type: ActionType.ChatPendingMessageRemoved,
 							kind: PendingMessageKind.Queued,
 							id: "q1",
 						},
@@ -592,7 +617,7 @@ describe("StateMirror", () => {
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.queuedMessages).toHaveLength(1);
 				expect(session.queuedMessages![0].id).toBe("q2");
 			});
@@ -608,10 +633,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Steering,
 							id: "s1",
-							userMessage: { text: "steer" },
+							message: message("steer"),
 						},
 						1,
 					),
@@ -619,7 +644,7 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageRemoved,
+							type: ActionType.ChatPendingMessageRemoved,
 							kind: PendingMessageKind.Steering,
 							id: "s2",
 						},
@@ -627,7 +652,7 @@ describe("StateMirror", () => {
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.steeringMessage).toBeDefined();
 			});
 
@@ -642,10 +667,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q1",
-							userMessage: { text: "first" },
+							message: message("first"),
 						},
 						1,
 					),
@@ -653,10 +678,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q2",
-							userMessage: { text: "second" },
+							message: message("second"),
 						},
 						2,
 					),
@@ -664,10 +689,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q3",
-							userMessage: { text: "third" },
+							message: message("third"),
 						},
 						3,
 					),
@@ -675,14 +700,14 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionQueuedMessagesReordered,
+							type: ActionType.ChatQueuedMessagesReordered,
 							order: ["q3", "q1", "q2"],
 						},
 						4,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.queuedMessages!.map((m) => m.id)).toEqual(["q3", "q1", "q2"]);
 			});
 
@@ -697,10 +722,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q1",
-							userMessage: { text: "first" },
+							message: message("first"),
 						},
 						1,
 					),
@@ -708,10 +733,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q2",
-							userMessage: { text: "second" },
+							message: message("second"),
 						},
 						2,
 					),
@@ -719,10 +744,10 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionPendingMessageSet,
+							type: ActionType.ChatPendingMessageSet,
 							kind: PendingMessageKind.Queued,
 							id: "q3",
-							userMessage: { text: "third" },
+							message: message("third"),
 						},
 						3,
 					),
@@ -730,14 +755,14 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionQueuedMessagesReordered,
+							type: ActionType.ChatQueuedMessagesReordered,
 							order: ["q2"],
 						},
 						4,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.queuedMessages!.map((m) => m.id)).toEqual(["q2", "q1", "q3"]);
 			});
 		});
@@ -755,9 +780,7 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationsChanged,
-							customizations: [
-								{ customization: { uri: "https://example.com/plugin", displayName: "Test Plugin" }, enabled: true },
-							],
+							customizations: [pluginCustomization("plugin", "Test Plugin", true, "https://example.com/plugin")],
 						},
 						1,
 					),
@@ -780,7 +803,7 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationsChanged,
-							customizations: [{ customization: { uri: "https://example.com/a", displayName: "A" }, enabled: true }],
+							customizations: [pluginCustomization("a", "A", true, "https://example.com/a")],
 						},
 						1,
 					),
@@ -790,8 +813,8 @@ describe("StateMirror", () => {
 						{
 							type: ActionType.SessionCustomizationsChanged,
 							customizations: [
-								{ customization: { uri: "https://example.com/b", displayName: "B" }, enabled: false },
-								{ customization: { uri: "https://example.com/c", displayName: "C" }, enabled: true },
+								pluginCustomization("b", "B", false, "https://example.com/b"),
+								pluginCustomization("c", "C", true, "https://example.com/c"),
 							],
 						},
 						2,
@@ -800,8 +823,8 @@ describe("StateMirror", () => {
 
 				const session = mirror.getSession("copilot:/s1")!;
 				expect(session.customizations).toHaveLength(2);
-				expect(session.customizations![0].customization.displayName).toBe("B");
-				expect(session.customizations![1].customization.displayName).toBe("C");
+				expect(session.customizations![0].name).toBe("B");
+				expect(session.customizations![1].name).toBe("C");
 			});
 
 			it("toggles a customization", () => {
@@ -816,9 +839,7 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationsChanged,
-							customizations: [
-								{ customization: { uri: "https://example.com/plugin", displayName: "Test Plugin" }, enabled: true },
-							],
+							customizations: [pluginCustomization("plugin", "Test Plugin", true, "https://example.com/plugin")],
 						},
 						1,
 					),
@@ -827,7 +848,7 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationToggled,
-							uri: "https://example.com/plugin",
+							id: "plugin",
 							enabled: false,
 						},
 						2,
@@ -850,9 +871,7 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationsChanged,
-							customizations: [
-								{ customization: { uri: "https://example.com/plugin", displayName: "Test Plugin" }, enabled: true },
-							],
+							customizations: [pluginCustomization("plugin", "Test Plugin", true, "https://example.com/plugin")],
 						},
 						1,
 					),
@@ -861,7 +880,7 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationToggled,
-							uri: "https://example.com/unknown",
+							id: "unknown",
 							enabled: false,
 						},
 						2,
@@ -884,7 +903,7 @@ describe("StateMirror", () => {
 					envelope(
 						{
 							type: ActionType.SessionCustomizationToggled,
-							uri: "https://example.com/plugin",
+							id: "plugin",
 							enabled: false,
 						},
 						1,
@@ -901,19 +920,18 @@ describe("StateMirror", () => {
 				const mirror = new StateMirror();
 				mirror.applySnapshot({
 					resource: "copilot:/s1",
-					state: makeSessionState({
-						lifecycle: SessionLifecycle.Ready,
+					state: makeChatState({
 						turns: [
 							{
 								id: "t1",
-								userMessage: { text: "msg1" },
+								message: message("msg1"),
 								responseParts: [],
 								usage: undefined,
 								state: TurnState.Complete,
 							},
 							{
 								id: "t2",
-								userMessage: { text: "msg2" },
+								message: message("msg2"),
 								responseParts: [],
 								usage: undefined,
 								state: TurnState.Complete,
@@ -926,42 +944,41 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionTruncated,
+							type: ActionType.ChatTruncated,
 						},
 						1,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.turns).toHaveLength(0);
 				expect(session.activeTurn).toBeUndefined();
-				expect(session.summary.status).toBe(SessionStatus.Idle);
+				expect(session.status).toBe(SessionStatus.Idle);
 			});
 
 			it("keeps turns up to and including specified turnId", () => {
 				const mirror = new StateMirror();
 				mirror.applySnapshot({
 					resource: "copilot:/s1",
-					state: makeSessionState({
-						lifecycle: SessionLifecycle.Ready,
+					state: makeChatState({
 						turns: [
 							{
 								id: "t1",
-								userMessage: { text: "msg1" },
+								message: message("msg1"),
 								responseParts: [],
 								usage: undefined,
 								state: TurnState.Complete,
 							},
 							{
 								id: "t2",
-								userMessage: { text: "msg2" },
+								message: message("msg2"),
 								responseParts: [],
 								usage: undefined,
 								state: TurnState.Complete,
 							},
 							{
 								id: "t3",
-								userMessage: { text: "msg3" },
+								message: message("msg3"),
 								responseParts: [],
 								usage: undefined,
 								state: TurnState.Complete,
@@ -974,14 +991,14 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionTruncated,
+							type: ActionType.ChatTruncated,
 							turnId: "t2",
 						},
 						1,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.turns).toHaveLength(2);
 				expect(session.turns[0].id).toBe("t1");
 				expect(session.turns[1].id).toBe("t2");
@@ -991,12 +1008,11 @@ describe("StateMirror", () => {
 				const mirror = new StateMirror();
 				mirror.applySnapshot({
 					resource: "copilot:/s1",
-					state: makeSessionState({
-						lifecycle: SessionLifecycle.Ready,
+					state: makeChatState({
 						turns: [
 							{
 								id: "t1",
-								userMessage: { text: "msg1" },
+								message: message("msg1"),
 								responseParts: [],
 								usage: undefined,
 								state: TurnState.Complete,
@@ -1004,7 +1020,7 @@ describe("StateMirror", () => {
 						],
 						activeTurn: {
 							id: "t2",
-							userMessage: { text: "in progress" },
+							message: message("in progress"),
 							responseParts: [],
 							usage: undefined,
 						},
@@ -1015,13 +1031,13 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionTruncated,
+							type: ActionType.ChatTruncated,
 						},
 						1,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.activeTurn).toBeUndefined();
 				expect(session.turns).toHaveLength(0);
 			});
@@ -1030,19 +1046,18 @@ describe("StateMirror", () => {
 				const mirror = new StateMirror();
 				mirror.applySnapshot({
 					resource: "copilot:/s1",
-					state: makeSessionState({
-						lifecycle: SessionLifecycle.Ready,
+					state: makeChatState({
 						turns: [
 							{
 								id: "t1",
-								userMessage: { text: "msg1" },
+								message: message("msg1"),
 								responseParts: [],
 								usage: undefined,
 								state: TurnState.Complete,
 							},
 							{
 								id: "t2",
-								userMessage: { text: "msg2" },
+								message: message("msg2"),
 								responseParts: [],
 								usage: undefined,
 								state: TurnState.Complete,
@@ -1055,14 +1070,14 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionTruncated,
+							type: ActionType.ChatTruncated,
 							turnId: "nonexistent",
 						},
 						1,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.turns).toHaveLength(2);
 			});
 		});
@@ -1072,11 +1087,10 @@ describe("StateMirror", () => {
 				const mirror = new StateMirror();
 				mirror.applySnapshot({
 					resource: "copilot:/s1",
-					state: makeSessionState({
-						lifecycle: SessionLifecycle.Ready,
+					state: makeChatState({
 						activeTurn: {
 							id: "t1",
-							userMessage: { text: "Run a tool" },
+							message: message("Run a tool"),
 							responseParts: [
 								{
 									kind: ResponsePartKind.ToolCall,
@@ -1097,7 +1111,7 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionToolCallReady,
+							type: ActionType.ChatToolCallReady,
 							turnId: "t1",
 							toolCallId: "tc1",
 							confirmed: undefined,
@@ -1109,7 +1123,7 @@ describe("StateMirror", () => {
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				const tcPart = session.activeTurn!.responseParts.find(
 					(p) => p.kind === ResponsePartKind.ToolCall && p.toolCall.toolCallId === "tc1",
 				);
@@ -1125,9 +1139,8 @@ describe("StateMirror", () => {
 				const mirror = new StateMirror();
 				mirror.applySnapshot({
 					resource: "copilot:/s1",
-					state: makeSessionState({
-						lifecycle: SessionLifecycle.Ready,
-						steeringMessage: { id: "s1", userMessage: { text: "steer" } },
+					state: makeChatState({
+						steeringMessage: { id: "s1", message: message("steer") },
 					}),
 					fromSeq: 0,
 				});
@@ -1135,16 +1148,16 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionTurnStarted,
+							type: ActionType.ChatTurnStarted,
 							turnId: "t1",
-							userMessage: { text: "steer" },
+							message: message("steer"),
 							queuedMessageId: "s1",
 						},
 						1,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.steeringMessage).toBeUndefined();
 			});
 
@@ -1152,11 +1165,10 @@ describe("StateMirror", () => {
 				const mirror = new StateMirror();
 				mirror.applySnapshot({
 					resource: "copilot:/s1",
-					state: makeSessionState({
-						lifecycle: SessionLifecycle.Ready,
+					state: makeChatState({
 						queuedMessages: [
-							{ id: "q1", userMessage: { text: "first" } },
-							{ id: "q2", userMessage: { text: "second" } },
+							{ id: "q1", message: message("first") },
+							{ id: "q2", message: message("second") },
 						],
 					}),
 					fromSeq: 0,
@@ -1165,16 +1177,16 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionTurnStarted,
+							type: ActionType.ChatTurnStarted,
 							turnId: "t1",
-							userMessage: { text: "first" },
+							message: message("first"),
 							queuedMessageId: "q1",
 						},
 						1,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.queuedMessages).toHaveLength(1);
 				expect(session.queuedMessages![0].id).toBe("q2");
 			});
@@ -1183,10 +1195,9 @@ describe("StateMirror", () => {
 				const mirror = new StateMirror();
 				mirror.applySnapshot({
 					resource: "copilot:/s1",
-					state: makeSessionState({
-						lifecycle: SessionLifecycle.Ready,
-						steeringMessage: { id: "s1", userMessage: { text: "steer" } },
-						queuedMessages: [{ id: "q1", userMessage: { text: "queued" } }],
+					state: makeChatState({
+						steeringMessage: { id: "s1", message: message("steer") },
+						queuedMessages: [{ id: "q1", message: message("queued") }],
 					}),
 					fromSeq: 0,
 				});
@@ -1194,15 +1205,15 @@ describe("StateMirror", () => {
 				mirror.applyAction(
 					envelope(
 						{
-							type: ActionType.SessionTurnStarted,
+							type: ActionType.ChatTurnStarted,
 							turnId: "t1",
-							userMessage: { text: "hello" },
+							message: message("hello"),
 						},
 						1,
 					),
 				);
 
-				const session = mirror.getSession("copilot:/s1")!;
+				const session = mirror.getChat("copilot:/s1")!;
 				expect(session.steeringMessage).toBeDefined();
 				expect(session.queuedMessages).toHaveLength(1);
 			});
@@ -1246,9 +1257,9 @@ describe("StateMirror", () => {
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionTurnStarted,
+						type: ActionType.ChatTurnStarted,
 						turnId: "t1",
-						userMessage: { text: "Hello" },
+						message: message("Hello"),
 					},
 					2,
 				),
@@ -1256,7 +1267,7 @@ describe("StateMirror", () => {
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionResponsePart,
+						type: ActionType.ChatResponsePart,
 						turnId: "t1",
 						part: { kind: ResponsePartKind.Markdown, id: "part-1", content: "" },
 					},
@@ -1266,7 +1277,7 @@ describe("StateMirror", () => {
 			mirror.applyAction(
 				envelope(
 					{
-						type: ActionType.SessionDelta,
+						type: ActionType.ChatDelta,
 						turnId: "t1",
 						partId: "part-1",
 						content: "Hello world",
@@ -1282,7 +1293,7 @@ describe("StateMirror", () => {
 				fromSeq: 1,
 			});
 
-			const session = mirror.getSession("copilot:/s1")!;
+			const session = mirror.getChat("copilot:/s1")!;
 			expect(session.activeTurn).toBeDefined();
 			expect(session.activeTurn!.id).toBe("t1");
 			const mdPart = session.activeTurn!.responseParts.find(

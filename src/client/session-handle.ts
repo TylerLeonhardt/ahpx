@@ -8,11 +8,19 @@
 
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { ActionEnvelope, StateAction } from "../protocol/actions.js";
-import { ActionType } from "../protocol/actions.js";
-import type { SessionDeltaAction, SessionErrorAction, SessionUsageAction } from "../protocol/actions.js";
-import type { ActiveTurn, MessageAttachment, SessionState, Turn, URI, UsageInfo } from "../protocol/state.js";
-import { SessionLifecycle } from "../protocol/state.js";
+import type { ActionEnvelope, StateAction } from "@microsoft/agent-host-protocol";
+import { ActionType } from "@microsoft/agent-host-protocol";
+import type { ChatDeltaAction, ChatErrorAction, ChatUsageAction } from "@microsoft/agent-host-protocol";
+import type {
+	ActiveTurn,
+	ChatState,
+	MessageAttachment,
+	SessionState,
+	Turn,
+	URI,
+	UsageInfo,
+} from "@microsoft/agent-host-protocol";
+import { MessageKind, SessionLifecycle } from "@microsoft/agent-host-protocol";
 import type { AhpClient } from "./index.js";
 
 /** Options for sending a prompt via SessionHandle. */
@@ -85,13 +93,13 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 			this.emit("action", envelope);
 
 			// Emit higher-level events
-			if (action.type === ActionType.SessionTurnComplete) {
-				const session = this.state;
-				if (session && session.turns.length > 0) {
-					this.emit("turnComplete", session.turns[session.turns.length - 1]);
+			if (action.type === ActionType.ChatTurnComplete) {
+				const chat = this.chat;
+				if (chat && chat.turns.length > 0) {
+					this.emit("turnComplete", chat.turns[chat.turns.length - 1]);
 				}
-			} else if (action.type === ActionType.SessionError) {
-				const a = action as SessionErrorAction;
+			} else if (action.type === ActionType.ChatError) {
+				const a = action as ChatErrorAction;
 				this.emit("error", new Error(a.error.message));
 			}
 		};
@@ -111,6 +119,11 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 		return this.client.state.getSession(this.uri);
 	}
 
+	/** Current chat state (turns / activeTurn) from the state mirror. */
+	get chat(): ChatState | undefined {
+		return this.client.state.getChat(this.uri);
+	}
+
 	/** Whether the session is ready for prompts. */
 	get isReady(): boolean {
 		return this.state?.lifecycle === SessionLifecycle.Ready;
@@ -118,7 +131,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 
 	/** The currently active turn, if any. */
 	get activeTurn(): ActiveTurn | undefined {
-		return this.state?.activeTurn;
+		return this.chat?.activeTurn;
 	}
 
 	/** Whether this handle has been disposed. */
@@ -240,34 +253,34 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 				}
 
 				switch (action.type) {
-					case ActionType.SessionDelta: {
-						const a = action as SessionDeltaAction;
+					case ActionType.ChatDelta: {
+						const a = action as ChatDeltaAction;
 						responseText += a.content;
 						break;
 					}
 
-					case ActionType.SessionToolCallStart:
+					case ActionType.ChatToolCallStart:
 						toolCallCount++;
 						break;
 
-					case ActionType.SessionUsage: {
-						const a = action as SessionUsageAction;
+					case ActionType.ChatUsage: {
+						const a = action as ChatUsageAction;
 						usage = a.usage;
 						break;
 					}
 
-					case ActionType.SessionTurnComplete: {
+					case ActionType.ChatTurnComplete: {
 						finish("complete");
 						break;
 					}
 
-					case ActionType.SessionError: {
-						const a = action as SessionErrorAction;
+					case ActionType.ChatError: {
+						const a = action as ChatErrorAction;
 						finish("error", a.error.message);
 						break;
 					}
 
-					case ActionType.SessionTurnCancelled: {
+					case ActionType.ChatTurnCancelled: {
 						finish("cancelled");
 						break;
 					}
@@ -327,10 +340,11 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 
 			// Dispatch turn start
 			this.client.dispatchAction(this.uri, {
-				type: ActionType.SessionTurnStarted,
+				type: ActionType.ChatTurnStarted,
 				turnId,
-				userMessage: {
+				message: {
 					text,
+					origin: { kind: MessageKind.User },
 					...(options?.attachments && options.attachments.length > 0 ? { attachments: options.attachments } : {}),
 				},
 			});
@@ -345,7 +359,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 		if (!this._activeTurnId) return;
 
 		this.client.dispatchAction(this.uri, {
-			type: ActionType.SessionTurnCancelled,
+			type: ActionType.ChatTurnCancelled,
 			turnId: this._activeTurnId,
 		});
 	}

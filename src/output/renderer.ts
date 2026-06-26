@@ -5,8 +5,8 @@
  * and turn lifecycle events to stdout with color formatting via picocolors.
  */
 
+import type { ErrorInfo, StringOrMarkdown, ToolCallResult, UsageInfo } from "@microsoft/agent-host-protocol";
 import pc from "picocolors";
-import type { ErrorInfo, StringOrMarkdown, ToolCallResult, UsageInfo } from "../protocol/state.js";
 import type { OutputFormatter } from "./format.js";
 
 /** Minimal info about a tool call ready for display. */

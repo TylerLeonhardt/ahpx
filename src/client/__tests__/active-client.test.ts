@@ -1,10 +1,10 @@
 import { EventEmitter } from "node:events";
+import type { StateAction } from "@microsoft/agent-host-protocol";
+import { ActionType } from "@microsoft/agent-host-protocol";
+import type { SessionActiveClient, SessionState, ToolDefinition } from "@microsoft/agent-host-protocol";
+import { SessionLifecycle, SessionStatus } from "@microsoft/agent-host-protocol";
 import { describe, expect, it } from "vitest";
 import type { AhpClient } from "../../client/index.js";
-import type { StateAction } from "../../protocol/actions.js";
-import { ActionType } from "../../protocol/actions.js";
-import type { SessionActiveClient, SessionState, ToolDefinition } from "../../protocol/state.js";
-import { SessionLifecycle, SessionStatus } from "../../protocol/state.js";
 import { ActiveClientManager } from "../active-client.js";
 
 const SESSION_URI = "copilot:/test-session";
@@ -21,7 +21,7 @@ function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 			modifiedAt: 1000,
 		},
 		lifecycle: SessionLifecycle.Ready,
-		turns: [],
+		chats: [],
 		...overrides,
 	};
 }
@@ -136,7 +136,7 @@ describe("ActiveClientManager", () => {
 		});
 
 		expect(dispatched).toHaveLength(1);
-		expect(dispatched[0].type).toBe(ActionType.SessionToolCallComplete);
+		expect(dispatched[0].type).toBe(ActionType.ChatToolCallComplete);
 
 		const action = dispatched[0] as { result: { success: boolean; pastTenseMessage: string } };
 		expect(action.result.success).toBe(true);

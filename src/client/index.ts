@@ -8,7 +8,7 @@
 
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { ActionEnvelope, StateAction } from "../protocol/actions.js";
+import type { ActionEnvelope, StateAction } from "@microsoft/agent-host-protocol";
 import type {
 	ContentEncoding,
 	FetchTurnsResult,
@@ -29,10 +29,10 @@ import type {
 	SessionConfigCompletionsParams,
 	SessionConfigCompletionsResult,
 	SubscribeResult,
-} from "../protocol/commands.js";
-import type { ProtocolNotification } from "../protocol/notifications.js";
-import type { SessionActiveClient, TerminalClaim, URI } from "../protocol/state.js";
-import { PROTOCOL_VERSION } from "../protocol/version/registry.js";
+} from "@microsoft/agent-host-protocol";
+import type { SessionActiveClient, TerminalClaim, URI } from "@microsoft/agent-host-protocol";
+import { PROTOCOL_VERSION } from "@microsoft/agent-host-protocol";
+import type { ProtocolNotification } from "../notifications.js";
 import { FileServingHandler } from "./file-serving.js";
 import { ProtocolLayer, type ProtocolLayerOptions } from "./protocol.js";
 import { SessionHandle } from "./session-handle.js";

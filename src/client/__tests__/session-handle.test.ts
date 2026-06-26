@@ -1,10 +1,16 @@
 import { EventEmitter } from "node:events";
+import type { ActionEnvelope, StateAction } from "@microsoft/agent-host-protocol";
+import { ActionType } from "@microsoft/agent-host-protocol";
+import type { ActiveTurn, ChatState, Message, SessionState, Turn } from "@microsoft/agent-host-protocol";
+import {
+	MessageKind,
+	ResponsePartKind,
+	SessionLifecycle,
+	SessionStatus,
+	TurnState,
+} from "@microsoft/agent-host-protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { AhpClient } from "../../client/index.js";
-import type { ActionEnvelope, StateAction } from "../../protocol/actions.js";
-import { ActionType } from "../../protocol/actions.js";
-import type { ActiveTurn, SessionState, Turn } from "../../protocol/state.js";
-import { ResponsePartKind, SessionLifecycle, SessionStatus, TurnState } from "../../protocol/state.js";
 import { SessionHandle } from "../session-handle.js";
 
 const SESSION_URI = "copilot:/test-session";
@@ -23,6 +29,21 @@ function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 			modifiedAt: 1000,
 		},
 		lifecycle: SessionLifecycle.Ready,
+		chats: [],
+		...overrides,
+	};
+}
+
+function message(text: string): Message {
+	return { text, origin: { kind: MessageKind.User } };
+}
+
+function makeChatState(overrides: Partial<ChatState> = {}): ChatState {
+	return {
+		resource: SESSION_URI,
+		title: "Test Session",
+		status: SessionStatus.Idle,
+		modifiedAt: "2026-01-01T00:00:00.000Z",
 		turns: [],
 		...overrides,
 	};
@@ -37,6 +58,7 @@ function createMockClient() {
 	const dispatched: StateAction[] = [];
 	const dispatchChannels: string[] = [];
 	const sessionStates = new Map<string, SessionState>();
+	const chatStates = new Map<string, ChatState>();
 	let connected = true;
 
 	const client = Object.assign(emitter, {
@@ -51,6 +73,9 @@ function createMockClient() {
 			getSession(uri: string) {
 				return sessionStates.get(uri);
 			},
+			getChat(uri: string) {
+				return chatStates.get(uri);
+			},
 		},
 		disposeSession: vi.fn().mockResolvedValue(null),
 	}) as unknown as AhpClient;
@@ -61,6 +86,9 @@ function createMockClient() {
 		dispatchChannels,
 		setSessionState(uri: string, state: SessionState) {
 			sessionStates.set(uri, state);
+		},
+		setChatState(uri: string, state: ChatState) {
+			chatStates.set(uri, state);
 		},
 		setConnected(value: boolean) {
 			connected = value;
@@ -101,17 +129,17 @@ describe("SessionHandle", () => {
 		});
 
 		it("reads activeTurn from session state", () => {
-			const { client, setSessionState } = createMockClient();
+			const { client, setChatState } = createMockClient();
 			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
 
 			const activeTurn: ActiveTurn = {
 				id: "turn-1",
-				userMessage: { text: "Hello" },
+				message: message("Hello"),
 				responseParts: [],
 				usage: undefined,
 			};
 
-			setSessionState(SESSION_URI, makeSessionState({ activeTurn }));
+			setChatState(SESSION_URI, makeChatState({ activeTurn }));
 			expect(handle.activeTurn).toBe(activeTurn);
 		});
 	});
@@ -126,7 +154,7 @@ describe("SessionHandle", () => {
 			// Action for our session — should emit
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId: "t1",
 					partId: "part-1",
 					content: "hello",
@@ -137,7 +165,7 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope(
 					{
-						type: ActionType.SessionDelta,
+						type: ActionType.ChatDelta,
 						turnId: "t2",
 						partId: "part-1",
 						content: "world",
@@ -163,25 +191,25 @@ describe("SessionHandle", () => {
 		});
 
 		it("emits turnComplete when a turn completes", () => {
-			const { client, setSessionState, emitAction } = createMockClient();
+			const { client, setChatState, emitAction } = createMockClient();
 			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
 
 			const completedTurn: Turn = {
 				id: "turn-1",
-				userMessage: { text: "Hello" },
+				message: message("Hello"),
 				responseParts: [{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" }],
 				usage: undefined,
 				state: TurnState.Complete,
 			};
 
-			setSessionState(SESSION_URI, makeSessionState({ turns: [completedTurn] }));
+			setChatState(SESSION_URI, makeChatState({ turns: [completedTurn] }));
 
 			const handler = vi.fn();
 			handle.on("turnComplete", handler);
 
 			emitAction(
 				envelope({
-					type: ActionType.SessionTurnComplete,
+					type: ActionType.ChatTurnComplete,
 					turnId: "turn-1",
 				}),
 			);
@@ -199,7 +227,7 @@ describe("SessionHandle", () => {
 
 			emitAction(
 				envelope({
-					type: ActionType.SessionError,
+					type: ActionType.ChatError,
 					turnId: "t1",
 					error: { errorType: "error", message: "Something went wrong" },
 				}),
@@ -238,7 +266,7 @@ describe("SessionHandle", () => {
 			// Action for session 1
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId: "t1",
 					partId: "part-1",
 					content: "for session 1",
@@ -249,7 +277,7 @@ describe("SessionHandle", () => {
 			emitAction(
 				envelope(
 					{
-						type: ActionType.SessionDelta,
+						type: ActionType.ChatDelta,
 						turnId: "t2",
 						partId: "part-1",
 						content: "for session 2",
@@ -382,12 +410,12 @@ describe("SessionHandle", () => {
 			const turnPromise = handle.sendPrompt("hello");
 
 			expect(dispatched.length).toBe(1);
-			expect(dispatched[0].type).toBe(ActionType.SessionTurnStarted);
+			expect(dispatched[0].type).toBe(ActionType.ChatTurnStarted);
 
 			// Simulate turn complete
 			emitAction(
 				envelope({
-					type: ActionType.SessionTurnComplete,
+					type: ActionType.ChatTurnComplete,
 					turnId: (dispatched[0] as { turnId: string }).turnId,
 				}),
 			);
@@ -412,17 +440,17 @@ describe("SessionHandle", () => {
 
 			// Should have dispatched turnStarted
 			expect(dispatched).toHaveLength(1);
-			expect(dispatched[0].type).toBe(ActionType.SessionTurnStarted);
-			const startAction = dispatched[0] as { turnId: string; userMessage: { text: string } };
+			expect(dispatched[0].type).toBe(ActionType.ChatTurnStarted);
+			const startAction = dispatched[0] as { turnId: string; message: { text: string } };
 			expect(dispatchChannels[0]).toBe(SESSION_URI);
-			expect(startAction.userMessage.text).toBe("Hello");
+			expect(startAction.message.text).toBe("Hello");
 
 			const turnId = startAction.turnId;
 
 			// Simulate response
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId,
 					partId: "part-1",
 					content: "Hi ",
@@ -430,7 +458,7 @@ describe("SessionHandle", () => {
 			);
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId,
 					partId: "part-1",
 					content: "there!",
@@ -438,7 +466,7 @@ describe("SessionHandle", () => {
 			);
 			emitAction(
 				envelope({
-					type: ActionType.SessionTurnComplete,
+					type: ActionType.ChatTurnComplete,
 					turnId,
 				}),
 			);
@@ -459,7 +487,7 @@ describe("SessionHandle", () => {
 
 			emitAction(
 				envelope({
-					type: ActionType.SessionToolCallStart,
+					type: ActionType.ChatToolCallStart,
 					turnId,
 					toolCallId: "tc-1",
 					toolName: "readFile",
@@ -468,7 +496,7 @@ describe("SessionHandle", () => {
 			);
 			emitAction(
 				envelope({
-					type: ActionType.SessionToolCallStart,
+					type: ActionType.ChatToolCallStart,
 					turnId,
 					toolCallId: "tc-2",
 					toolName: "writeFile",
@@ -477,7 +505,7 @@ describe("SessionHandle", () => {
 			);
 			emitAction(
 				envelope({
-					type: ActionType.SessionTurnComplete,
+					type: ActionType.ChatTurnComplete,
 					turnId,
 				}),
 			);
@@ -496,14 +524,14 @@ describe("SessionHandle", () => {
 
 			emitAction(
 				envelope({
-					type: ActionType.SessionUsage,
+					type: ActionType.ChatUsage,
 					turnId,
 					usage: { inputTokens: 100, outputTokens: 50, model: "gpt-4" },
 				}),
 			);
 			emitAction(
 				envelope({
-					type: ActionType.SessionTurnComplete,
+					type: ActionType.ChatTurnComplete,
 					turnId,
 				}),
 			);
@@ -525,7 +553,7 @@ describe("SessionHandle", () => {
 
 			emitAction(
 				envelope({
-					type: ActionType.SessionError,
+					type: ActionType.ChatError,
 					turnId,
 					error: { errorType: "error", message: "Rate limited" },
 				}),
@@ -546,7 +574,7 @@ describe("SessionHandle", () => {
 
 			emitAction(
 				envelope({
-					type: ActionType.SessionTurnCancelled,
+					type: ActionType.ChatTurnCancelled,
 					turnId,
 				}),
 			);
@@ -566,7 +594,7 @@ describe("SessionHandle", () => {
 			// Delta from a different turn — should be ignored
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId: "different-turn",
 					partId: "part-1",
 					content: "stale data",
@@ -576,7 +604,7 @@ describe("SessionHandle", () => {
 			// Our turn completes
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId,
 					partId: "part-1",
 					content: "correct",
@@ -584,7 +612,7 @@ describe("SessionHandle", () => {
 			);
 			emitAction(
 				envelope({
-					type: ActionType.SessionTurnComplete,
+					type: ActionType.ChatTurnComplete,
 					turnId,
 				}),
 			);
@@ -654,7 +682,7 @@ describe("SessionHandle", () => {
 			// Simulate partial response before disconnect
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId,
 					partId: "part-1",
 					content: "partial ",
@@ -682,7 +710,7 @@ describe("SessionHandle", () => {
 			// Accumulate several deltas
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId,
 					partId: "part-1",
 					content: "Hello, ",
@@ -690,7 +718,7 @@ describe("SessionHandle", () => {
 			);
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId,
 					partId: "part-1",
 					content: "I am working on ",
@@ -698,7 +726,7 @@ describe("SessionHandle", () => {
 			);
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId,
 					partId: "part-1",
 					content: "your request",
@@ -748,7 +776,7 @@ describe("SessionHandle", () => {
 
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId,
 					partId: "part-1",
 					content: "All done!",
@@ -756,7 +784,7 @@ describe("SessionHandle", () => {
 			);
 			emitAction(
 				envelope({
-					type: ActionType.SessionTurnComplete,
+					type: ActionType.ChatTurnComplete,
 					turnId,
 				}),
 			);
@@ -786,7 +814,7 @@ describe("SessionHandle", () => {
 			await handle.cancelTurn();
 
 			expect(dispatched).toHaveLength(2);
-			expect(dispatched[1].type).toBe(ActionType.SessionTurnCancelled);
+			expect(dispatched[1].type).toBe(ActionType.ChatTurnCancelled);
 			expect((dispatched[1] as { turnId: string }).turnId).toBe(turnId);
 		});
 
@@ -842,7 +870,7 @@ describe("SessionHandle", () => {
 			// Should no longer receive events
 			emitAction(
 				envelope({
-					type: ActionType.SessionDelta,
+					type: ActionType.ChatDelta,
 					turnId: "t1",
 					partId: "part-1",
 					content: "late",

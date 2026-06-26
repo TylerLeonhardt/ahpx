@@ -1,6 +1,6 @@
+import { ToolResultContentType } from "@microsoft/agent-host-protocol";
+import type { ToolCallResult, UsageInfo } from "@microsoft/agent-host-protocol";
 import { describe, expect, it } from "vitest";
-import { ToolResultContentType } from "../../protocol/state.js";
-import type { ToolCallResult, UsageInfo } from "../../protocol/state.js";
 import { PromptRenderer } from "../renderer.js";
 import type { ToolCallInfo, WritableOutput } from "../renderer.js";
 
