@@ -1,7 +1,7 @@
+import type { ErrorInfo, ToolCallResult, UsageInfo } from "@microsoft/agent-host-protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { OutputFormatter } from "../../output/format.js";
 import type { ToolCallInfo } from "../../output/renderer.js";
-import type { ErrorInfo, ToolCallResult, UsageInfo } from "../../protocol/state.js";
 import type { AhpxEvent, EventForwarder } from "../forwarder.js";
 import { ForwardingFormatter, type ForwardingFormatterOptions } from "../forwarding-formatter.js";
 

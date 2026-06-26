@@ -7,7 +7,7 @@
  *   - quiet: Accumulates silently, prints only the final response
  */
 
-import type { ErrorInfo, ToolCallResult, UsageInfo } from "../protocol/state.js";
+import type { ErrorInfo, ToolCallResult, UsageInfo } from "@microsoft/agent-host-protocol";
 import type { ToolCallInfo } from "./renderer.js";
 
 export type OutputFormat = "text" | "json" | "quiet";

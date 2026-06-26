@@ -20,7 +20,7 @@ import { WebSocket, WebSocketServer } from "ws";
 
 // ── Protocol constants (mirroring src/protocol) ─────────────────────────
 
-const PROTOCOL_VERSION = "0.1.0";
+const PROTOCOL_VERSION = "0.4.0";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -279,17 +279,46 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 					resource: session.uri,
 					provider: session.provider,
 					title: session.title,
-					status: "idle",
+					status: 1,
 					createdAt: session.createdAt,
 					modifiedAt: session.createdAt,
 					model: session.model,
 				},
 				lifecycle: "ready",
+				chats: [
+					{
+						resource: session.uri,
+						title: session.title,
+						status: 1,
+						modifiedAt: new Date(session.createdAt).toISOString(),
+					},
+				],
+				defaultChat: session.uri,
+			},
+		};
+	}
+
+	/**
+	 * Chat-channel snapshot helper. ahpx uses a one-session / one-chat model
+	 * where the chat shares the session's URI; subscribing to the URI yields the
+	 * session snapshot and chat state is built from streamed `chat/*` actions.
+	 * Exposed for scenarios that subscribe to a distinct chat resource.
+	 */
+	function makeChatSnapshot(uri: string, session?: MockSession) {
+		return {
+			resource: uri,
+			fromSeq: serverSeq,
+			state: {
+				resource: uri,
+				title: session?.title ?? "",
+				status: 1,
+				modifiedAt: new Date(session?.createdAt ?? Date.now()).toISOString(),
 				turns: [],
 				activeTurn: undefined,
 			},
 		};
 	}
+	void makeChatSnapshot;
 
 	function handleRequest(ws: WebSocket, req: JsonRpcRequest) {
 		const params = (req.params ?? {}) as Record<string, unknown>;
@@ -395,7 +424,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 					return;
 				}
 
-				// Unknown channel — return empty snapshot
+				// Unknown channel — return empty session snapshot
 				sendResponse(ws, req.id, {
 					snapshot: {
 						resource: channel,
@@ -405,12 +434,12 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 								resource: channel,
 								provider: "mock-agent",
 								title: "Unknown Session",
-								status: "idle",
+								status: 1,
 								createdAt: Date.now(),
 								modifiedAt: Date.now(),
 							},
 							lifecycle: "creating",
-							turns: [],
+							chats: [],
 						},
 					},
 				});
@@ -533,7 +562,10 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			if (channel && !actionForScenario.session && !actionForScenario.terminal) {
 				if (typeof action.type === "string" && action.type.startsWith("terminal/")) {
 					actionForScenario.terminal = channel;
-				} else if (typeof action.type === "string" && action.type.startsWith("session/")) {
+				} else if (
+					typeof action.type === "string" &&
+					(action.type.startsWith("session/") || action.type.startsWith("chat/"))
+				) {
 					actionForScenario.session = channel;
 				}
 			}
@@ -591,14 +623,14 @@ export function echoScenario(): MockServerScenario {
 	return {
 		onDispatchAction(params, ctx) {
 			const action = params.action as Record<string, unknown>;
-			if (action.type === "session/turnStarted") {
+			if (action.type === "chat/turnStarted") {
 				const sessionUri = action.session as string;
 				const turnId = action.turnId as string;
-				const userMessage = action.userMessage as { text: string };
+				const message = action.message as { text: string };
 
 				// Send response part first
 				ctx.sendAction({
-					type: "session/responsePart",
+					type: "chat/responsePart",
 					session: sessionUri,
 					turnId,
 					part: {
@@ -609,10 +641,10 @@ export function echoScenario(): MockServerScenario {
 				});
 
 				// Send delta chunks
-				const chunks = userMessage.text.split(" ");
+				const chunks = message.text.split(" ");
 				for (const chunk of chunks) {
 					ctx.sendAction({
-						type: "session/delta",
+						type: "chat/delta",
 						session: sessionUri,
 						turnId,
 						partId: "part-1",
@@ -622,7 +654,7 @@ export function echoScenario(): MockServerScenario {
 
 				// Send usage
 				ctx.sendAction({
-					type: "session/usage",
+					type: "chat/usage",
 					session: sessionUri,
 					turnId,
 					usage: {
@@ -634,7 +666,7 @@ export function echoScenario(): MockServerScenario {
 
 				// Complete the turn
 				ctx.sendAction({
-					type: "session/turnComplete",
+					type: "chat/turnComplete",
 					session: sessionUri,
 					turnId,
 				});
@@ -657,25 +689,25 @@ export function toolCallScenario(options?: {
 		onDispatchAction(params, ctx) {
 			const action = params.action as Record<string, unknown>;
 
-			if (action.type === "session/turnStarted") {
+			if (action.type === "chat/turnStarted") {
 				const sessionUri = action.session as string;
 				const turnId = action.turnId as string;
 				const toolCallId = randomUUID();
 
 				// Tool call start
 				ctx.sendAction({
-					type: "session/toolCallStart",
+					type: "chat/toolCallStart",
 					session: sessionUri,
 					turnId,
 					toolCallId,
 					toolName,
 					displayName: `Run ${toolName}`,
-					...(options?.toolClientId ? { toolClientId: options.toolClientId } : {}),
+					...(options?.toolClientId ? { contributor: { kind: "client", clientId: options.toolClientId } } : {}),
 				});
 
 				// Response part for tool call
 				ctx.sendAction({
-					type: "session/responsePart",
+					type: "chat/responsePart",
 					session: sessionUri,
 					turnId,
 					part: {
@@ -685,14 +717,14 @@ export function toolCallScenario(options?: {
 							toolName,
 							displayName: `Run ${toolName}`,
 							status: "streaming",
-							...(options?.toolClientId ? { toolClientId: options.toolClientId } : {}),
+							...(options?.toolClientId ? { contributor: { kind: "client", clientId: options.toolClientId } } : {}),
 						},
 					},
 				});
 
 				// Tool call ready
 				ctx.sendAction({
-					type: "session/toolCallReady",
+					type: "chat/toolCallReady",
 					session: sessionUri,
 					turnId,
 					toolCallId,
@@ -702,7 +734,7 @@ export function toolCallScenario(options?: {
 				});
 			}
 
-			if (action.type === "session/toolCallConfirmed") {
+			if (action.type === "chat/toolCallConfirmed") {
 				const sessionUri = action.session as string;
 				const turnId = action.turnId as string;
 				const toolCallId = action.toolCallId as string;
@@ -711,7 +743,7 @@ export function toolCallScenario(options?: {
 				if (approved && sendResult) {
 					// Send tool completion
 					ctx.sendAction({
-						type: "session/toolCallComplete",
+						type: "chat/toolCallComplete",
 						session: sessionUri,
 						turnId,
 						toolCallId,
@@ -723,7 +755,7 @@ export function toolCallScenario(options?: {
 
 					// Send response text
 					ctx.sendAction({
-						type: "session/responsePart",
+						type: "chat/responsePart",
 						session: sessionUri,
 						turnId,
 						part: {
@@ -734,7 +766,7 @@ export function toolCallScenario(options?: {
 					});
 
 					ctx.sendAction({
-						type: "session/delta",
+						type: "chat/delta",
 						session: sessionUri,
 						turnId,
 						partId: "part-1",
@@ -743,14 +775,14 @@ export function toolCallScenario(options?: {
 
 					// Complete turn
 					ctx.sendAction({
-						type: "session/turnComplete",
+						type: "chat/turnComplete",
 						session: sessionUri,
 						turnId,
 					});
 				} else if (!approved) {
 					// Tool was denied — send response and complete
 					ctx.sendAction({
-						type: "session/responsePart",
+						type: "chat/responsePart",
 						session: sessionUri,
 						turnId,
 						part: {
@@ -761,7 +793,7 @@ export function toolCallScenario(options?: {
 					});
 
 					ctx.sendAction({
-						type: "session/delta",
+						type: "chat/delta",
 						session: sessionUri,
 						turnId,
 						partId: "part-1",
@@ -769,7 +801,7 @@ export function toolCallScenario(options?: {
 					});
 
 					ctx.sendAction({
-						type: "session/turnComplete",
+						type: "chat/turnComplete",
 						session: sessionUri,
 						turnId,
 					});

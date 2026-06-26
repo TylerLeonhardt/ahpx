@@ -1,20 +1,21 @@
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
-import type { AhpClient } from "../../client/index.js";
-import type { OutputFormatter } from "../../output/format.js";
-import type { WritableOutput } from "../../output/renderer.js";
-import type { ActionEnvelope, StateAction } from "../../protocol/actions.js";
-import { ActionType } from "../../protocol/actions.js";
-import type { SubscribeResult } from "../../protocol/commands.js";
-import type { SessionState } from "../../protocol/state.js";
+import type { ActionEnvelope, StateAction } from "@microsoft/agent-host-protocol";
+import { ActionType } from "@microsoft/agent-host-protocol";
+import type { SubscribeResult } from "@microsoft/agent-host-protocol";
+import type { ChatState, Message, SessionState } from "@microsoft/agent-host-protocol";
 import {
+	MessageKind,
 	ResponsePartKind,
 	SessionLifecycle,
 	SessionStatus,
 	ToolCallConfirmationReason,
 	ToolCallStatus,
 	TurnState,
-} from "../../protocol/state.js";
+} from "@microsoft/agent-host-protocol";
+import { describe, expect, it } from "vitest";
+import type { AhpClient } from "../../client/index.js";
+import type { OutputFormatter } from "../../output/format.js";
+import type { WritableOutput } from "../../output/renderer.js";
 import { SessionWatcher } from "../watcher.js";
 
 /** Captures output. */
@@ -67,6 +68,21 @@ function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 			modifiedAt: 1000,
 		},
 		lifecycle: SessionLifecycle.Ready,
+		chats: [],
+		...overrides,
+	};
+}
+
+function message(text: string): Message {
+	return { text, origin: { kind: MessageKind.User } };
+}
+
+function makeChatState(overrides: Partial<ChatState> = {}): ChatState {
+	return {
+		resource: "copilot:/test-session",
+		title: "Test Session",
+		status: SessionStatus.Idle,
+		modifiedAt: "2026-01-01T00:00:00.000Z",
 		turns: [],
 		...overrides,
 	};
@@ -81,6 +97,7 @@ function createMockClient() {
 	const emitter = new EventEmitter();
 	let seq = 0;
 	const sessionStates = new Map<string, SessionState>();
+	const chatStates = new Map<string, ChatState>();
 
 	const client = Object.assign(emitter, {
 		subscribe: async (_uri: string): Promise<SubscribeResult> => {
@@ -94,6 +111,7 @@ function createMockClient() {
 		},
 		state: {
 			getSession: (uri: string) => sessionStates.get(uri),
+			getChat: (uri: string) => chatStates.get(uri),
 			root: { agents: [] },
 		},
 		connected: true,
@@ -108,6 +126,9 @@ function createMockClient() {
 		},
 		setSessionState(uri: string, state: SessionState) {
 			sessionStates.set(uri, state);
+		},
+		setChatState(uri: string, state: ChatState) {
+			chatStates.set(uri, state);
 		},
 	};
 }
@@ -126,14 +147,14 @@ describe("SessionWatcher", () => {
 
 		// Simulate server streaming
 		emitAction({
-			type: ActionType.SessionDelta,
+			type: ActionType.ChatDelta,
 			turnId: "t1",
 			partId: "part-1",
 			content: "Hello world",
 		});
 
 		emitAction({
-			type: ActionType.SessionToolCallStart,
+			type: ActionType.ChatToolCallStart,
 			turnId: "t1",
 			toolCallId: "tc1",
 			toolName: "readFile",
@@ -154,16 +175,22 @@ describe("SessionWatcher", () => {
 	});
 
 	it("shows current state when joining mid-turn", async () => {
-		const { client, setSessionState } = createMockClient();
+		const { client, setSessionState, setChatState } = createMockClient();
 
 		// Set up a session with an active turn that has streaming text
 		setSessionState(
 			SESSION_URI,
 			makeSessionState({
 				summary: { ...makeSessionState().summary, resource: SESSION_URI, status: SessionStatus.InProgress },
+			}),
+		);
+		setChatState(
+			SESSION_URI,
+			makeChatState({
+				status: SessionStatus.InProgress,
 				activeTurn: {
 					id: "t1",
-					userMessage: { text: "Hello" },
+					message: message("Hello"),
 					responseParts: [
 						{ kind: ResponsePartKind.Reasoning, id: "reason-1", content: "thinking..." },
 						{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Existing text" },
@@ -253,7 +280,7 @@ describe("SessionWatcher", () => {
 
 		emitAction(
 			{
-				type: ActionType.SessionDelta,
+				type: ActionType.ChatDelta,
 				turnId: "t1",
 				partId: "part-1",
 				content: "Wrong session",
@@ -269,19 +296,20 @@ describe("SessionWatcher", () => {
 	});
 
 	it("streams turn complete and error actions", async () => {
-		const { client, emitAction, setSessionState } = createMockClient();
-		const state = makeSessionState({
+		const { client, emitAction, setSessionState, setChatState } = createMockClient();
+		setSessionState(SESSION_URI, makeSessionState());
+		const state = makeChatState({
 			turns: [
 				{
 					id: "t1",
-					userMessage: { text: "Hello" },
+					message: message("Hello"),
 					responseParts: [{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" }],
 					usage: undefined,
 					state: TurnState.Complete,
 				},
 			],
 		});
-		setSessionState(SESSION_URI, state);
+		setChatState(SESSION_URI, state);
 		const formatter = createMockFormatter();
 
 		const watcher = new SessionWatcher(client, SESSION_URI, formatter);
@@ -289,18 +317,18 @@ describe("SessionWatcher", () => {
 		await tick();
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId: "t2",
 		});
 
 		emitAction({
-			type: ActionType.SessionError,
+			type: ActionType.ChatError,
 			turnId: "t3",
 			error: { errorType: "runtime", message: "Something went wrong" },
 		});
 
 		emitAction({
-			type: ActionType.SessionTurnCancelled,
+			type: ActionType.ChatTurnCancelled,
 			turnId: "t4",
 		});
 

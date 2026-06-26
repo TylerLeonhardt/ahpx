@@ -22,44 +22,69 @@ Key design principles:
 
 ## State tree
 
-The state is addressed by URI. Two resource types exist:
+The state is addressed by URI. The main resource types are:
 
 | URI | Type | Contents |
 |-----|------|----------|
 | `ahp-root://` | Root state | Available agents, models, active session count |
-| `<provider>:/<uuid>` | Session state | Turns, tool calls, permissions, streaming text |
+| `<provider>:/<uuid>` | Session state | Summary, lifecycle, chats catalog, active client, customizations |
+| chat channel | Chat state | Turns, the active turn, tool calls, streaming response parts |
+
+> **Session / chat split (0.3+).** A session's *coordination* state (summary,
+> lifecycle, the catalogue of chats, the active client) is separate from a chat's
+> *conversation* state (turns and the in-progress turn). A session lists its chats
+> in `chats` and names a `defaultChat`. ahpx is a one-session / one-chat CLI, so
+> it treats the session's default chat as sharing the **same URI** as the session
+> and subscribes to both views under that key.
 
 **Root state:**
 ```
 ahp-root://
-├── agents: IAgentInfo[]
+├── agents: AgentInfo[]
 │   ├── provider: string          (e.g. "copilot")
 │   ├── displayName: string
 │   ├── description: string
-│   ├── models: ISessionModelInfo[]
-│   └── protectedResources?: IProtectedResourceMetadata[]
+│   ├── models: SessionModelInfo[]
+│   └── protectedResources?: ProtectedResourceMetadata[]
 └── activeSessions?: number
 ```
 
-**Session state:**
+**Session state** (coordination — `SessionState`):
 ```
 <provider>:/<uuid>
-├── summary: ISessionSummary
+├── summary: SessionSummary
 │   ├── resource, provider, title, status, createdAt, modifiedAt, model?
 ├── lifecycle: "creating" | "ready" | "creationFailed"
-├── creationError?: IErrorInfo
-├── serverTools?: IToolDefinition[]
-├── activeClient?: ISessionActiveClient
-├── turns: ITurn[]               (completed turns)
-└── activeTurn?: IActiveTurn     (in-progress turn)
-    ├── id, userMessage
-    ├── streamingText: string    (accumulated deltas)
-    ├── responseParts: IResponsePart[]
-    ├── toolCalls: Record<string, IToolCallState>
-    ├── pendingPermissions: Record<string, IPermissionRequest>
-    ├── reasoning: string
-    └── usage?: IUsageInfo
+├── serverTools?: ToolDefinition[]
+├── activeClient?: SessionActiveClient
+├── customizations?: Customization[]
+├── chats: ChatSummary[]          (catalogue of this session's chats)
+└── defaultChat?: URI             (the chat ahpx maps to the session URI)
 ```
+
+**Chat state** (conversation — `ChatState`):
+```
+chat channel
+├── resource, title, status, modifiedAt
+├── turns: Turn[]                 (completed turns)
+│   └── { id, message, responseParts[], usage, state, error? }
+├── activeTurn?: ActiveTurn       (in-progress turn)
+│   ├── id
+│   ├── message: Message          ({ text, origin: { kind }, attachments? })
+│   ├── responseParts: ResponsePart[]   (markdown, toolCall, reasoning, …)
+│   └── usage?: UsageInfo
+├── steeringMessage?: PendingMessage
+├── queuedMessages?: PendingMessage[]
+└── inputRequests?: ChatInputRequest[]
+```
+
+> **Response-parts model.** Streaming text, tool calls, and reasoning are not
+> separate maps on the turn — they are ordered entries in `responseParts[]`,
+> discriminated by `kind` (`ResponsePartKind.Markdown`, `.ToolCall`,
+> `.Reasoning`, …). A tool call is a `ResponsePart` whose `toolCall` carries a
+> `ToolCallState` (a status discriminated union with an optional `contributor`).
+> Derive a turn's text by concatenating its markdown parts; iterate
+> `responseParts` filtered by kind to find tool calls.
 
 ## Connection lifecycle
 
@@ -118,27 +143,29 @@ Wait for `session/ready` (success) or `session/creationFailed` (failure) action.
 
 ### 4. Start a turn
 
-Dispatch a `session/turnStarted` action via fire-and-forget notification:
+Dispatch a `chat/turnStarted` action via fire-and-forget notification. The
+target channel is carried in `params.channel` (the chat URI — for ahpx, the same
+as the session URI); the action no longer carries a `session` field:
 
 ```json
 {
   "jsonrpc": "2.0",
   "method": "dispatchAction",
   "params": {
+    "channel": "copilot:/<uuid>",
     "clientSeq": 1,
     "action": {
-      "type": "session/turnStarted",
-      "session": "copilot:/<uuid>",
+      "type": "chat/turnStarted",
       "turnId": "<unique-turn-id>",
-      "userMessage": { "text": "Hello, world!" }
+      "message": { "text": "Hello, world!", "origin": { "kind": "user" } }
     }
   }
 }
 ```
 
-The server streams back `session/delta` actions (text chunks), possibly
-`session/toolCallStart` / `session/permissionRequest` actions, and finally
-`session/turnComplete`.
+The server streams back `chat/responsePart` / `chat/delta` actions (text chunks),
+possibly `chat/toolCallStart` / `chat/toolCallReady` actions, a `chat/usage`
+action, and finally `chat/turnComplete`.
 
 ### 5. Handle tool calls
 
@@ -150,35 +177,27 @@ streaming → pending-confirmation → running → completed
             OR → cancelled (denied/skipped)
 ```
 
-When a tool needs confirmation (`session/toolCallReady` without `confirmed`),
-dispatch:
+When a tool needs confirmation (`chat/toolCallReady` without `confirmed`),
+dispatch on the chat channel:
 
 ```json
 {
-  "type": "session/toolCallConfirmed",
-  "session": "<uri>",
+  "type": "chat/toolCallConfirmed",
   "turnId": "<turn-id>",
   "toolCallId": "<tool-call-id>",
   "approved": true,
-  "confirmed": "user-action"
+  "reason": "user-action"
 }
 ```
 
-### 6. Handle permissions
+### 6. Permissions via tool-call confirmation
 
-When the server dispatches `session/permissionRequest`, respond with:
-
-```json
-{
-  "type": "session/permissionResolved",
-  "session": "<uri>",
-  "turnId": "<turn-id>",
-  "requestId": "<request-id>",
-  "approved": true
-}
-```
-
-Permission kinds: `shell`, `write`, `mcp`, `read`, `url`
+There is no separate permission action pair. A tool call that requires user
+approval surfaces as `chat/toolCallReady` (without `confirmed`); the client
+approves or denies by dispatching `chat/toolCallConfirmed` as above. Some tools
+also require result approval — the server sends `chat/toolCallComplete` with
+`requiresResultConfirmation`, and the client replies with
+`chat/toolCallResultConfirmed`.
 
 ### 7. Reconnection
 
@@ -210,68 +229,71 @@ Actions are the sole mechanism for state mutation. Each action is wrapped in an
 `ActionEnvelope` with a monotonically increasing `serverSeq` and optional
 `origin` (client who dispatched it).
 
-### All action types (25 total)
+### Action types
+
+Channel-scoped: an action no longer carries a `session` field — the target
+channel travels in the envelope (`ActionEnvelope.channel`) and in
+`dispatchAction`'s `params.channel`. Turn, streaming, tool-call, usage,
+reasoning, and error actions live on the **chat** channel (`chat/*`); session
+lifecycle and metadata actions live on the **session** channel (`session/*`).
 
 #### Root actions (server-only)
 | Type | Payload | Description |
 |------|---------|-------------|
-| `root/agentsChanged` | `agents: IAgentInfo[]` | Available agents or models changed |
+| `root/agentsChanged` | `agents: AgentInfo[]` | Available agents or models changed |
 | `root/activeSessionsChanged` | `activeSessions: number` | Active session count changed |
 
-#### Session lifecycle (server-only)
-| Type | Payload | Description |
-|------|---------|-------------|
-| `session/ready` | `session` | Session backend initialized |
-| `session/creationFailed` | `session, error` | Session failed to initialize |
-
-#### Turn lifecycle
+#### Session lifecycle & metadata (`session/*`)
 | Type | Client? | Payload | Description |
 |------|---------|---------|-------------|
-| `session/turnStarted` | **Yes** | `session, turnId, userMessage` | Start a new turn |
-| `session/delta` | No | `session, turnId, content` | Streaming text chunk |
-| `session/responsePart` | No | `session, turnId, part` | Structured content part |
-| `session/turnComplete` | No | `session, turnId` | Turn finished |
-| `session/turnCancelled` | **Yes** | `session, turnId` | Abort in-progress turn |
-| `session/error` | No | `session, turnId, error` | Error during turn |
+| `session/ready` | No | — | Session backend initialized |
+| `session/creationFailed` | No | `error` | Session failed to initialize |
+| `session/titleChanged` | No | `title` | Session title updated |
+| `session/modelChanged` | **Yes** | `model` | Model changed for session |
+| `session/agentChanged` | **Yes** | `agent` | Custom agent changed |
+| `session/serverToolsChanged` | No | `tools` | Server tools changed |
+| `session/activeClientChanged` | **Yes** | `activeClient` | Active client (tools + customizations) changed |
+| `session/activeClientToolsChanged` | **Yes** | `tools` | Active client's tools changed |
+| `session/customizationsChanged` | No | `customizations` | Full customization list replaced |
+| `session/customizationToggled` | **Yes** | `id, enabled` | Enable/disable a container customization |
+| `session/chatAdded` / `chatRemoved` / `chatUpdated` | No | `chat` | Session's chat catalogue changed |
+| `session/defaultChatChanged` | No | `defaultChat` | Default chat pointer changed |
 
-#### Tool calls
+#### Turn lifecycle (`chat/*`)
 | Type | Client? | Payload | Description |
 |------|---------|---------|-------------|
-| `session/toolCallStart` | No | `session, turnId, toolCallId, toolName, displayName` | Tool invocation began |
-| `session/toolCallDelta` | No | `session, turnId, toolCallId, content` | Streaming tool parameters |
-| `session/toolCallReady` | No | `session, turnId, toolCallId, invocationMessage, toolInput?` | Parameters complete; ready for execution |
-| `session/toolCallConfirmed` | **Yes** | `session, turnId, toolCallId, approved, confirmed/reason` | Approve or deny tool call |
-| `session/toolCallComplete` | **Yes** | `session, turnId, toolCallId, result` | Tool execution finished |
-| `session/toolCallResultConfirmed` | **Yes** | `session, turnId, toolCallId, approved` | Approve or deny tool result |
+| `chat/turnStarted` | **Yes** | `turnId, message` | Start a new turn (`message: { text, origin: { kind } }`) |
+| `chat/delta` | No | `turnId, partId, content` | Streaming text chunk appended to a response part |
+| `chat/responsePart` | No | `turnId, part` | Structured response part (markdown / toolCall / reasoning) |
+| `chat/usage` | No | `turnId, usage` | Token usage report |
+| `chat/reasoning` | No | `turnId, content` | Model reasoning/thinking text |
+| `chat/turnComplete` | No | `turnId` | Turn finished |
+| `chat/turnCancelled` | **Yes** | `turnId` | Abort in-progress turn |
+| `chat/error` | No | `turnId, error` | Error during turn |
+| `chat/truncated` | **Yes** | `turnId?` | Truncate turns from history |
 
-#### Permissions
+#### Tool calls (`chat/*`)
 | Type | Client? | Payload | Description |
 |------|---------|---------|-------------|
-| `session/permissionRequest` | No | `session, turnId, request` | Permission needed from user |
-| `session/permissionResolved` | **Yes** | `session, turnId, requestId, approved` | Permission granted or denied |
+| `chat/toolCallStart` | No | `turnId, toolCallId, toolName, displayName, contributor?` | Tool invocation began |
+| `chat/toolCallDelta` | No | `turnId, toolCallId, content` | Streaming tool parameters |
+| `chat/toolCallReady` | No | `turnId, toolCallId, invocationMessage, toolInput?, confirmed?` | Parameters complete; ready (or auto-confirmed) |
+| `chat/toolCallConfirmed` | **Yes** | `turnId, toolCallId, approved, reason?` | Approve or deny a tool call |
+| `chat/toolCallComplete` | **Yes** | `turnId, toolCallId, result` | Tool execution finished |
+| `chat/toolCallResultConfirmed` | **Yes** | `turnId, toolCallId, approved` | Approve or deny a tool result |
 
-#### Metadata (server-originated, some client-dispatchable)
-| Type | Client? | Payload | Description |
-|------|---------|---------|-------------|
-| `session/titleChanged` | No | `session, title` | Session title updated |
-| `session/usage` | No | `session, turnId, usage` | Token usage report |
-| `session/reasoning` | No | `session, turnId, content` | Model reasoning/thinking text |
-| `session/modelChanged` | **Yes** | `session, model` | Model changed for session |
-| `session/serverToolsChanged` | No | `session, tools` | Server tools changed |
-| `session/activeClientChanged` | **Yes** | `session, activeClient` | Active client changed |
-| `session/activeClientToolsChanged` | **Yes** | `session, tools` | Active client's tools changed |
+> Permissions are expressed through the tool-call confirmation flow
+> (`chat/toolCallReady` → `chat/toolCallConfirmed`), not a separate permission
+> action pair. The `contributor` on a tool call identifies who provides the tool
+> (`{ kind: "client", clientId }` for client-contributed tools).
 
-### Client-dispatchable actions (9 total)
+#### Pending / queued messages & input (`chat/*`)
+`chat/pendingMessageSet`, `chat/pendingMessageRemoved`,
+`chat/queuedMessagesReordered`, `chat/inputRequested`, `chat/inputAnswerChanged`,
+`chat/inputCompleted`.
 
-1. `session/turnStarted`
-2. `session/turnCancelled`
-3. `session/toolCallConfirmed`
-4. `session/toolCallComplete`
-5. `session/toolCallResultConfirmed`
-6. `session/permissionResolved`
-7. `session/modelChanged`
-8. `session/activeClientChanged`
-9. `session/activeClientToolsChanged`
+Client-dispatchability is encoded in the package's `IS_CLIENT_DISPATCHABLE` map
+(`isClientDispatchable(type)`); the **Client?** columns above reflect it.
 
 ## JSON-RPC commands
 
@@ -281,28 +303,34 @@ Actions are the sole mechanism for state mutation. Each action is wrapped in an
 |--------|--------|--------|-------------|
 | `initialize` | `protocolVersion, clientId, initialSubscriptions?` | `protocolVersion, serverSeq, snapshots[], defaultDirectory?` | Establish connection |
 | `reconnect` | `clientId, lastSeenServerSeq, subscriptions[]` | `{type: "replay", actions[]}` or `{type: "snapshot", snapshots[]}` | Re-establish dropped connection |
-| `subscribe` | `resource` | `snapshot` | Subscribe to URI state |
-| `createSession` | `session, provider?, model?, workingDirectory?` | `null` | Create new session |
-| `disposeSession` | `session` | `null` | Dispose session |
-| `listSessions` | `{}` | `sessions: ISessionSummary[]` | List all sessions |
-| `fetchContent` | `uri` | `data, encoding, mimeType?` | Fetch large content by reference |
-| `browseDirectory` | `uri?` | `entries[], canBrowseParent` | List directory entries |
-| `fetchTurns` | `session, before?, limit?` | `turns[], hasMore` | Fetch historical turns |
+| `subscribe` | `channel` | `snapshot` | Subscribe to URI state |
+| `createSession` | `channel, provider?, model?, workingDirectory?, activeClient?` | `null` | Create new session |
+| `disposeSession` | `channel` | `null` | Dispose session |
+| `listSessions` | `{}` | `sessions: SessionSummary[]` | List all sessions |
+| `resourceRead` | `channel/uri` | `data, encoding, mimeType?` | Read a resource / large content by reference |
+| `resourceList` | `uri?` | `entries[]` | List directory entries |
+| `fetchTurns` | `channel, before?, limit?` | `turns[], hasMore` | Fetch historical turns |
 | `authenticate` | `resource, token` | `{}` | Push Bearer token for protected resource |
+
+Most command params extend `BaseParams`, which carries the target `channel` URI.
 
 ### Notifications (fire-and-forget)
 
 **Client → Server:**
 | Method | Params | Description |
 |--------|--------|-------------|
-| `unsubscribe` | `resource` | Stop receiving updates for URI |
-| `dispatchAction` | `clientSeq, action` | Dispatch state-changing action (write-ahead) |
+| `unsubscribe` | `channel` | Stop receiving updates for URI |
+| `dispatchAction` | `channel, clientSeq, action` | Dispatch state-changing action (write-ahead) |
 
 **Server → Client:**
 | Method | Params | Description |
 |--------|--------|-------------|
 | `action` | `ActionEnvelope` | Broadcast action to subscribed clients |
-| `notification` | `IProtocolNotification` | Broadcast notification (session added/removed, auth required) |
+| `root/sessionAdded` / `root/sessionRemoved` / `root/sessionSummaryChanged` / `auth/required` | `*Params` | Notifications (session list churn, auth required) |
+
+> The package discriminates notifications by JSON-RPC **method** — its
+> notification param types carry no `type` field. ahpx layers a `type`
+> discriminator on top in `src/notifications.ts` (see the architecture skill).
 
 ## Error codes
 
@@ -348,25 +376,30 @@ delta, add tool call). Rare conflicts resolved by server-wins semantics.
 
 ## Authentication
 
-When an agent declares `protectedResources` in its `IAgentInfo`:
+When an agent declares `protectedResources` in its `AgentInfo`:
 
-1. Server sends `notify/authRequired` notification
+1. Server sends an `auth/required` notification
 2. Client obtains Bearer token from the declared `authorization_servers`
 3. Client pushes token via `authenticate` command
 4. Server validates and responds with `{}` or error `-32007`
 
-Token expiry triggers a new `notify/authRequired` notification with
-`reason: "expired"`.
+Token expiry triggers a new `auth/required` notification with
+`reason: AuthRequiredReason.Expired`.
 
 ## Protocol notifications
 
-Three notification types (NOT part of state tree, NOT replayed on reconnect):
+Notifications are addressed by JSON-RPC method (NOT part of the state tree, NOT
+replayed on reconnect):
 
-| Type | Payload | Description |
+| Method | Payload | Description |
 |------|---------|-------------|
-| `notify/sessionAdded` | `summary: ISessionSummary` | New session created |
-| `notify/sessionRemoved` | `session: URI` | Session disposed |
-| `notify/authRequired` | `resource, reason` | Authentication needed or expired |
+| `root/sessionAdded` | `summary: SessionSummary` | New session created |
+| `root/sessionRemoved` | `session: URI` | Session disposed |
+| `root/sessionSummaryChanged` | `summary` | Session summary changed |
+| `auth/required` | `resource, reason` | Authentication needed or expired |
+
+Re-fetch the session list via `listSessions()` after reconnecting, since
+notifications are not replayed.
 
 ## Testing with an AHP server
 

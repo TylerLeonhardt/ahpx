@@ -6,9 +6,9 @@
  * active status and registering tools.
  */
 
-import { ActionType } from "../protocol/actions.js";
-import type { SessionActiveClient, ToolDefinition, ToolResultContent, URI } from "../protocol/state.js";
-import { ToolResultContentType } from "../protocol/state.js";
+import { ActionType } from "@microsoft/agent-host-protocol";
+import type { SessionActiveClient, ToolDefinition, ToolResultContent, URI } from "@microsoft/agent-host-protocol";
+import { ToolResultContentType } from "@microsoft/agent-host-protocol";
 import type { AhpClient } from "./index.js";
 
 /**
@@ -87,7 +87,7 @@ export class ActiveClientManager {
 		result: { success: boolean; pastTenseMessage: string; content?: Array<{ type: "text"; text: string }> },
 	): void {
 		this.client.dispatchAction(sessionUri, {
-			type: ActionType.SessionToolCallComplete,
+			type: ActionType.ChatToolCallComplete,
 			turnId,
 			toolCallId,
 			result: {

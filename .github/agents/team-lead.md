@@ -24,7 +24,7 @@ Before starting work, ensure you have context from these project skills:
 - **`.github/skills/ahp-protocol/SKILL.md`** — the AHP protocol: state model,
   actions, JSON-RPC commands, connection lifecycle, write-ahead reconciliation
 - **`.github/skills/ahpx-architecture/SKILL.md`** — the ahpx codebase: 3-layer
-  client, session management, prompting, config, vendored protocol types
+  client, session management, prompting, config, official protocol package
 
 Read these skills before making changes. They are the project's institutional
 memory.
@@ -93,10 +93,11 @@ Key things to know when working on ahpx:
 
 - **Three-layer client** (Transport → Protocol → Client) — changes to the
   protocol layer should not leak into the transport layer, and vice versa
-- **Vendored protocol types** in `src/protocol/` — these come from the upstream
-  `agent-host-protocol` repo. Don't modify them without syncing upstream.
-- **Pure reducers** — `rootReducer` and `sessionReducer` must remain pure
-  functions (no side effects, no I/O)
+- **Official protocol types** from `@microsoft/agent-host-protocol` — ahpx
+  imports all protocol types, reducers, and constants from this npm package.
+  Upgrade it via the `ahp-package-upgrader` agent; don't vendor or hand-edit types.
+- **Pure reducers** — `rootReducer`, `sessionReducer`, and `chatReducer` (from the
+  package) must be used as pure functions (no side effects, no I/O)
 - **Output formatters** — new output behavior should implement the
   `OutputFormatter` interface, not modify existing formatters
 - **Atomic file writes** — any file persistence must use temp + rename pattern

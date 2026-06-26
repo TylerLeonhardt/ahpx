@@ -10,11 +10,11 @@
  * never disrupts the primary output pipeline.
  */
 
+import type { ErrorInfo, ToolCallResult, UsageInfo } from "@microsoft/agent-host-protocol";
 import { createLogger } from "../logger.js";
 import type { OutputFormatter } from "../output/format.js";
 import type { JsonEventType } from "../output/json-formatter.js";
 import type { ToolCallInfo } from "../output/renderer.js";
-import type { ErrorInfo, ToolCallResult, UsageInfo } from "../protocol/state.js";
 import type { AhpxEvent, EventForwarder } from "./forwarder.js";
 
 const log = createLogger("forwarding-formatter");

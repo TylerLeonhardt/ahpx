@@ -123,7 +123,7 @@ export type {
 	ActiveTurn,
 	Turn,
 	ToolCallState,
-	UserMessage,
+	Message,
 	MessageAttachment,
 	MessageAttachmentBase,
 	SimpleMessageAttachment,
@@ -156,31 +156,31 @@ export type {
 	TerminalContentPart,
 	TerminalUnclassifiedPart,
 	TerminalCommandPart,
-	SessionInputRequest,
-	SessionInputQuestion,
-	SessionInputTextQuestion,
-	SessionInputNumberQuestion,
-	SessionInputBooleanQuestion,
-	SessionInputSingleSelectQuestion,
-	SessionInputMultiSelectQuestion,
-	SessionInputOption,
-	SessionInputAnswer,
-	SessionInputAnswered,
-	SessionInputSkipped,
-	SessionInputAnswerValue,
+	ChatInputRequest,
+	ChatInputQuestion,
+	ChatInputTextQuestion,
+	ChatInputNumberQuestion,
+	ChatInputBooleanQuestion,
+	ChatInputSingleSelectQuestion,
+	ChatInputMultiSelectQuestion,
+	ChatInputOption,
+	ChatInputAnswer,
+	ChatInputAnswered,
+	ChatInputSkipped,
+	ChatInputAnswerValue,
 	ToolCallResult,
 	ToolResultContent,
 	ToolResultTextContent,
 	ToolResultTerminalContent,
 	ToolResultSubagentContent,
 	ToolResultFileEditContent,
-} from "./protocol/index.js";
+} from "@microsoft/agent-host-protocol";
 
-export type {
-	CustomizationRef,
-	SessionCustomization,
-	Icon,
-} from "./protocol/state.js";
+export type { CustomizationRef, Icon } from "./customizations/types.js";
+/** A customization active in a session (official `Customization` union element). */
+export type SessionCustomization = NonNullable<
+	import("@microsoft/agent-host-protocol").SessionState["customizations"]
+>[number];
 
 // State enums
 export {
@@ -196,28 +196,28 @@ export {
 	ConfirmationOptionKind,
 	ToolResultContentType,
 	PendingMessageKind,
-	SessionInputAnswerState,
-	SessionInputAnswerValueKind,
-	SessionInputQuestionKind,
-	SessionInputResponseKind,
+	ChatInputAnswerState,
+	ChatInputAnswerValueKind,
+	ChatInputQuestionKind,
+	ChatInputResponseKind,
 	TerminalClaimKind,
-} from "./protocol/index.js";
+} from "@microsoft/agent-host-protocol";
 
 // Action types
-export type { ActionEnvelope, StateAction } from "./protocol/index.js";
-export { ActionType } from "./protocol/index.js";
+export type { ActionEnvelope, StateAction } from "@microsoft/agent-host-protocol";
+export { ActionType } from "@microsoft/agent-host-protocol";
 
 // Action interfaces
 export type {
-	SessionToolCallContentChangedAction,
-	SessionInputRequestedAction,
-	SessionInputAnswerChangedAction,
-	SessionInputCompletedAction,
+	ChatToolCallContentChangedAction,
+	ChatInputRequestedAction,
+	ChatInputAnswerChangedAction,
+	ChatInputCompletedAction,
 	SessionIsReadChangedAction,
 	SessionIsArchivedChangedAction,
 	SessionActivityChangedAction,
 	SessionConfigChangedAction,
-	SessionChangesetsChangedAction,
+	ChangesetStatusChangedAction,
 	RootTerminalsChangedAction,
 	RootConfigChangedAction,
 	TerminalAction,
@@ -234,7 +234,7 @@ export type {
 	TerminalCommandDetectionAvailableAction,
 	TerminalCommandExecutedAction,
 	TerminalCommandFinishedAction,
-} from "./protocol/index.js";
+} from "@microsoft/agent-host-protocol";
 
 // Command result types (returned from AhpClient methods)
 export type {
@@ -265,15 +265,15 @@ export type {
 	SessionConfigCompletionsResult,
 	CreateTerminalParams,
 	DisposeTerminalParams,
-} from "./protocol/index.js";
+} from "@microsoft/agent-host-protocol";
 
-export { ContentEncoding, ReconnectResultType } from "./protocol/index.js";
+export { ContentEncoding, ReconnectResultType } from "@microsoft/agent-host-protocol";
 
 // Notification types (emitted by AhpClient 'notification' event)
-export type { ProtocolNotification, SessionSummaryChangedNotification } from "./protocol/index.js";
+export type { ProtocolNotification, SessionSummaryChangedNotification } from "./notifications.js";
 
 // Notification enums
-export { NotificationType, AuthRequiredReason } from "./protocol/index.js";
+export { NotificationType, AuthRequiredReason } from "./notifications.js";
 
 // Reducers
-export { terminalReducer } from "./protocol/index.js";
+export { terminalReducer } from "@microsoft/agent-host-protocol";

@@ -1,19 +1,19 @@
 import { EventEmitter } from "node:events";
+import type { ActionEnvelope, StateAction } from "@microsoft/agent-host-protocol";
+import { ActionType } from "@microsoft/agent-host-protocol";
+import type { ChatState, Message, SessionState } from "@microsoft/agent-host-protocol";
+import {
+	MessageKind,
+	ResponsePartKind,
+	SessionStatus,
+	ToolCallConfirmationReason,
+	ToolCallStatus,
+} from "@microsoft/agent-host-protocol";
 import { describe, expect, it } from "vitest";
 import type { AhpClient } from "../../client/index.js";
 import { PromptRenderer } from "../../output/renderer.js";
 import type { WritableOutput } from "../../output/renderer.js";
 import { PermissionHandler } from "../../permissions/handler.js";
-import type { ActionEnvelope, StateAction } from "../../protocol/actions.js";
-import { ActionType } from "../../protocol/actions.js";
-import type { SessionState } from "../../protocol/state.js";
-import {
-	ResponsePartKind,
-	SessionLifecycle,
-	SessionStatus,
-	ToolCallConfirmationReason,
-	ToolCallStatus,
-} from "../../protocol/state.js";
 import { TurnController } from "../controller.js";
 
 /** Captures output. */
@@ -29,20 +29,27 @@ function createCapture(): { out: WritableOutput; text: () => string } {
 	};
 }
 
-/** Create a minimal session state for the state mirror. */
-function makeSessionState(): SessionState {
+function message(text: string): Message {
+	return { text, origin: { kind: MessageKind.User } };
+}
+
+/** Create a minimal chat state for the state mirror. */
+function makeChatState(overrides: Partial<ChatState> = {}): ChatState {
 	return {
-		summary: {
-			resource: "copilot:/test",
-			provider: "copilot",
-			title: "Test",
-			status: SessionStatus.Idle,
-			createdAt: 1000,
-			modifiedAt: 1000,
-		},
-		lifecycle: SessionLifecycle.Ready,
+		resource: "copilot:/test-session",
+		title: "Test",
+		status: SessionStatus.Idle,
+		modifiedAt: "2026-01-01T00:00:00.000Z",
 		turns: [],
+		...overrides,
 	};
+}
+
+type ToolCallPart = Extract<ChatState["turns"][number]["responseParts"][number], { toolCall: unknown }>;
+type ClientContributor = Extract<NonNullable<ToolCallPart["toolCall"]["contributor"]>, { clientId: string }>;
+
+function clientContributor(clientId: string): ClientContributor {
+	return { kind: "client" as ClientContributor["kind"], clientId };
 }
 
 /**
@@ -58,6 +65,7 @@ function createMockClient() {
 
 	// Minimal state mock
 	const sessionStates = new Map<string, SessionState>();
+	const chatStates = new Map<string, ChatState>();
 
 	const client = Object.assign(emitter, {
 		clientId: "test-client-id",
@@ -67,6 +75,9 @@ function createMockClient() {
 		state: {
 			getSession(uri: string) {
 				return sessionStates.get(uri);
+			},
+			getChat(uri: string) {
+				return chatStates.get(uri);
 			},
 		},
 	}) as unknown as AhpClient;
@@ -86,8 +97,9 @@ function createMockClient() {
 			emitter.emit("action", envelope);
 		},
 		/** Set a session state for lookups. */
-		setSessionState(uri: string, state: SessionState) {
-			sessionStates.set(uri, state);
+		setSessionState(uri: string, state: SessionState | ChatState) {
+			if ("summary" in state) sessionStates.set(uri, state);
+			if ("turns" in state) chatStates.set(uri, state);
 		},
 	};
 }
@@ -107,19 +119,19 @@ describe("TurnController", () => {
 
 		// Check that turnStarted was dispatched
 		expect(dispatched).toHaveLength(1);
-		expect(dispatched[0].type).toBe(ActionType.SessionTurnStarted);
+		expect(dispatched[0].type).toBe(ActionType.ChatTurnStarted);
 		const turnId = (dispatched[0] as { turnId: string }).turnId;
 
 		// Simulate server streaming
 		emitAction({
-			type: ActionType.SessionDelta,
+			type: ActionType.ChatDelta,
 			turnId,
 			partId: "part-1",
 			content: "Hi there!",
 		});
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -143,7 +155,7 @@ describe("TurnController", () => {
 		const turnId = (dispatched[0] as { turnId: string }).turnId;
 
 		emitAction({
-			type: ActionType.SessionError,
+			type: ActionType.ChatError,
 			turnId,
 			error: { errorType: "runtime", message: "model overloaded" },
 		});
@@ -166,7 +178,7 @@ describe("TurnController", () => {
 		const turnId = (dispatched[0] as { turnId: string }).turnId;
 
 		emitAction({
-			type: ActionType.SessionTurnCancelled,
+			type: ActionType.ChatTurnCancelled,
 			turnId,
 		});
 
@@ -187,21 +199,21 @@ describe("TurnController", () => {
 		const turnId = (dispatched[0] as { turnId: string }).turnId;
 
 		emitAction({
-			type: ActionType.SessionReasoning,
+			type: ActionType.ChatReasoning,
 			turnId,
 			partId: "reason-1",
 			content: "analyzing...",
 		});
 
 		emitAction({
-			type: ActionType.SessionDelta,
+			type: ActionType.ChatDelta,
 			turnId,
 			partId: "part-1",
 			content: "Here's the answer.",
 		});
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -224,13 +236,13 @@ describe("TurnController", () => {
 		const turnId = (dispatched[0] as { turnId: string }).turnId;
 
 		emitAction({
-			type: ActionType.SessionUsage,
+			type: ActionType.ChatUsage,
 			turnId,
 			usage: { inputTokens: 100, outputTokens: 50, model: "gpt-4o" },
 		});
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -252,7 +264,7 @@ describe("TurnController", () => {
 
 		// Tool call start
 		emitAction({
-			type: ActionType.SessionToolCallStart,
+			type: ActionType.ChatToolCallStart,
 			turnId,
 			toolCallId: "tc1",
 			toolName: "shell",
@@ -261,14 +273,14 @@ describe("TurnController", () => {
 
 		// Tool call complete
 		emitAction({
-			type: ActionType.SessionToolCallComplete,
+			type: ActionType.ChatToolCallComplete,
 			turnId,
 			toolCallId: "tc1",
 			result: { success: true, pastTenseMessage: "Ran npm test" },
 		});
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -286,27 +298,28 @@ describe("TurnController", () => {
 		const handler = new PermissionHandler("approve-all", { output: cap.out });
 
 		// Set up session state with a tool call for lookup
-		setSessionState(SESSION_URI, {
-			...makeSessionState(),
-			summary: { ...makeSessionState().summary, resource: SESSION_URI },
-			activeTurn: {
-				id: "placeholder",
-				userMessage: { text: "test" },
-				responseParts: [
-					{
-						kind: ResponsePartKind.ToolCall,
-						toolCall: {
-							toolCallId: "tc1",
-							toolName: "shell",
-							displayName: "Run Shell Command",
-							status: ToolCallStatus.PendingConfirmation,
-							invocationMessage: "npm test",
+		setSessionState(
+			SESSION_URI,
+			makeChatState({
+				activeTurn: {
+					id: "placeholder",
+					message: message("test"),
+					responseParts: [
+						{
+							kind: ResponsePartKind.ToolCall,
+							toolCall: {
+								toolCallId: "tc1",
+								toolName: "shell",
+								displayName: "Run Shell Command",
+								status: ToolCallStatus.PendingConfirmation,
+								invocationMessage: "npm test",
+							},
 						},
-					},
-				],
-				usage: undefined,
-			},
-		});
+					],
+					usage: undefined,
+				},
+			}),
+		);
 
 		const controller = new TurnController(client, SESSION_URI, renderer, handler);
 		const resultPromise = controller.prompt("confirm this");
@@ -315,7 +328,7 @@ describe("TurnController", () => {
 
 		// Emit toolCallReady without auto-confirm
 		emitAction({
-			type: ActionType.SessionToolCallReady,
+			type: ActionType.ChatToolCallReady,
 			turnId,
 			toolCallId: "tc1",
 			invocationMessage: "npm test --reporter=verbose",
@@ -325,12 +338,12 @@ describe("TurnController", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		// Should have dispatched toolCallConfirmed (approve-all)
-		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
+		const confirmAction = dispatched.find((a) => a.type === ActionType.ChatToolCallConfirmed);
 		expect(confirmAction).toBeDefined();
 
 		// Complete the turn
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -351,7 +364,7 @@ describe("TurnController", () => {
 		// Action for a different session — should be ignored
 		emitAction(
 			{
-				type: ActionType.SessionDelta,
+				type: ActionType.ChatDelta,
 				turnId,
 				partId: "part-1",
 				content: "wrong session",
@@ -360,7 +373,7 @@ describe("TurnController", () => {
 		);
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -382,14 +395,14 @@ describe("TurnController", () => {
 
 		// Action for a different turn — should be ignored
 		emitAction({
-			type: ActionType.SessionDelta,
+			type: ActionType.ChatDelta,
 			turnId: "different-turn-id",
 			partId: "part-1",
 			content: "wrong turn",
 		});
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -412,12 +425,12 @@ describe("TurnController", () => {
 		await controller.cancel();
 
 		// Should have dispatched turnCancelled
-		const cancelAction = dispatched.find((a) => a.type === ActionType.SessionTurnCancelled);
+		const cancelAction = dispatched.find((a) => a.type === ActionType.ChatTurnCancelled);
 		expect(cancelAction).toBeDefined();
 
 		// Simulate server acknowledging cancellation
 		emitAction({
-			type: ActionType.SessionTurnCancelled,
+			type: ActionType.ChatTurnCancelled,
 			turnId,
 		});
 
@@ -432,29 +445,30 @@ describe("TurnController", () => {
 		const handler = new PermissionHandler("approve-all", { output: cap.out });
 
 		// Set up session state with a client-provided tool (toolClientId matches client)
-		setSessionState(SESSION_URI, {
-			...makeSessionState(),
-			summary: { ...makeSessionState().summary, resource: SESSION_URI },
-			activeTurn: {
-				id: "placeholder",
-				userMessage: { text: "test" },
-				responseParts: [
-					{
-						kind: ResponsePartKind.ToolCall,
-						toolCall: {
-							toolCallId: "tc1",
-							toolName: "read_file",
-							displayName: "Read File",
-							status: ToolCallStatus.Running,
-							toolClientId: "test-client-id",
-							invocationMessage: "Read file.ts",
-							confirmed: ToolCallConfirmationReason.NotNeeded,
+		setSessionState(
+			SESSION_URI,
+			makeChatState({
+				activeTurn: {
+					id: "placeholder",
+					message: message("test"),
+					responseParts: [
+						{
+							kind: ResponsePartKind.ToolCall,
+							toolCall: {
+								toolCallId: "tc1",
+								toolName: "read_file",
+								displayName: "Read File",
+								status: ToolCallStatus.Running,
+								contributor: clientContributor("test-client-id"),
+								invocationMessage: "Read file.ts",
+								confirmed: ToolCallConfirmationReason.NotNeeded,
+							},
 						},
-					},
-				],
-				usage: undefined,
-			},
-		});
+					],
+					usage: undefined,
+				},
+			}),
+		);
 
 		const controller = new TurnController(client, SESSION_URI, renderer, handler);
 		const resultPromise = controller.prompt("auto confirm");
@@ -463,7 +477,7 @@ describe("TurnController", () => {
 
 		// Tool call ready with confirmed set — client-provided tool
 		emitAction({
-			type: ActionType.SessionToolCallReady,
+			type: ActionType.ChatToolCallReady,
 			turnId,
 			toolCallId: "tc1",
 			invocationMessage: "Read file.ts",
@@ -473,7 +487,7 @@ describe("TurnController", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		// Should NOT have dispatched toolCallConfirmed — client tool skips entirely
-		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
+		const confirmAction = dispatched.find((a) => a.type === ActionType.ChatToolCallConfirmed);
 		expect(confirmAction).toBeUndefined();
 
 		// Should NOT have consulted permission handler (no auto-approved/denied output)
@@ -481,7 +495,7 @@ describe("TurnController", () => {
 		expect(cap.text()).not.toContain("[denied]");
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -495,28 +509,29 @@ describe("TurnController", () => {
 		const handler = new PermissionHandler("deny-all", { output: cap.out });
 
 		// Set up session state with a server tool (no toolClientId)
-		setSessionState(SESSION_URI, {
-			...makeSessionState(),
-			summary: { ...makeSessionState().summary, resource: SESSION_URI },
-			activeTurn: {
-				id: "placeholder",
-				userMessage: { text: "test" },
-				responseParts: [
-					{
-						kind: ResponsePartKind.ToolCall,
-						toolCall: {
-							toolCallId: "tc1",
-							toolName: "server_shell",
-							displayName: "Server Shell",
-							status: ToolCallStatus.Running,
-							invocationMessage: "npm test",
-							confirmed: ToolCallConfirmationReason.NotNeeded,
+		setSessionState(
+			SESSION_URI,
+			makeChatState({
+				activeTurn: {
+					id: "placeholder",
+					message: message("test"),
+					responseParts: [
+						{
+							kind: ResponsePartKind.ToolCall,
+							toolCall: {
+								toolCallId: "tc1",
+								toolName: "server_shell",
+								displayName: "Server Shell",
+								status: ToolCallStatus.Running,
+								invocationMessage: "npm test",
+								confirmed: ToolCallConfirmationReason.NotNeeded,
+							},
 						},
-					},
-				],
-				usage: undefined,
-			},
-		});
+					],
+					usage: undefined,
+				},
+			}),
+		);
 
 		const controller = new TurnController(client, SESSION_URI, renderer, handler);
 		const resultPromise = controller.prompt("run server tool");
@@ -525,7 +540,7 @@ describe("TurnController", () => {
 
 		// Server tool auto-confirmed — permission handler should be skipped entirely
 		emitAction({
-			type: ActionType.SessionToolCallReady,
+			type: ActionType.ChatToolCallReady,
 			turnId,
 			toolCallId: "tc1",
 			invocationMessage: "npm test",
@@ -535,7 +550,7 @@ describe("TurnController", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		// Should NOT have dispatched toolCallConfirmed — server already handled it
-		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
+		const confirmAction = dispatched.find((a) => a.type === ActionType.ChatToolCallConfirmed);
 		expect(confirmAction).toBeUndefined();
 
 		// Renderer should show auto-approved (not denied, because permission handler was skipped)
@@ -543,7 +558,7 @@ describe("TurnController", () => {
 		expect(cap.text()).not.toContain("[denied]");
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -557,28 +572,29 @@ describe("TurnController", () => {
 		const handler = new PermissionHandler("approve-all", { output: cap.out });
 
 		// Set up session state with a server tool (no toolClientId)
-		setSessionState(SESSION_URI, {
-			...makeSessionState(),
-			summary: { ...makeSessionState().summary, resource: SESSION_URI },
-			activeTurn: {
-				id: "placeholder",
-				userMessage: { text: "test" },
-				responseParts: [
-					{
-						kind: ResponsePartKind.ToolCall,
-						toolCall: {
-							toolCallId: "tc1",
-							toolName: "server_read",
-							displayName: "Server Read",
-							status: ToolCallStatus.Running,
-							invocationMessage: "Read config.json",
-							confirmed: ToolCallConfirmationReason.NotNeeded,
+		setSessionState(
+			SESSION_URI,
+			makeChatState({
+				activeTurn: {
+					id: "placeholder",
+					message: message("test"),
+					responseParts: [
+						{
+							kind: ResponsePartKind.ToolCall,
+							toolCall: {
+								toolCallId: "tc1",
+								toolName: "server_read",
+								displayName: "Server Read",
+								status: ToolCallStatus.Running,
+								invocationMessage: "Read config.json",
+								confirmed: ToolCallConfirmationReason.NotNeeded,
+							},
 						},
-					},
-				],
-				usage: undefined,
-			},
-		});
+					],
+					usage: undefined,
+				},
+			}),
+		);
 
 		const controller = new TurnController(client, SESSION_URI, renderer, handler);
 		const resultPromise = controller.prompt("run server tool");
@@ -587,7 +603,7 @@ describe("TurnController", () => {
 
 		// Server tool auto-confirmed, user has approve-all
 		emitAction({
-			type: ActionType.SessionToolCallReady,
+			type: ActionType.ChatToolCallReady,
 			turnId,
 			toolCallId: "tc1",
 			invocationMessage: "Read config.json",
@@ -597,14 +613,14 @@ describe("TurnController", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		// Should NOT have dispatched toolCallConfirmed — server already running
-		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
+		const confirmAction = dispatched.find((a) => a.type === ActionType.ChatToolCallConfirmed);
 		expect(confirmAction).toBeUndefined();
 
 		// Renderer should show auto-approved (permission handler was not called)
 		expect(cap.text()).toContain("[auto-approved]");
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -618,29 +634,30 @@ describe("TurnController", () => {
 		const handler = new PermissionHandler("deny-all", { output: cap.out });
 
 		// Set up session state with a tool owned by a different client
-		setSessionState(SESSION_URI, {
-			...makeSessionState(),
-			summary: { ...makeSessionState().summary, resource: SESSION_URI },
-			activeTurn: {
-				id: "placeholder",
-				userMessage: { text: "test" },
-				responseParts: [
-					{
-						kind: ResponsePartKind.ToolCall,
-						toolCall: {
-							toolCallId: "tc1",
-							toolName: "other_tool",
-							displayName: "Other Tool",
-							status: ToolCallStatus.Running,
-							toolClientId: "different-client-id",
-							invocationMessage: "Do something",
-							confirmed: ToolCallConfirmationReason.NotNeeded,
+		setSessionState(
+			SESSION_URI,
+			makeChatState({
+				activeTurn: {
+					id: "placeholder",
+					message: message("test"),
+					responseParts: [
+						{
+							kind: ResponsePartKind.ToolCall,
+							toolCall: {
+								toolCallId: "tc1",
+								toolName: "other_tool",
+								displayName: "Other Tool",
+								status: ToolCallStatus.Running,
+								contributor: clientContributor("different-client-id"),
+								invocationMessage: "Do something",
+								confirmed: ToolCallConfirmationReason.NotNeeded,
+							},
 						},
-					},
-				],
-				usage: undefined,
-			},
-		});
+					],
+					usage: undefined,
+				},
+			}),
+		);
 
 		const controller = new TurnController(client, SESSION_URI, renderer, handler);
 		const resultPromise = controller.prompt("other client tool");
@@ -649,7 +666,7 @@ describe("TurnController", () => {
 
 		// Auto-confirmed but toolClientId doesn't match → treated as server tool, auto-approved
 		emitAction({
-			type: ActionType.SessionToolCallReady,
+			type: ActionType.ChatToolCallReady,
 			turnId,
 			toolCallId: "tc1",
 			invocationMessage: "Do something",
@@ -659,14 +676,14 @@ describe("TurnController", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		// Should NOT have dispatched any confirmation — server already confirmed
-		const confirmAction = dispatched.find((a) => a.type === ActionType.SessionToolCallConfirmed);
+		const confirmAction = dispatched.find((a) => a.type === ActionType.ChatToolCallConfirmed);
 		expect(confirmAction).toBeUndefined();
 
 		// Renderer should show auto-approved
 		expect(cap.text()).toContain("[auto-approved]");
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -701,7 +718,7 @@ describe("TurnController", () => {
 		for (let i = 0; i < 5; i++) {
 			await new Promise((r) => setTimeout(r, 30));
 			emitAction({
-				type: ActionType.SessionDelta,
+				type: ActionType.ChatDelta,
 				turnId,
 				partId: "part-1",
 				content: `chunk ${i}`,
@@ -710,7 +727,7 @@ describe("TurnController", () => {
 
 		// Complete before idle timeout fires
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 
@@ -734,7 +751,7 @@ describe("TurnController", () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		emitAction({
-			type: ActionType.SessionTurnComplete,
+			type: ActionType.ChatTurnComplete,
 			turnId,
 		});
 

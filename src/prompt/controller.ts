@@ -7,25 +7,30 @@
  */
 
 import { randomUUID } from "node:crypto";
+import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
+import { ActionType } from "@microsoft/agent-host-protocol";
+import type {
+	ChatDeltaAction,
+	ChatErrorAction,
+	ChatReasoningAction,
+	ChatToolCallCompleteAction,
+	ChatToolCallDeltaAction,
+	ChatToolCallReadyAction,
+	ChatToolCallStartAction,
+	ChatUsageAction,
+	SessionTitleChangedAction,
+} from "@microsoft/agent-host-protocol";
+import {
+	ResponsePartKind,
+	ToolCallCancellationReason,
+	ToolCallConfirmationReason,
+} from "@microsoft/agent-host-protocol";
+import { MessageKind } from "@microsoft/agent-host-protocol";
+import type { MessageAttachment, URI, UsageInfo } from "@microsoft/agent-host-protocol";
 import type { AhpClient } from "../client/index.js";
 import type { OutputFormatter } from "../output/format.js";
 import type { ToolCallInfo } from "../output/renderer.js";
 import type { PermissionHandler } from "../permissions/handler.js";
-import type { ActionEnvelope } from "../protocol/actions.js";
-import { ActionType } from "../protocol/actions.js";
-import type {
-	SessionDeltaAction,
-	SessionErrorAction,
-	SessionReasoningAction,
-	SessionTitleChangedAction,
-	SessionToolCallCompleteAction,
-	SessionToolCallDeltaAction,
-	SessionToolCallReadyAction,
-	SessionToolCallStartAction,
-	SessionUsageAction,
-} from "../protocol/actions.js";
-import { ResponsePartKind, ToolCallCancellationReason, ToolCallConfirmationReason } from "../protocol/state.js";
-import type { MessageAttachment, URI, UsageInfo } from "../protocol/state.js";
 
 export interface TurnResult {
 	turnId: string;
@@ -113,46 +118,47 @@ export class TurnController {
 				resetIdleTimer();
 
 				switch (action.type) {
-					case ActionType.SessionDelta: {
-						const a = action as SessionDeltaAction;
+					case ActionType.ChatDelta: {
+						const a = action as ChatDeltaAction;
 						responseText += a.content;
 						this.renderer.onDelta(a.content);
 						break;
 					}
 
-					case ActionType.SessionReasoning: {
-						const a = action as SessionReasoningAction;
+					case ActionType.ChatReasoning: {
+						const a = action as ChatReasoningAction;
 						this.renderer.onReasoning(a.content);
 						break;
 					}
 
-					case ActionType.SessionToolCallStart: {
-						const a = action as SessionToolCallStartAction;
+					case ActionType.ChatToolCallStart: {
+						const a = action as ChatToolCallStartAction;
 						toolCallCount++;
 						this.renderer.onToolCallStart(a.toolCallId, a.displayName);
 						break;
 					}
 
-					case ActionType.SessionToolCallDelta: {
-						const a = action as SessionToolCallDeltaAction;
+					case ActionType.ChatToolCallDelta: {
+						const a = action as ChatToolCallDeltaAction;
 						this.renderer.onToolCallDelta(a.toolCallId, a.content);
 						break;
 					}
 
-					case ActionType.SessionToolCallReady: {
-						const a = action as SessionToolCallReadyAction;
+					case ActionType.ChatToolCallReady: {
+						const a = action as ChatToolCallReadyAction;
 						const serverConfirmed = !!a.confirmed;
 
-						// Look up tool call from session state (for toolClientId and display info)
+						// Look up tool call from chat state (for contributor and display info)
 						let toolClientId: string | undefined;
 						let stateName: string | undefined;
 						let stateDisplayName: string | undefined;
 
-						const session = this.client.state.getSession(this.sessionUri);
-						if (session?.activeTurn) {
-							for (const part of session.activeTurn.responseParts) {
+						const chat = this.client.state.getChat(this.sessionUri);
+						if (chat?.activeTurn) {
+							for (const part of chat.activeTurn.responseParts) {
 								if (part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === a.toolCallId) {
-									toolClientId = part.toolCall.toolClientId;
+									const contributor = part.toolCall.contributor;
+									toolClientId = contributor && "clientId" in contributor ? contributor.clientId : undefined;
 									stateName = part.toolCall.toolName;
 									stateDisplayName = part.toolCall.displayName;
 									break;
@@ -194,7 +200,7 @@ export class TurnController {
 
 							if (approved) {
 								this.client.dispatchAction(this.sessionUri, {
-									type: ActionType.SessionToolCallConfirmed,
+									type: ActionType.ChatToolCallConfirmed,
 									turnId,
 									toolCallId: a.toolCallId,
 									approved: true,
@@ -202,7 +208,7 @@ export class TurnController {
 								});
 							} else {
 								this.client.dispatchAction(this.sessionUri, {
-									type: ActionType.SessionToolCallConfirmed,
+									type: ActionType.ChatToolCallConfirmed,
 									turnId,
 									toolCallId: a.toolCallId,
 									approved: false,
@@ -213,14 +219,14 @@ export class TurnController {
 						break;
 					}
 
-					case ActionType.SessionToolCallComplete: {
-						const a = action as SessionToolCallCompleteAction;
+					case ActionType.ChatToolCallComplete: {
+						const a = action as ChatToolCallCompleteAction;
 						this.renderer.onToolCallComplete(a.toolCallId, a.result);
 						break;
 					}
 
-					case ActionType.SessionUsage: {
-						const a = action as SessionUsageAction;
+					case ActionType.ChatUsage: {
+						const a = action as ChatUsageAction;
 						usage = a.usage;
 						this.renderer.onUsage(a.usage);
 						break;
@@ -232,7 +238,7 @@ export class TurnController {
 						break;
 					}
 
-					case ActionType.SessionTurnComplete: {
+					case ActionType.ChatTurnComplete: {
 						cleanup();
 						this.renderer.onTurnComplete(responseText);
 						resolve({
@@ -251,8 +257,8 @@ export class TurnController {
 						break;
 					}
 
-					case ActionType.SessionError: {
-						const a = action as SessionErrorAction;
+					case ActionType.ChatError: {
+						const a = action as ChatErrorAction;
 						cleanup();
 						this.renderer.onTurnError(a.error);
 						resolve({
@@ -272,7 +278,7 @@ export class TurnController {
 						break;
 					}
 
-					case ActionType.SessionTurnCancelled: {
+					case ActionType.ChatTurnCancelled: {
 						cleanup();
 						this.renderer.onTurnCancelled();
 						resolve({
@@ -308,10 +314,11 @@ export class TurnController {
 
 			// Dispatch turn start
 			this.client.dispatchAction(this.sessionUri, {
-				type: ActionType.SessionTurnStarted,
+				type: ActionType.ChatTurnStarted,
 				turnId,
-				userMessage: {
+				message: {
 					text,
+					origin: { kind: MessageKind.User },
 					...(attachments && attachments.length > 0 ? { attachments } : {}),
 				},
 			});
@@ -328,7 +335,7 @@ export class TurnController {
 		if (!this.activeTurnId) return;
 		this.cancelled = true;
 		this.client.dispatchAction(this.sessionUri, {
-			type: ActionType.SessionTurnCancelled,
+			type: ActionType.ChatTurnCancelled,
 			turnId: this.activeTurnId,
 		});
 	}

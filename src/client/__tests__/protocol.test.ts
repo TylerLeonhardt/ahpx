@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
+import { ContentEncoding } from "@microsoft/agent-host-protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ContentEncoding } from "../../protocol/commands.js";
 import { ProtocolLayer, RpcError, RpcTimeoutError } from "../protocol.js";
 import type { Transport } from "../transport.js";
 

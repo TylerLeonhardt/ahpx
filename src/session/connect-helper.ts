@@ -11,8 +11,8 @@ import { AhpClient } from "../client/index.js";
 import type { AhpxConfig } from "../config/index.js";
 import { ConnectionStore, isValidWsUrl } from "../config/index.js";
 import type { ConnectionProfile } from "../config/index.js";
-import { NotificationType } from "../protocol/notifications.js";
-import type { AuthRequiredNotification } from "../protocol/notifications.js";
+import { NotificationType } from "../notifications.js";
+import type { AuthRequiredNotification } from "../notifications.js";
 
 export interface WithConnectionOptions {
 	/** Server name or WebSocket URL (from --server flag) */

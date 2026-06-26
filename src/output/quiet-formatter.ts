@@ -6,7 +6,7 @@
  * to stderr.
  */
 
-import type { ErrorInfo, ToolCallResult, UsageInfo } from "../protocol/state.js";
+import type { ErrorInfo, ToolCallResult, UsageInfo } from "@microsoft/agent-host-protocol";
 import type { OutputFormatter, WritableOutput } from "./format.js";
 import type { ToolCallInfo } from "./renderer.js";
 

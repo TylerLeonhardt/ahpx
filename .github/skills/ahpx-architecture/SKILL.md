@@ -1,8 +1,8 @@
 ---
 description: >-
   ahpx codebase architecture — the 3-layer client, session management,
-  prompting system, config, and protocol types. Use when implementing features,
-  fixing bugs, or understanding how ahpx works.
+  prompting system, config, and the official AHP protocol package. Use when
+  implementing features, fixing bugs, or understanding how ahpx works.
 ---
 
 # ahpx Architecture
@@ -11,8 +11,10 @@ ahpx is a CLI client for the Agent Host Protocol. It connects to AHP servers via
 WebSocket, speaks JSON-RPC 2.0, and manages AI agent sessions with streaming
 responses, tool calls, and permissions.
 
-**626 tests across 32 test files.** ~10,500 lines of TypeScript — ~7,000 lines of application code plus ~3,500
-lines of vendored AHP protocol type definitions.
+**700+ tests across 30+ test files.** ~9,600 lines of application TypeScript.
+Protocol types, reducers, and constants come from the official
+[`@microsoft/agent-host-protocol`](https://www.npmjs.com/package/@microsoft/agent-host-protocol)
+npm package (pinned at `^0.4.0`) — ahpx no longer vendors them.
 
 ## Directory structure
 
@@ -77,17 +79,20 @@ src/
 ├── watch/                  File watching
 │   └── watcher.ts          Session file monitoring
 │
-└── protocol/               Vendored AHP protocol types (~3,100 lines)
-    ├── state.ts            State definitions (IRootState, ISessionState, etc.)
-    ├── actions.ts          Action types (25 ActionType enum members)
-    ├── commands.ts         JSON-RPC command types (ICommandMap)
-    ├── reducers.ts         Pure state reducers (rootReducer, sessionReducer)
-    ├── messages.ts         JSON-RPC message types
-    ├── notifications.ts    Protocol notification types
-    ├── errors.ts           Error codes
-    ├── action-origin.generated.ts   Client/server action dispatch matrix
-    └── version/
-        └── registry.ts     Protocol version compatibility maps
+├── customizations/         Workspace customization discovery
+│   ├── discovery.ts        Scans for instructions/agents/prompts/skills
+│   └── types.ts            ahpx-local CustomizationRef + mapper to the
+│                           official ClientPluginCustomization wire shape
+│
+└── notifications.ts        ahpx-local notification compat — layers a `type`
+                            discriminator over the package's `*Params` types
+                            (the package discriminates by JSON-RPC method)
+
+# Protocol types, the ActionType enum, reducers (rootReducer, sessionReducer,
+# chatReducer, terminalReducer), notification params, and version constants are
+# all imported from `@microsoft/agent-host-protocol`. The official client,
+# WebSocket transport, and multi-host helpers live under its `/client`, `/ws`,
+# and `/hosts` subpaths (ahpx keeps its own custom 3-layer client).
 
 docs/
 ├── errors.md               Error catalog and troubleshooting
@@ -183,26 +188,38 @@ On `connect()`:
 ### State mirror (`client/state.ts`)
 
 Tracks server state locally by applying snapshots and actions through the
-vendored reducers.
+package's reducers.
+
+AHP 0.3+ splits a session's coordination state (`ahp-session:` channels) from
+its conversation state (`ahp-chat:` channels): turns and the active turn moved
+off `SessionState` onto a new `ChatState`. ahpx is a one-session / one-chat CLI,
+so it models a session and its default chat as the **same** channel URI —
+`getSession(uri)` returns the `SessionState` (summary, lifecycle, chats catalog)
+and `getChat(uri)` returns the `ChatState` (turns, activeTurn, pending/queued
+messages). The two are tracked in separate maps and never collide.
 
 ```typescript
 class StateMirror {
-  get root(): IRootState
+  get root(): RootState
   get seq(): number
-  getSession(uri: URI): ISessionState | undefined
+  getSession(uri: URI): SessionState | undefined
   get sessionUris(): URI[]
-  getTerminal(uri: URI): ITerminalState | undefined
+  getChat(uri: URI): ChatState | undefined
+  get chatUris(): URI[]
+  getTerminal(uri: URI): TerminalState | undefined
   get terminalUris(): URI[]
-  applySnapshot(snapshot: ISnapshot): void
-  applyAction(envelope: IActionEnvelope): void
+  applySnapshot(snapshot: Snapshot): void
+  applyAction(envelope: ActionEnvelope): void
   removeSession(uri: URI): void
   removeTerminal(uri: URI): void
 }
 ```
 
-Routes actions: root actions (`root/agentsChanged`, `root/activeSessionsChanged`,
-`root/terminalsChanged`) go through `rootReducer`; terminal actions (`terminal/*`)
-go through `terminalReducer`; all others through `sessionReducer`.
+Routes actions by channel/type: root actions (`root/*`) go through `rootReducer`;
+chat actions (`chat/*` — turns, streaming, tool calls) build/update `ChatState`
+via `chatReducer` (lazily creating an empty chat state on first chat action);
+terminal actions (`terminal/*`) go through `terminalReducer`; all remaining
+`session/*` actions go through `sessionReducer`.
 
 ### Session handle (`client/session-handle.ts`)
 
@@ -211,10 +228,13 @@ session URI and providing a cleaner API than raw `dispatchAction()` calls.
 
 ```typescript
 class SessionHandle extends EventEmitter {
-  get sessionUri(): URI
-  get sessionState(): ISessionState | undefined
+  get uri(): URI
+  get state(): SessionState | undefined    // summary, lifecycle, chats
+  get chat(): ChatState | undefined        // turns, activeTurn
+  get activeTurn(): ActiveTurn | undefined
+  get isReady(): boolean
 
-  async sendPrompt(text: string, options?: PromptOptions): Promise<TurnResult>
+  async prompt(text: string, options?: PromptOptions): Promise<TurnResult>
   async cancelTurn(): Promise<void>
   async waitForReady(timeoutMs?: number): Promise<void>
   dispose(): void
@@ -224,7 +244,7 @@ interface TurnResult {
   turnId: string
   responseText: string
   toolCalls: number
-  usage?: IUsageInfo
+  usage?: UsageInfo
   state: "complete" | "cancelled" | "error"
   error?: string
 }
@@ -562,29 +582,52 @@ Well-defined exit codes for scripting:
 Error class hierarchy: `AhpxError` → `UsageError`, `TimeoutError`,
 `NoSessionError`, `PermissionDeniedError`.
 
-## Vendored protocol types (`src/protocol/`)
+## Official protocol package (`@microsoft/agent-host-protocol`)
 
-The protocol types are vendored from the
-[agent-host-protocol](https://github.com/microsoft/agent-host-protocol)
-repository. These are the source of truth for the AHP type system.
+ahpx imports the AHP type system, reducers, and constants directly from the
+official npm package — there is no vendored copy. Everything comes from the root
+entrypoint:
 
-Key files:
-- `state.ts` — `IRootState`, `ISessionState`, `ITerminalState`, `IActiveTurn`,
-  `ITurn`, `IToolCallState` (discriminated union with 6 statuses),
-  `ISessionInputRequest` and related input/elicitation types
-- `actions.ts` — `ActionType` enum (38 members: 2 root, 20 session, 8 terminal,
-  plus input/metadata actions), all action interfaces
-- `commands.ts` — `ICommandMap` mapping method names to param/result types
-  (16 commands including `createTerminal`/`disposeTerminal`)
-- `reducers.ts` — `rootReducer()`, `sessionReducer()`, and `terminalReducer()`
-  pure functions
-- `messages.ts` — JSON-RPC message types
-- `notifications.ts` — `SessionSummaryChanged` notification for live sync
-- `errors.ts` — `ErrorCode` enum (standard + AHP-specific)
-- `action-origin.generated.ts` — which actions are client-dispatchable
+- **State**: `RootState`, `SessionState`, `ChatState`, `TerminalState`,
+  `Turn`, `ActiveTurn`, `Message` (+ `MessageOrigin`), `ToolCallState`
+  (discriminated union of statuses with a `contributor?` field),
+  `ChatInputRequest` and related input/elicitation types
+- **Actions**: the `ActionType` enum and all action interfaces. Turn/streaming/
+  tool-call actions are `Chat*` (`ChatTurnStarted`, `ChatDelta`,
+  `ChatResponsePart`, `ChatToolCall*`, `ChatUsage`, `ChatError`, …); session
+  coordination actions stay `Session*` (`SessionReady`, `SessionTitleChanged`,
+  `SessionActiveClientChanged`, `SessionCustomization*`, `SessionChatAdded`, …)
+- **Commands**: `CommandMap` mapping method names to param/result types
+- **Reducers**: `rootReducer`, `sessionReducer`, `chatReducer`, `terminalReducer`
+  (pure functions)
+- **Version**: `PROTOCOL_VERSION`, `SUPPORTED_PROTOCOL_VERSIONS`
+  (includes `0.4.0`, `0.3.0`)
 
-When updating protocol types, copy from the upstream `types/` directory and
-ensure the vendored files stay in sync. See `AHP_SPEC_SYNC.md` for sync history.
+Subpath entrypoints provide the official client (`/client` — `AhpClient`,
+`AhpStateMirror`, `InMemoryTransport`), the WebSocket transport (`/ws`), and
+multi-host helpers (`/hosts`). ahpx currently keeps its own custom 3-layer client
+and only consumes types/reducers/constants from the package.
+
+### ahpx-local compat shims
+
+A few concepts the package doesn't expose the way ahpx needs are recreated
+locally:
+
+- `src/notifications.ts` — the package's notification `*Params` carry no `type`
+  field (it discriminates by JSON-RPC method). ahpx defines a `NotificationType`
+  enum and `*Notification` types (params intersected with `{ type }`), and the
+  ProtocolLayer injects the method as `type` so consumers keep a `type`-switch.
+- `src/customizations/types.ts` — `CustomizationRef`/`Icon` for workspace
+  discovery, plus `toClientCustomization()` which maps a discovered file to the
+  official `ClientPluginCustomization` (Open Plugins container) wire shape before
+  it's published in `activeClient.customizations`.
+
+Some types (e.g. `Customization`, `ClientPluginCustomization`,
+`CustomizationType`) are not re-exported from the package root; derive them from
+exported types, e.g.
+`NonNullable<SessionState["customizations"]>[number]`.
+
+To upgrade the package, use the **`ahp-package-upgrader`** agent.
 
 ## Logging (`logger.ts`)
 
@@ -845,7 +888,7 @@ The library exports:
 | Fleet management | `HealthChecker`, `ServerHealth`, `FleetManager`, `FleetManagerOptions`, `RoutingStrategy`, `ServerRequirements` |
 | Connection config | `ConnectionProfile` |
 | Auth | `AuthHandler`, `AuthHandlerOptions` |
-| Protocol types | State types (`IRootState`, `ISessionState`, …), action types, command result types |
+| Protocol types | State types (`RootState`, `SessionState`, `ChatState`, …), action types, command result types |
 
 ## Build and test
 

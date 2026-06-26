@@ -5,8 +5,8 @@
  * `session config` and `session config set` CLI commands.
  */
 
+import type { SessionConfigPropertySchema, SessionConfigState } from "@microsoft/agent-host-protocol";
 import { describe, expect, it } from "vitest";
-import type { SessionConfigPropertySchema, SessionConfigState } from "../protocol/state.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
