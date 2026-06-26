@@ -45,6 +45,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@microsoft/agent-host-protocol": "^0.4.0",
 		"@microsoft/dev-tunnels-connections": "^1.3.48",
 		"@microsoft/dev-tunnels-contracts": "^1.3.48",
 		"@microsoft/dev-tunnels-management": "^1.3.48",
