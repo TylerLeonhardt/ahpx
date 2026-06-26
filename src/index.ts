@@ -269,6 +269,9 @@ export type {
 
 export { ContentEncoding, ReconnectResultType } from "@microsoft/agent-host-protocol";
 
+// Protocol version constants
+export { PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS } from "@microsoft/agent-host-protocol";
+
 // Notification types (emitted by AhpClient 'notification' event)
 export type { ProtocolNotification, SessionSummaryChangedNotification } from "./notifications.js";
 
