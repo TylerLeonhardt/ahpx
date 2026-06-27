@@ -73,16 +73,16 @@ describe("@microsoft/agent-host-protocol package", () => {
 				JSON.stringify({
 					jsonrpc: "2.0",
 					id: req.id,
-					result: { protocolVersion: "0.4.0", snapshots: [] },
+					result: { protocolVersion: "0.5.0", snapshots: [] },
 				}),
 			);
 		})();
 
 		const result = await client.initialize({
 			clientId: "ahpx-smoke",
-			protocolVersions: ["0.4.0"],
+			protocolVersions: ["0.5.0"],
 		});
-		expect(result.protocolVersion).toBe("0.4.0");
+		expect(result.protocolVersion).toBe("0.5.0");
 		await serverLoop;
 		await client.shutdown();
 	});

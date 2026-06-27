@@ -20,15 +20,11 @@ const MODEL = "gpt-4";
 
 function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 	return {
-		summary: {
-			resource: SESSION_URI,
-			provider: PROVIDER,
-			title: "Test Session",
-			status: SessionStatus.Idle,
-			createdAt: 1000,
-			modifiedAt: 1000,
-		},
+		provider: PROVIDER,
+		title: "Test Session",
+		status: SessionStatus.Idle,
 		lifecycle: SessionLifecycle.Ready,
+		activeClients: [],
 		chats: [],
 		...overrides,
 	};
@@ -834,13 +830,13 @@ describe("SessionHandle", () => {
 			const handle = new SessionHandle(client, SESSION_URI, PROVIDER);
 
 			handle.dispatchAction({
-				type: ActionType.SessionModelChanged,
-				model: { id: "claude-3" },
+				type: ActionType.SessionTitleChanged,
+				title: "Renamed",
 			});
 
 			expect(dispatched).toHaveLength(1);
 			expect(dispatchChannels[0]).toBe(SESSION_URI);
-			expect((dispatched[0] as unknown as { model: { id: string } }).model).toEqual({ id: "claude-3" });
+			expect((dispatched[0] as unknown as { title: string }).title).toEqual("Renamed");
 		});
 
 		it("throws if disposed", async () => {
@@ -850,9 +846,7 @@ describe("SessionHandle", () => {
 			setConnected(false);
 			await handle.dispose();
 
-			expect(() => handle.dispatchAction({ type: ActionType.SessionModelChanged, model: { id: "x" } })).toThrow(
-				"disposed",
-			);
+			expect(() => handle.dispatchAction({ type: ActionType.SessionTitleChanged, title: "x" })).toThrow("disposed");
 		});
 	});
 

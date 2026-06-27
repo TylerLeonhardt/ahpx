@@ -345,6 +345,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 				message: {
 					text,
 					origin: { kind: MessageKind.User },
+					...(this.model ? { model: { id: this.model } } : {}),
 					...(options?.attachments && options.attachments.length > 0 ? { attachments: options.attachments } : {}),
 				},
 			});

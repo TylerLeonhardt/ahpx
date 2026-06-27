@@ -15,15 +15,11 @@ import { StateMirror } from "../state.js";
 
 function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 	return {
-		summary: {
-			resource: "copilot:/test-session",
-			provider: "copilot",
-			title: "Test Session",
-			status: SessionStatus.Idle,
-			createdAt: 1000,
-			modifiedAt: 1000,
-		},
+		provider: "copilot",
+		title: "Test Session",
+		status: SessionStatus.Idle,
 		lifecycle: SessionLifecycle.Creating,
+		activeClients: [],
 		chats: [],
 		...overrides,
 	};
@@ -170,7 +166,7 @@ describe("StateMirror", () => {
 
 			const session = mirror.getSession("copilot:/s1")!;
 			expect(session.lifecycle).toBe(SessionLifecycle.Ready);
-			expect(session.summary.status).toBe(SessionStatus.Idle);
+			expect(session.status).toBe(SessionStatus.Idle);
 		});
 
 		it("treats SessionDelta targeting a nonexistent partId as a no-op", () => {
@@ -378,7 +374,7 @@ describe("StateMirror", () => {
 			);
 
 			const session = mirror.getSession("copilot:/s1")!;
-			expect(session.summary.title).toBe("New Title");
+			expect(session.title).toBe("New Title");
 		});
 
 		it("handles SessionToolCallStart", () => {

@@ -1,7 +1,7 @@
 /**
  * Customization types for ahpx workspace discovery.
  *
- * AHP 0.4.0 models published customizations as [Open Plugins](https://open-plugins.com/)
+ * AHP 0.5.0 models published customizations as [Open Plugins](https://open-plugins.com/)
  * containers (`ClientPluginCustomization`), which the host expands into typed
  * children. ahpx discovers individual workspace files (instructions, agents,
  * prompts, skills) and publishes each as a plugin container.

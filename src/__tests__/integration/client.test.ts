@@ -66,7 +66,7 @@ describe("AhpClient integration", () => {
 
 			const result = await client.connect(server.url);
 
-			expect(result.protocolVersion).toBe("0.4.0");
+			expect(result.protocolVersion).toBe("0.5.0");
 			expect(result.snapshots).toHaveLength(1);
 			expect(result.snapshots[0].resource).toBe("ahp-root://");
 			expect(client.connected).toBe(true);
@@ -136,7 +136,7 @@ describe("AhpClient integration", () => {
 
 			const sessionState = client.state.getSession(handle.uri);
 			expect(sessionState).toBeDefined();
-			expect(sessionState!.summary.provider).toBe("mock-agent");
+			expect(sessionState!.provider).toBe("mock-agent");
 			expect(sessionState!.lifecycle).toBe("ready");
 		});
 
@@ -406,7 +406,7 @@ describe("AhpClient integration", () => {
 			const state = client.state.getSession(handle.uri);
 
 			expect(state).toBeDefined();
-			expect(state!.summary.resource).toBe(handle.uri);
+			expect(state!.provider).toBe("mock-agent");
 			expect(state!.lifecycle).toBe("ready");
 		});
 	});

@@ -75,7 +75,6 @@ describe("ProtocolLayer", () => {
 			const promise = protocol.request("createSession", {
 				channel: "ahp-session:/test-session",
 				provider: "copilot",
-				model: { id: "gpt-4o" },
 				workingDirectory: "/tmp/my-project",
 			});
 

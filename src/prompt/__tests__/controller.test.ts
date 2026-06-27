@@ -61,6 +61,7 @@ function clientContributor(clientId: string): ClientContributor {
 function createMockClient() {
 	const emitter = new EventEmitter();
 	const dispatched: StateAction[] = [];
+	const dispatchedChannels: string[] = [];
 	let seq = 0;
 
 	// Minimal state mock
@@ -69,7 +70,8 @@ function createMockClient() {
 
 	const client = Object.assign(emitter, {
 		clientId: "test-client-id",
-		dispatchAction(_channel: string, action: StateAction) {
+		dispatchAction(channel: string, action: StateAction) {
+			dispatchedChannels.push(channel);
 			dispatched.push(action);
 		},
 		state: {
@@ -85,6 +87,7 @@ function createMockClient() {
 	return {
 		client,
 		dispatched,
+		dispatchedChannels,
 		/** Simulate an action envelope arriving from the server. */
 		emitAction(action: StateAction, channel = "copilot:/test-session") {
 			seq++;
@@ -98,7 +101,7 @@ function createMockClient() {
 		},
 		/** Set a session state for lookups. */
 		setSessionState(uri: string, state: SessionState | ChatState) {
-			if ("summary" in state) sessionStates.set(uri, state);
+			if ("lifecycle" in state) sessionStates.set(uri, state);
 			if ("turns" in state) chatStates.set(uri, state);
 		},
 	};
@@ -141,6 +144,45 @@ describe("TurnController", () => {
 		expect(result.turnId).toBe(turnId);
 		expect(cap.text()).toContain("Hi there!");
 		expect(cap.text()).toContain("[done]");
+	});
+
+	it("attaches a per-message model and routes turns to a distinct chat channel", async () => {
+		const CHAT_URI = "ahp-chat://default/test-session";
+		const { client, dispatched, dispatchedChannels, emitAction } = createMockClient();
+		const cap = createCapture();
+		const renderer = new PromptRenderer(cap.out);
+		const handler = new PermissionHandler("approve-all", { output: cap.out });
+
+		const controller = new TurnController(client, SESSION_URI, renderer, handler, CHAT_URI, "claude-opus-4.8");
+
+		const resultPromise = controller.prompt("Hello");
+
+		// turnStarted dispatched on the chat channel, not the session URI
+		expect(dispatchedChannels[0]).toBe(CHAT_URI);
+		const started = dispatched[0] as { turnId: string; message: Message };
+		expect(started.message.model).toEqual({ id: "claude-opus-4.8" });
+		const turnId = started.turnId;
+
+		// Stream + complete on the chat channel
+		emitAction({ type: ActionType.ChatDelta, turnId, partId: "part-1", content: "Hi!" }, CHAT_URI);
+		emitAction({ type: ActionType.ChatTurnComplete, turnId }, CHAT_URI);
+
+		const result = await resultPromise;
+		expect(result.state).toBe("complete");
+		expect(result.responseText).toBe("Hi!");
+	});
+
+	it("omits message.model when no model is provided", async () => {
+		const { client, dispatched } = createMockClient();
+		const cap = createCapture();
+		const renderer = new PromptRenderer(cap.out);
+		const handler = new PermissionHandler("approve-all", { output: cap.out });
+
+		const controller = new TurnController(client, SESSION_URI, renderer, handler);
+		void controller.prompt("Hello");
+
+		const started = dispatched[0] as { message: Message };
+		expect(started.message.model).toBeUndefined();
 	});
 
 	it("handles error turn", async () => {

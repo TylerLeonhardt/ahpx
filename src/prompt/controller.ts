@@ -53,6 +53,18 @@ export class TurnController {
 		private readonly sessionUri: URI,
 		private readonly renderer: OutputFormatter,
 		private readonly permissionHandler: PermissionHandler,
+		/**
+		 * Channel that carries this session's chat (turn) actions. As of protocol
+		 * 0.5.0 a session's default chat MAY live on a distinct `ahp-chat://`
+		 * channel rather than sharing the session URI. Defaults to the session URI
+		 * for hosts that keep the one-session/one-chat model on a single URI.
+		 */
+		private readonly chatUri: URI = sessionUri,
+		/**
+		 * Model to attach to each turn's message. As of protocol 0.5.0 the model is
+		 * selected per-message via `Message.model`; omit to use the host default.
+		 */
+		private readonly model?: string,
 	) {}
 
 	/** The currently active turn ID, if any. */
@@ -105,8 +117,8 @@ export class TurnController {
 			const onAction = (envelope: ActionEnvelope) => {
 				const action = envelope.action;
 
-				// Only handle actions for our session (by channel)
-				if (envelope.channel !== this.sessionUri) {
+				// Only handle actions for our session or its chat channel.
+				if (envelope.channel !== this.sessionUri && envelope.channel !== this.chatUri) {
 					return;
 				}
 
@@ -153,7 +165,7 @@ export class TurnController {
 						let stateName: string | undefined;
 						let stateDisplayName: string | undefined;
 
-						const chat = this.client.state.getChat(this.sessionUri);
+						const chat = this.client.state.getChat(this.chatUri);
 						if (chat?.activeTurn) {
 							for (const part of chat.activeTurn.responseParts) {
 								if (part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === a.toolCallId) {
@@ -199,7 +211,7 @@ export class TurnController {
 							if (this.cancelled) return;
 
 							if (approved) {
-								this.client.dispatchAction(this.sessionUri, {
+								this.client.dispatchAction(this.chatUri, {
 									type: ActionType.ChatToolCallConfirmed,
 									turnId,
 									toolCallId: a.toolCallId,
@@ -207,7 +219,7 @@ export class TurnController {
 									confirmed: ToolCallConfirmationReason.UserAction,
 								});
 							} else {
-								this.client.dispatchAction(this.sessionUri, {
+								this.client.dispatchAction(this.chatUri, {
 									type: ActionType.ChatToolCallConfirmed,
 									turnId,
 									toolCallId: a.toolCallId,
@@ -313,12 +325,13 @@ export class TurnController {
 			this.client.on("action", onAction);
 
 			// Dispatch turn start
-			this.client.dispatchAction(this.sessionUri, {
+			this.client.dispatchAction(this.chatUri, {
 				type: ActionType.ChatTurnStarted,
 				turnId,
 				message: {
 					text,
 					origin: { kind: MessageKind.User },
+					...(this.model ? { model: { id: this.model } } : {}),
 					...(attachments && attachments.length > 0 ? { attachments } : {}),
 				},
 			});
@@ -334,7 +347,7 @@ export class TurnController {
 	async cancel(): Promise<void> {
 		if (!this.activeTurnId) return;
 		this.cancelled = true;
-		this.client.dispatchAction(this.sessionUri, {
+		this.client.dispatchAction(this.chatUri, {
 			type: ActionType.ChatTurnCancelled,
 			turnId: this.activeTurnId,
 		});

@@ -25,7 +25,7 @@ export class ActiveClientManager {
 
 	/**
 	 * Claim active client status for a session.
-	 * Dispatches `session/activeClientChanged` with this client's info.
+	 * Dispatches `session/activeClientSet` with this client's info.
 	 */
 	async claimActiveClient(sessionUri: URI, displayName?: string, tools: ToolDefinition[] = []): Promise<void> {
 		const activeClient: SessionActiveClient = {
@@ -35,7 +35,7 @@ export class ActiveClientManager {
 		};
 
 		this.client.dispatchAction(sessionUri, {
-			type: ActionType.SessionActiveClientChanged,
+			type: ActionType.SessionActiveClientSet,
 			activeClient,
 		});
 
@@ -44,12 +44,12 @@ export class ActiveClientManager {
 
 	/**
 	 * Release active client status for a session.
-	 * Dispatches `session/activeClientChanged` with `null`.
+	 * Dispatches `session/activeClientRemoved` with this client's id.
 	 */
 	async releaseActiveClient(sessionUri: URI): Promise<void> {
 		this.client.dispatchAction(sessionUri, {
-			type: ActionType.SessionActiveClientChanged,
-			activeClient: null,
+			type: ActionType.SessionActiveClientRemoved,
+			clientId: this.clientId,
 		});
 
 		this.activeSessions.delete(sessionUri);
@@ -61,18 +61,27 @@ export class ActiveClientManager {
 	 */
 	isActiveClient(sessionUri: URI): boolean {
 		const session = this.client.state.getSession(sessionUri);
-		return session?.activeClient?.clientId === this.clientId;
+		return session?.activeClients?.some((c) => c.clientId === this.clientId) ?? false;
 	}
 
 	/**
 	 * Register (or update) the tools this client provides to a session.
-	 * Dispatches `session/activeClientToolsChanged`.
+	 * Dispatches `session/activeClientSet` with the refreshed tool list.
 	 * Only valid when this client is the active client.
 	 */
 	async registerTools(sessionUri: URI, tools: ToolDefinition[]): Promise<void> {
-		this.client.dispatchAction(sessionUri, {
-			type: ActionType.SessionActiveClientToolsChanged,
+		const existing = this.client.state.getSession(sessionUri)?.activeClients?.find((c) => c.clientId === this.clientId);
+
+		const activeClient: SessionActiveClient = {
+			clientId: this.clientId,
+			displayName: existing?.displayName,
 			tools,
+			customizations: existing?.customizations,
+		};
+
+		this.client.dispatchAction(sessionUri, {
+			type: ActionType.SessionActiveClientSet,
+			activeClient,
 		});
 	}
 

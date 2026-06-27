@@ -59,15 +59,11 @@ function createMockFormatter(): OutputFormatter & { calls: Array<{ method: strin
 
 function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 	return {
-		summary: {
-			resource: "copilot:/test",
-			provider: "copilot",
-			title: "Test Session",
-			status: SessionStatus.Idle,
-			createdAt: 1000,
-			modifiedAt: 1000,
-		},
+		provider: "copilot",
+		title: "Test Session",
+		status: SessionStatus.Idle,
 		lifecycle: SessionLifecycle.Ready,
+		activeClients: [],
 		chats: [],
 		...overrides,
 	};
@@ -181,7 +177,7 @@ describe("SessionWatcher", () => {
 		setSessionState(
 			SESSION_URI,
 			makeSessionState({
-				summary: { ...makeSessionState().summary, resource: SESSION_URI, status: SessionStatus.InProgress },
+				status: SessionStatus.InProgress,
 			}),
 		);
 		setChatState(

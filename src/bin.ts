@@ -1281,7 +1281,7 @@ session
 							// Dispatch activeClient so the session state mirror gets customizations
 							if (activeClientParam) {
 								client.dispatchAction(sessionUri, {
-									type: ActionType.SessionActiveClientChanged,
+									type: ActionType.SessionActiveClientSet,
 									activeClient: activeClientParam,
 								});
 							}
@@ -1342,11 +1342,11 @@ session
 								serverName: serverInfo.name,
 								serverUrl: serverInfo.url,
 								provider: resolvedProvider,
-								model: model ?? sessionState?.summary.model?.id,
+								model: model,
 								name: opts.name,
 								workingDirectory: cwd,
 								gitRoot,
-								title: sessionState?.summary.title,
+								title: sessionState?.title,
 								status: "active",
 								createdAt: new Date().toISOString(),
 							};
@@ -2209,7 +2209,6 @@ session
 
 								console.log(`  ${pc.bold(pc.cyan(s.resource))}`);
 								console.log(`    ${pc.bold("Provider:")} ${s.provider}`);
-								if (s.model) console.log(`    ${pc.bold("Model:")} ${s.model.id}`);
 								if (s.title) console.log(`    ${pc.bold("Title:")} ${s.title}`);
 								console.log(`    ${pc.bold("Status:")} ${status}`);
 								console.log();
@@ -2220,7 +2219,6 @@ session
 							sessions: result.items.map((s) => ({
 								resource: s.resource,
 								provider: s.provider,
-								model: s.model?.id,
 								title: s.title,
 								status: s.status,
 								createdAt: s.createdAt,
@@ -2391,8 +2389,18 @@ async function runPrompt(
 			if (forwardingFormatter) {
 				forwardingFormatter.sessionUri = sessionUri;
 			}
+			// As of protocol 0.5.0 a session's default chat MAY live on a separate
+			// `ahp-chat://` channel. Subscribe to it so turn actions are delivered,
+			// and route the turn through it. Falls back to the session URI for hosts
+			// that keep chat on the session channel.
+			const chatUri = await resolveChatChannel(client, sessionUri);
+
+			// Model selection moved to per-message in protocol 0.5.0. Resolve from
+			// the persisted session record, explicit option, then config default.
+			const turnModel = sessionRecord?.model ?? opts.model ?? cfg.defaultModel;
+
 			const permHandler = new PermissionHandler(permMode);
-			const controller = new TurnController(client, sessionUri, formatter, permHandler);
+			const controller = new TurnController(client, sessionUri, formatter, permHandler, chatUri, turnModel);
 
 			// Set up Ctrl+C handling
 			let sigintCount = 0;
@@ -2418,7 +2426,7 @@ async function runPrompt(
 				if (sessionRecord) {
 					await sessionStore.update(sessionRecord.id, {
 						lastPromptAt: new Date().toISOString(),
-						title: client.state.getSession(sessionUri)?.summary.title ?? sessionRecord.title,
+						title: client.state.getSession(sessionUri)?.title ?? sessionRecord.title,
 					});
 
 					// Persist turn summary locally
@@ -2464,6 +2472,23 @@ async function runPrompt(
 	);
 }
 
+/**
+ * Resolve the chat channel for a session. As of protocol 0.5.0 a session's
+ * default chat MAY be exposed on a distinct `ahp-chat://` channel rather than
+ * sharing the session URI. When the host advertises such a `defaultChat`, we
+ * subscribe to it (so the state mirror receives turn actions) and return it as
+ * the chat channel. Hosts that keep chat on the session URI return the session
+ * URI unchanged.
+ */
+async function resolveChatChannel(client: AhpClient, sessionUri: string): Promise<string> {
+	const chatUri = client.state.getSession(sessionUri)?.defaultChat;
+	if (chatUri && chatUri !== sessionUri) {
+		await client.subscribe(chatUri);
+		return chatUri;
+	}
+	return sessionUri;
+}
+
 /** Create a temporary session for one-shot exec mode. */
 async function createTempSession(
 	client: AhpClient,
@@ -2494,7 +2519,7 @@ async function createTempSession(
 	// Dispatch activeClient so the session state mirror gets customizations
 	if (activeClient) {
 		client.dispatchAction(sessionUri, {
-			type: ActionType.SessionActiveClientChanged,
+			type: ActionType.SessionActiveClientSet,
 			activeClient,
 		});
 	}
@@ -2585,7 +2610,7 @@ async function resolveOrCreateSession(
 		// Dispatch activeClient so the session state mirror gets customizations
 		if (activeClient) {
 			client.dispatchAction(sessionUri, {
-				type: ActionType.SessionActiveClientChanged,
+				type: ActionType.SessionActiveClientSet,
 				activeClient,
 			});
 		}
@@ -2610,11 +2635,11 @@ async function resolveOrCreateSession(
 		serverName: serverInfo.name,
 		serverUrl: serverInfo.url,
 		provider,
-		model: opts.model ?? cfg.defaultModel ?? client.state.getSession(sessionUri)?.summary.model?.id,
+		model: opts.model ?? cfg.defaultModel,
 		name: opts.sessionName,
 		workingDirectory: cwd,
 		gitRoot,
-		title: client.state.getSession(sessionUri)?.summary.title,
+		title: client.state.getSession(sessionUri)?.title,
 		status: "active",
 		createdAt: new Date().toISOString(),
 	};
@@ -2670,6 +2695,7 @@ program
 	.description("Send a prompt to an agent session")
 	.argument("<text...>", "Prompt text")
 	.option("-s, --server <name>", "Server name or WebSocket URL")
+	.option("-m, --model <model>", "Model to use for this turn")
 	.option("-n, --session-name <name>", "Session name for scoped lookup")
 	.option("-S, --session <id>", "Target session by ID")
 	.option("-f, --file <path>", "Read prompt from file (- for stdin)")
@@ -2688,6 +2714,7 @@ program
 			textParts: string[],
 			opts: {
 				server?: string;
+				model?: string;
 				sessionName?: string;
 				session?: string;
 				file?: string;
@@ -3019,20 +3046,14 @@ program
 		try {
 			const record = await resolveSessionRecord(opts.session, { name: opts.sessionName, server: opts.server });
 
-			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
+			// As of protocol 0.5.0 the model is no longer a session-level concept
+			// dispatched to the server; it is carried per-message. ahpx persists the
+			// chosen model on the local session record and attaches it to each turn.
+			await sessionStore.update(record.id, { model: modelId });
 
-			await withConnection({ server: opts.server, config: cfg }, async (client) => {
-				await client.subscribe(record.sessionUri);
-
-				client.dispatchAction(record.sessionUri, {
-					type: ActionType.SessionModelChanged,
-					model: { id: modelId },
-				});
-
-				outputResult(globalOpts, () => console.log(pc.green("✓"), `Model change to ${pc.bold(modelId)} dispatched.`), {
-					sessionUri: record.sessionUri,
-					model: modelId,
-				});
+			outputResult(globalOpts, () => console.log(pc.green("✓"), `Model for session set to ${pc.bold(modelId)}.`), {
+				sessionUri: record.sessionUri,
+				model: modelId,
 			});
 		} catch (err) {
 			handleError(err, globalOpts);

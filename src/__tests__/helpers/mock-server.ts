@@ -20,7 +20,7 @@ import { WebSocket, WebSocketServer } from "ws";
 
 // ── Protocol constants (mirroring src/protocol) ─────────────────────────
 
-const PROTOCOL_VERSION = "0.4.0";
+const PROTOCOL_VERSION = "0.5.0";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -275,16 +275,14 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 			resource: session.uri,
 			fromSeq: serverSeq,
 			state: {
-				summary: {
-					resource: session.uri,
-					provider: session.provider,
-					title: session.title,
-					status: 1,
-					createdAt: session.createdAt,
-					modifiedAt: session.createdAt,
-					model: session.model,
-				},
+				resource: session.uri,
+				provider: session.provider,
+				title: session.title,
+				status: 1,
+				createdAt: session.createdAt,
+				modifiedAt: session.createdAt,
 				lifecycle: "ready",
+				activeClients: [],
 				chats: [
 					{
 						resource: session.uri,
@@ -430,15 +428,14 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 						resource: channel,
 						fromSeq: serverSeq,
 						state: {
-							summary: {
-								resource: channel,
-								provider: "mock-agent",
-								title: "Unknown Session",
-								status: 1,
-								createdAt: Date.now(),
-								modifiedAt: Date.now(),
-							},
+							resource: channel,
+							provider: "mock-agent",
+							title: "Unknown Session",
+							status: 1,
+							createdAt: Date.now(),
+							modifiedAt: Date.now(),
 							lifecycle: "creating",
+							activeClients: [],
 							chats: [],
 						},
 					},
@@ -473,7 +470,6 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 					status: "idle",
 					createdAt: s.createdAt,
 					modifiedAt: s.createdAt,
-					model: s.model,
 				}));
 				sendResponse(ws, req.id, { items });
 				break;

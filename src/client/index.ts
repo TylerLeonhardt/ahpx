@@ -299,11 +299,14 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		config?: Record<string, unknown>,
 		activeClient?: SessionActiveClient,
 	): Promise<null> {
+		// As of protocol 0.5.0 the model is no longer a session-level concept;
+		// it is carried per-message on `Message.model`. The `model` parameter is
+		// retained on the handle (see SessionHandle) and attached to each turn.
+		void model;
 		this.ensureConnected();
 		return this.protocol!.request("createSession", {
 			channel: sessionUri,
 			provider,
-			model: model ? { id: model } : undefined,
 			workingDirectory,
 			...(config && Object.keys(config).length > 0 ? { config } : {}),
 			...(activeClient ? { activeClient } : {}),

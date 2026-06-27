@@ -12,15 +12,11 @@ const CLIENT_ID = "test-client-123";
 
 function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
 	return {
-		summary: {
-			resource: SESSION_URI,
-			provider: "copilot",
-			title: "Test",
-			status: SessionStatus.Idle,
-			createdAt: 1000,
-			modifiedAt: 1000,
-		},
+		provider: "copilot",
+		title: "Test",
+		status: SessionStatus.Idle,
 		lifecycle: SessionLifecycle.Ready,
+		activeClients: [],
 		chats: [],
 		...overrides,
 	};
@@ -61,7 +57,7 @@ describe("ActiveClientManager", () => {
 		await manager.claimActiveClient(SESSION_URI, "ahpx CLI");
 
 		expect(dispatched).toHaveLength(1);
-		expect(dispatched[0].type).toBe(ActionType.SessionActiveClientChanged);
+		expect(dispatched[0].type).toBe(ActionType.SessionActiveClientSet);
 
 		const action = dispatched[0] as { activeClient: SessionActiveClient };
 		expect(action.activeClient.clientId).toBe(CLIENT_ID);
@@ -78,8 +74,9 @@ describe("ActiveClientManager", () => {
 
 		expect(dispatched).toHaveLength(2);
 
-		const releaseAction = dispatched[1] as { activeClient: SessionActiveClient | null };
-		expect(releaseAction.activeClient).toBeNull();
+		expect(dispatched[1].type).toBe(ActionType.SessionActiveClientRemoved);
+		const releaseAction = dispatched[1] as { clientId: string };
+		expect(releaseAction.clientId).toBe(CLIENT_ID);
 	});
 
 	it("checks if this client is active using state mirror", () => {
@@ -94,7 +91,7 @@ describe("ActiveClientManager", () => {
 		setSessionState(
 			SESSION_URI,
 			makeSessionState({
-				activeClient: { clientId: CLIENT_ID, tools: [] },
+				activeClients: [{ clientId: CLIENT_ID, tools: [] }],
 			}),
 		);
 		expect(manager.isActiveClient(SESSION_URI)).toBe(true);
@@ -103,7 +100,7 @@ describe("ActiveClientManager", () => {
 		setSessionState(
 			SESSION_URI,
 			makeSessionState({
-				activeClient: { clientId: "other-client", tools: [] },
+				activeClients: [{ clientId: "other-client", tools: [] }],
 			}),
 		);
 		expect(manager.isActiveClient(SESSION_URI)).toBe(false);
@@ -121,8 +118,8 @@ describe("ActiveClientManager", () => {
 		await manager.registerTools(SESSION_URI, tools);
 
 		expect(dispatched).toHaveLength(1);
-		expect(dispatched[0].type).toBe(ActionType.SessionActiveClientToolsChanged);
-		expect((dispatched[0] as { tools: ToolDefinition[] }).tools).toEqual(tools);
+		expect(dispatched[0].type).toBe(ActionType.SessionActiveClientSet);
+		expect((dispatched[0] as { activeClient: SessionActiveClient }).activeClient.tools).toEqual(tools);
 	});
 
 	it("completes a tool call with result", () => {

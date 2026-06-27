@@ -30,12 +30,15 @@ The state is addressed by URI. The main resource types are:
 | `<provider>:/<uuid>` | Session state | Summary, lifecycle, chats catalog, active client, customizations |
 | chat channel | Chat state | Turns, the active turn, tool calls, streaming response parts |
 
-> **Session / chat split (0.3+).** A session's *coordination* state (summary,
-> lifecycle, the catalogue of chats, the active client) is separate from a chat's
-> *conversation* state (turns and the in-progress turn). A session lists its chats
-> in `chats` and names a `defaultChat`. ahpx is a one-session / one-chat CLI, so
-> it treats the session's default chat as sharing the **same URI** as the session
-> and subscribes to both views under that key.
+> **Session / chat split (0.3+).** A session's *coordination* state (its
+> metadata, lifecycle, the catalogue of chats, and active clients) is separate
+> from a chat's *conversation* state (turns and the in-progress turn). A session
+> lists its chats in `chats` and names a `defaultChat`. **As of 0.5.0 the default
+> chat MAY be a distinct channel** (e.g. `ahp-chat://default/<id>`) rather than
+> sharing the session URI, so ahpx resolves `defaultChat` from the session
+> snapshot, subscribes to it, and dispatches turn (`chat/*`) actions there. When a
+> host keeps chat on the session URI, `defaultChat` equals the session URI and the
+> two views share one key.
 
 **Root state:**
 ```
@@ -52,15 +55,27 @@ ahp-root://
 **Session state** (coordination — `SessionState`):
 ```
 <provider>:/<uuid>
-├── summary: SessionSummary
-│   ├── resource, provider, title, status, createdAt, modifiedAt, model?
+├── provider, title, status, activity?    (SessionMetadata, inlined flat — no nested `summary`)
 ├── lifecycle: "creating" | "ready" | "creationFailed"
 ├── serverTools?: ToolDefinition[]
-├── activeClient?: SessionActiveClient
+├── activeClients: SessionActiveClient[]   (clients providing tools + customizations)
 ├── customizations?: Customization[]
-├── chats: ChatSummary[]          (catalogue of this session's chats)
-└── defaultChat?: URI             (the chat ahpx maps to the session URI)
+├── config?: SessionConfigState
+├── changesets?: Changeset[]
+├── chats: ChatSummary[]                    (catalogue of this session's chats)
+└── defaultChat?: URI                       (the chat channel turns are dispatched on)
 ```
+
+> **0.5.0 shape changes.** `SessionState` now **inlines** every `SessionMetadata`
+> field (`provider`, `title`, `status`, `activity`, `workingDirectory`, …)
+> directly — there is no nested `summary` object (read `state.title`, not
+> `state.summary.title`). The single `activeClient` became an **`activeClients`
+> array** (a session can have several). `SessionStatus` is a **bitset** (`Idle=1`,
+> `Error=2`, `InProgress=8`, `InputNeeded=24`, `IsRead=32`, `IsArchived=64`) — use
+> bitwise checks, not equality. There is **no session-level `model`** anymore;
+> model selection is carried per-message on `Message.model` (a `ModelSelection`
+> `{ id, config? }`). The lightweight catalog entry on the root channel is still
+> `SessionSummary` (which also extends `SessionMetadata`).
 
 **Chat state** (conversation — `ChatState`):
 ```
@@ -131,33 +146,42 @@ as `action` notifications.
   "id": 3,
   "method": "createSession",
   "params": {
-    "session": "copilot:/<uuid>",
+    "channel": "copilot:/<uuid>",
     "provider": "copilot",
-    "model": "gpt-4o"
+    "workingDirectory": "file:///path/to/project",
+    "config": {}
   }
 }
 ```
 
+`createSession` no longer accepts a `model` (model is per-message — see step 4).
 Then subscribe to the session URI. The session starts in `lifecycle: "creating"`.
 Wait for `session/ready` (success) or `session/creationFailed` (failure) action.
 
 ### 4. Start a turn
 
 Dispatch a `chat/turnStarted` action via fire-and-forget notification. The
-target channel is carried in `params.channel` (the chat URI — for ahpx, the same
-as the session URI); the action no longer carries a `session` field:
+target channel is carried in `params.channel` — the chat URI, which is the
+session's `defaultChat` (a distinct `ahp-chat://` channel on hosts that split it,
+or the session URI when they don't). The action no longer carries a `session`
+field. The chosen model rides on `message.model` (`{ id, config? }`); omit it to
+use the host default:
 
 ```json
 {
   "jsonrpc": "2.0",
   "method": "dispatchAction",
   "params": {
-    "channel": "copilot:/<uuid>",
+    "channel": "ahp-chat://default/<id>",
     "clientSeq": 1,
     "action": {
       "type": "chat/turnStarted",
       "turnId": "<unique-turn-id>",
-      "message": { "text": "Hello, world!", "origin": { "kind": "user" } }
+      "message": {
+        "text": "Hello, world!",
+        "origin": { "kind": "user" },
+        "model": { "id": "gpt-4o" }
+      }
     }
   }
 }
@@ -249,15 +273,27 @@ lifecycle and metadata actions live on the **session** channel (`session/*`).
 | `session/ready` | No | — | Session backend initialized |
 | `session/creationFailed` | No | `error` | Session failed to initialize |
 | `session/titleChanged` | No | `title` | Session title updated |
-| `session/modelChanged` | **Yes** | `model` | Model changed for session |
+| `session/activityChanged` | No | `activity` | Human-readable "what it's doing" string changed |
+| `session/metaChanged` | No | `_meta` | Provider-specific session metadata changed |
+| `session/isReadChanged` | **Yes** | `isRead` | Read/unread flag toggled (status bit) |
+| `session/isArchivedChanged` | **Yes** | `isArchived` | Archived flag toggled (status bit) |
 | `session/agentChanged` | **Yes** | `agent` | Custom agent changed |
 | `session/serverToolsChanged` | No | `tools` | Server tools changed |
-| `session/activeClientChanged` | **Yes** | `activeClient` | Active client (tools + customizations) changed |
-| `session/activeClientToolsChanged` | **Yes** | `tools` | Active client's tools changed |
+| `session/activeClientSet` | **Yes** | `activeClient` | Add/refresh an active client (tools + customizations), keyed by `clientId` |
+| `session/activeClientRemoved` | **Yes** | `clientId` | Remove an active client by id |
 | `session/customizationsChanged` | No | `customizations` | Full customization list replaced |
 | `session/customizationToggled` | **Yes** | `id, enabled` | Enable/disable a container customization |
+| `session/customizationUpdated` / `customizationRemoved` | No | `customization` / `id` | A single customization changed or was removed |
+| `session/mcpServerStateChanged` | No | `id, state` | An MCP server customization's runtime state changed |
+| `session/changesetsChanged` | No | `changesets` | Catalogue of subscribable changesets changed |
+| `session/configChanged` | No | `config` | Session config schema/values changed |
 | `session/chatAdded` / `chatRemoved` / `chatUpdated` | No | `chat` | Session's chat catalogue changed |
 | `session/defaultChatChanged` | No | `defaultChat` | Default chat pointer changed |
+
+> **Removed in 0.5.0:** `session/modelChanged` (no session-level model — model is
+> per-message), `session/activeClientChanged` and `session/activeClientToolsChanged`
+> (replaced by the `activeClientSet` / `activeClientRemoved` pair over the
+> `activeClients` array).
 
 #### Turn lifecycle (`chat/*`)
 | Type | Client? | Payload | Description |
@@ -304,7 +340,7 @@ Client-dispatchability is encoded in the package's `IS_CLIENT_DISPATCHABLE` map
 | `initialize` | `protocolVersion, clientId, initialSubscriptions?` | `protocolVersion, serverSeq, snapshots[], defaultDirectory?` | Establish connection |
 | `reconnect` | `clientId, lastSeenServerSeq, subscriptions[]` | `{type: "replay", actions[]}` or `{type: "snapshot", snapshots[]}` | Re-establish dropped connection |
 | `subscribe` | `channel` | `snapshot` | Subscribe to URI state |
-| `createSession` | `channel, provider?, model?, workingDirectory?, activeClient?` | `null` | Create new session |
+| `createSession` | `channel, provider?, workingDirectory?, config?, activeClient?, fork?` | `null` | Create new session (no `model` — model is per-message) |
 | `disposeSession` | `channel` | `null` | Dispose session |
 | `listSessions` | `{}` | `sessions: SessionSummary[]` | List all sessions |
 | `resourceRead` | `channel/uri` | `data, encoding, mimeType?` | Read a resource / large content by reference |

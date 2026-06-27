@@ -127,7 +127,7 @@ export class StateMirror {
 		// Determine the resource type from the snapshot shape.
 		if ("agents" in state) {
 			this.rootState = snapshot.state as RootState;
-		} else if ("summary" in state) {
+		} else if ("lifecycle" in state) {
 			this.sessions.set(snapshot.resource, snapshot.state as SessionState);
 			this.replayBuffered(snapshot.resource, snapshot.fromSeq);
 		} else if ("turns" in state) {
