@@ -122,7 +122,7 @@ describe.runIf(serverAvailable)("SDK E2E: Live AHP Server", () => {
 	// ── Test 1: Send a message ────────────────────────────────────────────
 
 	it("sends a prompt and receives a complete response", async () => {
-		session = await client.openSession({ provider: "copilot" });
+		session = await client.openSession();
 		autoApproveToolCalls(session);
 
 		const result = await session.sendPrompt('Respond with exactly: "hello world". Nothing else.', { timeout: 60_000 });
@@ -136,7 +136,7 @@ describe.runIf(serverAvailable)("SDK E2E: Live AHP Server", () => {
 	// ── Test 2: Steering mid-turn ─────────────────────────────────────────
 
 	it("sends a steering message while a turn is in progress", async () => {
-		session = await client.openSession({ provider: "copilot" });
+		session = await client.openSession();
 		autoApproveToolCalls(session);
 
 		// Prepare the steering ID and observer BEFORE starting the turn to avoid
@@ -161,7 +161,7 @@ describe.runIf(serverAvailable)("SDK E2E: Live AHP Server", () => {
 			type: ActionType.ChatPendingMessageSet,
 			kind: PendingMessageKind.Steering,
 			id: steeringId,
-			userMessage: { text: "Actually, make it about dogs instead." },
+			message: { text: "Actually, make it about dogs instead." },
 		});
 
 		// Wait for the turn to complete
@@ -173,15 +173,16 @@ describe.runIf(serverAvailable)("SDK E2E: Live AHP Server", () => {
 
 		// Verify steering was processed by the protocol: the server should echo the
 		// PendingMessageSet action back, or the state snapshot should reflect it.
-		// The server may consume it immediately, so we check both signals.
-		const stateHadSteering = session.state?.steeringMessage?.id === steeringId;
+		// The server may consume it immediately, so we check both signals. As of
+		// protocol 0.5.0 the steering/pending message lives on the chat state.
+		const stateHadSteering = session.chat?.steeringMessage?.id === steeringId;
 		expect(steeringActionObserved || stateHadSteering).toBe(true);
 	}, 90_000);
 
 	// ── Test 3: Observe session state mid-stream ──────────────────────────
 
 	it("observes session state and active turn while streaming", async () => {
-		session = await client.openSession({ provider: "copilot" });
+		session = await client.openSession();
 		autoApproveToolCalls(session);
 
 		let observedActiveTurn = false;
@@ -235,8 +236,9 @@ describe.runIf(serverAvailable)("SDK E2E: Live AHP Server", () => {
 		// After turn completes, activeTurn should be cleared
 		expect(session.activeTurn).toBeUndefined();
 
-		// The completed turn should be in the turns array
-		const finalState = session.state;
-		expect(finalState?.turns.length).toBeGreaterThanOrEqual(1);
+		// The completed turn should be in the turns array. As of protocol 0.5.0
+		// turns live on the chat state, not the session coordination state.
+		const finalChat = session.chat;
+		expect(finalChat?.turns.length).toBeGreaterThanOrEqual(1);
 	}, 90_000);
 });
