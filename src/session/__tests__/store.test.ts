@@ -443,6 +443,74 @@ describe("SessionStore", () => {
 		});
 	});
 
+	describe("getByName", () => {
+		it("finds a session by name regardless of cwd or server", async () => {
+			await store.save(makeSession({ id: "id-1", name: "e2e-demo" }));
+
+			const result = await store.getByName("e2e-demo");
+			expect(result).toBeDefined();
+			expect(result!.id).toBe("id-1");
+		});
+
+		it("finds a CLOSED session by name (for history after close)", async () => {
+			await store.save(makeSession({ id: "id-closed", name: "e2e-demo", status: "closed" }));
+
+			const result = await store.getByName("e2e-demo");
+			expect(result).toBeDefined();
+			expect(result!.id).toBe("id-closed");
+			expect(result!.status).toBe("closed");
+		});
+
+		it("prefers an active match over a closed one with the same name", async () => {
+			await store.save(
+				makeSession({
+					id: "id-old-closed",
+					name: "dup",
+					status: "closed",
+					createdAt: "2024-01-15T12:00:00.000Z",
+				}),
+			);
+			await store.save(
+				makeSession({
+					id: "id-active",
+					name: "dup",
+					status: "active",
+					createdAt: "2024-01-15T10:00:00.000Z",
+				}),
+			);
+
+			const result = await store.getByName("dup");
+			expect(result!.id).toBe("id-active");
+		});
+
+		it("returns the most recent when multiple match and none/all share status", async () => {
+			await store.save(
+				makeSession({ id: "older", name: "dup", status: "closed", createdAt: "2024-01-15T10:00:00.000Z" }),
+			);
+			await store.save(
+				makeSession({ id: "newer", name: "dup", status: "closed", createdAt: "2024-01-15T12:00:00.000Z" }),
+			);
+
+			const result = await store.getByName("dup");
+			expect(result!.id).toBe("newer");
+		});
+
+		it("narrows by server when one is provided", async () => {
+			await store.save(makeSession({ id: "on-local", name: "dup", serverName: "local" }));
+			await store.save(makeSession({ id: "on-remote", name: "dup", serverName: "remote" }));
+
+			const result = await store.getByName("dup", "remote");
+			expect(result!.id).toBe("on-remote");
+		});
+
+		it("returns undefined when no name matches", async () => {
+			await store.save(makeSession({ id: "id-1", name: "something-else" }));
+
+			const result = await store.getByName("e2e-demo");
+			expect(result).toBeUndefined();
+		});
+	});
+
 	describe("file persistence", () => {
 		it("persists as individual JSON files", async () => {
 			await store.save(makeSession({ id: "persist-1" }));

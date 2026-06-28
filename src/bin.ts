@@ -1126,11 +1126,27 @@ async function resolveSessionRecord(
 	opts: { name?: string; server?: string },
 ): Promise<SessionRecord> {
 	if (id) {
-		const record = await sessionStore.get(id);
-		if (!record) {
-			throw new NoSessionError(`Session "${id}" not found.`);
+		// Resolve by exact id first (the positional has historically been an id).
+		const byId = await sessionStore.get(id);
+		if (byId) return byId;
+
+		// Fall back: treat the positional as a NAME. Users think in names, and
+		// commands like `session close <name>` / `session history <name>` should
+		// Just Work. Precedence: an exact id always wins over a name collision.
+		// Narrow by server only when one was explicitly provided.
+		let serverFilter: string | undefined;
+		if (opts.server) {
+			try {
+				serverFilter = await resolveServerName(opts.server, await loadConfig());
+			} catch {
+				// Unknown/unsavable server flag — fall back to an unscoped name search.
+				serverFilter = undefined;
+			}
 		}
-		return record;
+		const byName = await sessionStore.getByName(id, serverFilter);
+		if (byName) return byName;
+
+		throw new NoSessionError(`No session found with id or name "${id}".`);
 	}
 
 	const cfg = await loadConfig();
@@ -1708,7 +1724,20 @@ session
 					return;
 				}
 
-				// Try server first, fall back to local
+				// The local record is the DURABLE source of truth for turn history:
+				// each completed turn is persisted locally (prompt, response preview,
+				// tool-call count, token usage, timestamp). Prefer it so history stays
+				// useful even after the session is closed/disposed on the host — and so
+				// it never silently prints empty when turns actually happened. (As of
+				// protocol 0.5.0 turns live on the chat channel, so fetching from the
+				// session URI returns empty once the session is gone.)
+				if ((record.turns?.length ?? 0) > 0) {
+					showLocalHistory(record, limit, globalOpts);
+					return;
+				}
+
+				// No locally-cached turns — fall back to the live host (e.g. a session
+				// created by another client, or resumed before any local turn landed).
 				const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 				try {
 					await withConnection(
