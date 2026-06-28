@@ -1,9 +1,25 @@
 /**
  * AhpClient — High-level AHP protocol client.
  *
- * Composes Transport + ProtocolLayer + StateMirror into a single
- * interface for connecting to AHP servers, managing sessions, and
- * dispatching actions.
+ * A thin EventEmitter-based facade over the **official**
+ * `@microsoft/agent-host-protocol` async-iterator client. ahpx's CLI,
+ * `TurnController`, connect-helper, watcher, health, auth, and persistence all
+ * consume this surface (`connect`/`createSession`/`subscribe`/`dispatchAction`,
+ * `on('action'|'notification'|'disconnected')`, `state.{root,getSession,getChat}`,
+ * …). This adapter preserves that surface while delegating protocol/transport to
+ * the official client.
+ *
+ * What stays in this adapter (capabilities the official client does not provide):
+ * - {@link WsTransport} — a `ws`-based transport with custom headers (auth /
+ *   dev-tunnel), since the official `/ws` transport uses the header-less global
+ *   `WebSocket`.
+ * - {@link StateMirror} — the official `AhpStateMirror` tracks sessions/terminals/
+ *   changesets but not `ahp-chat://` chat state, which the folded-first-delta
+ *   recovery depends on.
+ * - EventEmitter bridge — fans the official `events()` / `stateChanges()` async
+ *   iterators out as `action` / `notification` / `disconnected` events.
+ * - reverse-RPC file serving — bridges `setServerRequestHandler` to
+ *   {@link FileServingHandler}.
  */
 
 import { randomUUID } from "node:crypto";
@@ -32,18 +48,39 @@ import type {
 } from "@microsoft/agent-host-protocol";
 import type { SessionActiveClient, TerminalClaim, URI } from "@microsoft/agent-host-protocol";
 import { PROTOCOL_VERSION } from "@microsoft/agent-host-protocol";
+import { AhpClient as OfficialAhpClient } from "@microsoft/agent-host-protocol/client";
+import type {
+	ClientEvent,
+	ClosedReason,
+	ServerRequestHandler,
+	SubscriptionEvent,
+} from "@microsoft/agent-host-protocol/client";
 import type { ProtocolNotification } from "../notifications.js";
+import { NotificationType } from "../notifications.js";
 import { FileServingHandler } from "./file-serving.js";
-import { ProtocolLayer, type ProtocolLayerOptions } from "./protocol.js";
 import { SessionHandle } from "./session-handle.js";
 import { StateMirror } from "./state.js";
-import { Transport, type TransportOptions } from "./transport.js";
+import { WsTransport } from "./ws-transport.js";
 
-export interface AhpClientOptions extends TransportOptions, ProtocolLayerOptions {
+/** Options for opening a WebSocket connection (subset of {@link AhpClientOptions}). */
+export interface ConnectOptions {
+	/** Connection timeout in ms (default: 10_000). */
+	connectTimeout?: number;
+	/** Headers to include in the WebSocket handshake (auth / dev-tunnel). */
+	headers?: Record<string, string>;
+}
+
+export interface AhpClientOptions {
 	/** Unique client identifier (default: random UUID) */
 	clientId?: string;
 	/** URIs to subscribe to during initialization */
 	initialSubscriptions?: URI[];
+	/** Connection timeout in ms (default: 10_000) */
+	connectTimeout?: number;
+	/** Default request timeout in ms (default: 30_000) */
+	requestTimeout?: number;
+	/** Headers to include in the WebSocket handshake */
+	headers?: Record<string, string>;
 }
 
 export interface AhpClientEvents {
@@ -84,14 +121,14 @@ export interface OpenSessionOptions {
  * ```
  */
 export class AhpClient extends EventEmitter<AhpClientEvents> {
-	private transport: Transport | undefined;
-	private protocol: ProtocolLayer | undefined;
+	private official: OfficialAhpClient | undefined;
+	private transport: WsTransport | undefined;
 	private readonly _state = new StateMirror();
 	private readonly _sessions = new Map<string, SessionHandle>();
 	private readonly _fileServing = new FileServingHandler();
 	private _clientId: string;
-	private _clientSeq = 0;
 	private _connected = false;
+	private _disconnectedEmitted = false;
 
 	constructor(private readonly options: AhpClientOptions = {}) {
 		super();
@@ -126,65 +163,58 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/**
 	 * Connect to an AHP server and perform the initialization handshake.
 	 */
-	async connect(url: string, connectOptions?: TransportOptions): Promise<InitializeResult> {
-		const transport = new Transport();
-		const protocol = new ProtocolLayer(transport, this.options);
+	async connect(url: string, connectOptions?: ConnectOptions): Promise<InitializeResult> {
+		// Merge constructor headers with per-connect overrides.
+		const headers = { ...this.options.headers, ...connectOptions?.headers };
+		const connectTimeout = connectOptions?.connectTimeout ?? this.options.connectTimeout;
 
-		// Wire up events
-		protocol.on("action", (envelope) => {
-			this._state.applyAction(envelope);
-			this.emit("action", envelope);
+		const transport = await WsTransport.connect(url, {
+			connectTimeout,
+			headers: Object.keys(headers).length > 0 ? headers : undefined,
 		});
-
-		protocol.on("notification", (notification) => {
-			this.emit("notification", notification);
-		});
-
-		// Register reverse-RPC file serving handler
-		this._fileServing.register(protocol);
-
-		transport.on("close", (code, reason) => {
-			this._connected = false;
-			protocol.cancelAll("Connection closed");
-			this.emit("disconnected", code, reason);
-		});
-
-		transport.on("error", (err) => {
-			this.emit("error", err);
-		});
-
-		// Connect WebSocket — merge constructor options with per-connect overrides
-		const transportOpts: TransportOptions = {
-			...this.options,
-			...connectOptions,
-			headers: { ...this.options.headers, ...connectOptions?.headers },
-		};
-		await transport.connect(url, transportOpts);
-
 		this.transport = transport;
-		this.protocol = protocol;
 
-		// Send initialize
+		const official = new OfficialAhpClient(transport, {
+			requestTimeoutMs: this.options.requestTimeout ?? 30_000,
+		});
+		this.official = official;
+		this._disconnectedEmitted = false;
+
+		// Bridge reverse-RPC server requests (file serving) to the official client.
+		official.setServerRequestHandler(((method: string, params: unknown) =>
+			this._fileServing.handleServerRequest(method, params)) as ServerRequestHandler);
+
+		// Start the receive loop and begin draining event/state streams BEFORE
+		// `initialize` so no inbound action is missed (the initialize snapshots
+		// themselves are applied from the result below).
+		official.connect();
+		this.startStreams(official);
+
 		const initParams = {
-			channel: "ahp-root://" as const,
 			protocolVersions: [PROTOCOL_VERSION],
 			clientId: this._clientId,
 			initialSubscriptions: this.options.initialSubscriptions ?? ["ahp-root://"],
 		};
 
-		// DEBUG: Log initialize params
 		if (process.env.AHPX_DEBUG_PROTOCOL) {
 			console.error("[AHPX_DEBUG] Initialize params:", JSON.stringify(initParams, null, 2));
 		}
 
-		const result = await protocol.request("initialize", initParams);
+		let result: InitializeResult;
+		try {
+			result = await official.initialize(initParams);
+		} catch (err) {
+			await official.shutdown().catch(() => {});
+			this.official = undefined;
+			this.transport = undefined;
+			this._connected = false;
+			throw err;
+		}
 
-		// DEBUG: Log initialize result
 		if (process.env.AHPX_DEBUG_PROTOCOL) {
 			console.error("[AHPX_DEBUG] Initialize result:", JSON.stringify(result, null, 2));
 		}
 
-		// Apply initial snapshots to state mirror
 		for (const snapshot of result.snapshots) {
 			this._state.applySnapshot(snapshot);
 		}
@@ -210,16 +240,73 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		}
 		this._sessions.clear();
 
-		if (this.protocol) {
-			this.protocol.cancelAll("Client disconnecting");
-		}
 		this._fileServing.clearAllowedPaths();
-		if (this.transport) {
-			this.transport.close();
-			this.transport = undefined;
-			this.protocol = undefined;
+		if (this.official) {
+			await this.official.shutdown();
+			this.official = undefined;
 		}
 		this._connected = false;
+	}
+
+	// ── Official client event/state stream bridge ────────────────────────────
+
+	/**
+	 * Drain the official client's `events()` and `stateChanges()` async
+	 * iterators, fanning them out as EventEmitter events ahpx consumers expect.
+	 */
+	private startStreams(official: OfficialAhpClient): void {
+		void (async () => {
+			try {
+				for await (const event of official.events()) {
+					this.handleClientEvent(event);
+				}
+			} catch (err) {
+				this.emit("error", err instanceof Error ? err : new Error(String(err)));
+			}
+		})();
+
+		void (async () => {
+			try {
+				for await (const st of official.stateChanges()) {
+					if (st.status === "closed") {
+						this.handleClosed(st.reason);
+					}
+				}
+			} catch {
+				// stateChanges terminating is not itself an error condition.
+			}
+		})();
+	}
+
+	/** Route a single fanned-in client event to state mirror + emitters. */
+	private handleClientEvent(event: ClientEvent): void {
+		const sub = event.event;
+		if (sub.type === "action") {
+			this._state.applyAction(sub.params);
+			this.emit("action", sub.params);
+			return;
+		}
+		const notification = toNotification(sub);
+		if (notification) {
+			this.emit("notification", notification);
+		}
+	}
+
+	/** Map a connection-closed reason to a `disconnected` emission (once). */
+	private handleClosed(reason: ClosedReason): void {
+		if (this._disconnectedEmitted) return;
+		this._disconnectedEmitted = true;
+		this._connected = false;
+		if (reason.type === "transport") {
+			// Prefer the real WebSocket close code/reason (preserving the prior
+			// behavior where the raw `ws` close code was surfaced); fall back to
+			// 1006 (abnormal closure) when the socket closed without a code.
+			const code = this.transport?.closeCode ?? 1006;
+			const text = this.transport?.closeReason || reason.error.message;
+			this.emit("disconnected", code, text);
+		} else {
+			this.emit("disconnected", 1000, "shutdown");
+		}
 	}
 
 	// ── Session management ────────────────────────────────────────────────
@@ -316,7 +403,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		// retained on the handle (see SessionHandle) and attached to each turn.
 		void model;
 		this.ensureConnected();
-		return this.protocol!.request("createSession", {
+		return this.official!.request("createSession", {
 			channel: sessionUri,
 			provider,
 			workingDirectory,
@@ -334,7 +421,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async resolveSessionConfig(params: Omit<ResolveSessionConfigParams, "channel">): Promise<ResolveSessionConfigResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resolveSessionConfig", { ...params, channel: "ahp-root://" as const });
+		return this.official!.request("resolveSessionConfig", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
@@ -344,7 +431,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		params: Omit<SessionConfigCompletionsParams, "channel">,
 	): Promise<SessionConfigCompletionsResult> {
 		this.ensureConnected();
-		return this.protocol!.request("sessionConfigCompletions", { ...params, channel: "ahp-root://" as const });
+		return this.official!.request("sessionConfigCompletions", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
@@ -352,7 +439,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async disposeSession(sessionUri: URI): Promise<null> {
 		this.ensureConnected();
-		const result = await this.protocol!.request("disposeSession", {
+		const result = await this.official!.request("disposeSession", {
 			channel: sessionUri,
 		});
 		this._state.removeSession(sessionUri);
@@ -370,7 +457,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		options?: { name?: string; cwd?: string; cols?: number; rows?: number },
 	): Promise<null> {
 		this.ensureConnected();
-		return this.protocol!.request("createTerminal", {
+		return this.official!.request("createTerminal", {
 			channel: terminalUri,
 			claim,
 			...options,
@@ -382,7 +469,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async disposeTerminal(terminalUri: string): Promise<null> {
 		this.ensureConnected();
-		const result = await this.protocol!.request("disposeTerminal", {
+		const result = await this.official!.request("disposeTerminal", {
 			channel: terminalUri,
 		});
 		this._state.removeTerminal(terminalUri);
@@ -394,7 +481,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async listSessions(): Promise<ListSessionsResult> {
 		this.ensureConnected();
-		return this.protocol!.request("listSessions", { channel: "ahp-root://" as const });
+		return this.official!.request("listSessions", { channel: "ahp-root://" as const });
 	}
 
 	/**
@@ -402,7 +489,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async subscribe(channelUri: URI): Promise<SubscribeResult> {
 		this.ensureConnected();
-		const result = await this.protocol!.request("subscribe", {
+		const result = await this.official!.request("subscribe", {
 			channel: channelUri,
 		});
 		if (result.snapshot) {
@@ -416,7 +503,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	unsubscribe(channelUri: URI): void {
 		this.ensureConnected();
-		this.protocol!.notify("unsubscribe", { channel: channelUri });
+		void this.official!.unsubscribe(channelUri);
 	}
 
 	/**
@@ -424,7 +511,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async fetchTurns(sessionUri: URI, before?: string, limit?: number): Promise<FetchTurnsResult> {
 		this.ensureConnected();
-		return this.protocol!.request("fetchTurns", {
+		return this.official!.request("fetchTurns", {
 			channel: sessionUri,
 			before,
 			limit,
@@ -436,7 +523,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async resourceRead(uri: string, encoding?: ContentEncoding): Promise<ResourceReadResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceRead", {
+		return this.official!.request("resourceRead", {
 			channel: "ahp-root://" as const,
 			uri,
 			...(encoding ? { encoding } : {}),
@@ -448,7 +535,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async resourceWrite(params: Omit<ResourceWriteParams, "channel">): Promise<ResourceWriteResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceWrite", { ...params, channel: "ahp-root://" as const });
+		return this.official!.request("resourceWrite", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
@@ -456,7 +543,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async resourceList(uri: URI): Promise<ResourceListResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceList", { channel: "ahp-root://" as const, uri });
+		return this.official!.request("resourceList", { channel: "ahp-root://" as const, uri });
 	}
 
 	/**
@@ -464,7 +551,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async resourceCopy(params: Omit<ResourceCopyParams, "channel">): Promise<ResourceCopyResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceCopy", { ...params, channel: "ahp-root://" as const });
+		return this.official!.request("resourceCopy", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
@@ -472,7 +559,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async resourceDelete(params: Omit<ResourceDeleteParams, "channel">): Promise<ResourceDeleteResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceDelete", { ...params, channel: "ahp-root://" as const });
+		return this.official!.request("resourceDelete", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
@@ -480,20 +567,18 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async resourceMove(params: Omit<ResourceMoveParams, "channel">): Promise<ResourceMoveResult> {
 		this.ensureConnected();
-		return this.protocol!.request("resourceMove", { ...params, channel: "ahp-root://" as const });
+		return this.official!.request("resourceMove", { ...params, channel: "ahp-root://" as const });
 	}
 
 	/**
 	 * Dispatch a client-originated action to the server.
+	 *
+	 * Write-ahead `dispatchAction` notification — the official client assigns the
+	 * monotonic client sequence number internally.
 	 */
 	dispatchAction(channel: URI, action: StateAction): void {
 		this.ensureConnected();
-		this._clientSeq++;
-		this.protocol!.notify("dispatchAction", {
-			channel,
-			clientSeq: this._clientSeq,
-			action,
-		});
+		this.official!.dispatch(channel, action);
 	}
 
 	/**
@@ -501,19 +586,36 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 */
 	async authenticate(resource: string, token: string): Promise<void> {
 		this.ensureConnected();
-		await this.protocol!.request("authenticate", { channel: "ahp-root://" as const, resource, token });
+		await this.official!.request("authenticate", { channel: "ahp-root://" as const, resource, token });
 	}
 
 	private ensureConnected(): void {
-		if (!this._connected || !this.protocol) {
+		if (!this._connected || !this.official) {
 			throw new Error("Client is not connected");
 		}
 	}
 }
 
-export { Transport, type TransportOptions } from "./transport.js";
-export { ProtocolLayer, RpcError, RpcTimeoutError, type ProtocolLayerOptions } from "./protocol.js";
-export type { IncomingRequest } from "./protocol.js";
+/** Map an official client {@link SubscriptionEvent} to an ahpx notification. */
+function toNotification(sub: SubscriptionEvent): ProtocolNotification | undefined {
+	switch (sub.type) {
+		case "sessionAdded":
+			return { ...sub.params, type: NotificationType.SessionAdded };
+		case "sessionRemoved":
+			return { ...sub.params, type: NotificationType.SessionRemoved };
+		case "sessionSummaryChanged":
+			return { ...sub.params, type: NotificationType.SessionSummaryChanged };
+		case "authRequired":
+			return { ...sub.params, type: NotificationType.AuthRequired };
+		default:
+			return undefined;
+	}
+}
+
+// `RpcError` / `RpcTimeoutError` now come from the official client; re-exported
+// here so existing ahpx imports (`bin.ts`, `session/persistence.ts`) keep working.
+export { RpcError, RpcTimeoutError } from "@microsoft/agent-host-protocol/client";
+export { WsTransport, type WsTransportOptions } from "./ws-transport.js";
 export { StateMirror } from "./state.js";
 export { SessionHandle } from "./session-handle.js";
 export type { SessionHandleEvents, PromptOptions, TurnResult as SessionTurnResult } from "./session-handle.js";

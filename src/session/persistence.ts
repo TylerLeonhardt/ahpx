@@ -6,7 +6,7 @@
  */
 
 import type { AhpClient } from "../client/index.js";
-import { RpcError } from "../client/protocol.js";
+import { RpcError } from "../client/index.js";
 import { createLogger } from "../logger.js";
 import type { SessionRecord } from "./store.js";
 import { type SessionStore, buildTurnSummary } from "./store.js";

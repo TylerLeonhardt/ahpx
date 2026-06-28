@@ -10,10 +10,15 @@
 import * as fs from "node:fs/promises";
 import * as nodePath from "node:path";
 import { fileURLToPath } from "node:url";
+import { RpcError } from "@microsoft/agent-host-protocol/client";
 import { createLogger } from "../logger.js";
-import type { IncomingRequest, ProtocolLayer } from "./protocol.js";
 
 const log = createLogger("file-serving");
+
+/** JSON-RPC method-not-found code. */
+const METHOD_NOT_FOUND = -32601;
+/** AHP resource-access-denied code (used for read/list failures). */
+const ACCESS_DENIED = -32008;
 
 /**
  * Manages the set of file URIs the client has offered as customizations,
@@ -46,18 +51,29 @@ export class FileServingHandler {
 	}
 
 	/**
-	 * Register this handler on a ProtocolLayer to respond to incoming
-	 * reverse-RPC requests from the server.
+	 * Handle a reverse-RPC request from the server.
+	 *
+	 * Wire this into the official client via `setServerRequestHandler`. As of
+	 * protocol 0.5.0 the server may request `file://` customization contents back
+	 * from the client (`resourceRead`) and directory listings (`resourceList`).
+	 *
+	 * Returns the result on success, or throws an official {@link RpcError} so the
+	 * client sends back a JSON-RPC error response (`-32601` for unknown methods,
+	 * `-32008` for access-denied / read failures).
 	 */
-	register(protocol: ProtocolLayer): void {
-		protocol.on("request", (req) => {
-			this.handleRequest(protocol, req).catch((err) => {
-				log.info("unhandled file-serving error", {
-					method: req.method,
-					error: String(err),
-				});
-			});
-		});
+	async handleServerRequest(method: string, params: unknown): Promise<unknown> {
+		switch (method) {
+			case "resourceRead": {
+				const uri = (params as { uri: string }).uri;
+				return this.handleResourceRead(uri);
+			}
+			case "resourceList": {
+				const uri = (params as { uri: string }).uri;
+				return this.handleResourceList(uri);
+			}
+			default:
+				throw new RpcError(METHOD_NOT_FOUND, `Unknown method: ${method}`);
+		}
 	}
 
 	/**
@@ -67,50 +83,36 @@ export class FileServingHandler {
 		return this.allowedPaths.has(resolvedPath);
 	}
 
-	private async handleRequest(protocol: ProtocolLayer, req: IncomingRequest): Promise<void> {
-		try {
-			switch (req.method) {
-				case "resourceRead": {
-					const params = req.params as { uri: string };
-					const result = await this.handleResourceRead(params.uri);
-					protocol.respond(req.id, result);
-					break;
-				}
-				case "resourceList": {
-					const params = req.params as { uri: string };
-					const result = await this.handleResourceList(params.uri);
-					protocol.respond(req.id, result);
-					break;
-				}
-				default:
-					protocol.respondError(req.id, -32601, `Unknown method: ${req.method}`);
-			}
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			protocol.respondError(req.id, -32008, message);
-		}
-	}
-
 	private async handleResourceRead(uri: string): Promise<{ data: string; encoding: string }> {
-		const filePath = resolveAndValidatePath(uri, this.allowedPaths);
-		const content = await fs.readFile(filePath);
-		return {
-			data: content.toString("base64"),
-			encoding: "base64",
-		};
+		try {
+			const filePath = resolveAndValidatePath(uri, this.allowedPaths);
+			const content = await fs.readFile(filePath);
+			return {
+				data: content.toString("base64"),
+				encoding: "base64",
+			};
+		} catch (err) {
+			if (err instanceof RpcError) throw err;
+			throw new RpcError(ACCESS_DENIED, err instanceof Error ? err.message : String(err));
+		}
 	}
 
 	private async handleResourceList(
 		uri: string,
 	): Promise<{ entries: Array<{ name: string; type: "file" | "directory" }> }> {
-		const dirPath = resolveAndValidatePath(uri, this.allowedPaths);
-		const entries = await fs.readdir(dirPath, { withFileTypes: true });
-		return {
-			entries: entries.map((e) => ({
-				name: e.name,
-				type: e.isDirectory() ? ("directory" as const) : ("file" as const),
-			})),
-		};
+		try {
+			const dirPath = resolveAndValidatePath(uri, this.allowedPaths);
+			const entries = await fs.readdir(dirPath, { withFileTypes: true });
+			return {
+				entries: entries.map((e) => ({
+					name: e.name,
+					type: e.isDirectory() ? ("directory" as const) : ("file" as const),
+				})),
+			};
+		} catch (err) {
+			if (err instanceof RpcError) throw err;
+			throw new RpcError(ACCESS_DENIED, err instanceof Error ? err.message : String(err));
+		}
 	}
 }
 
