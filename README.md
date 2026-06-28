@@ -351,6 +351,7 @@ Project knowledge lives in `.github/` so both humans and agents can find it:
 
 - **[`.github/skills/ahp-protocol/`](.github/skills/ahp-protocol/SKILL.md)** — AHP protocol fundamentals
 - **[`.github/skills/ahpx-architecture/`](.github/skills/ahpx-architecture/SKILL.md)** — Codebase architecture and design
+- **[`.github/skills/capture-ahp-wire-frames/`](.github/skills/capture-ahp-wire-frames/SKILL.md)** — Debugging the wire protocol: tee-proxy capture of the exact frames ahpx sends (uses [`scripts/ahp-wire-tee.mjs`](scripts/ahp-wire-tee.mjs))
 - **[`.github/agents/team-lead.md`](.github/agents/team-lead.md)** — Team lead agent with quality gates and workflow
 
 Read the relevant skill docs before making changes — they'll save you time.
