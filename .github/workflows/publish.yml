@@ -1,7 +1,18 @@
 name: Publish to npm
+# Tag-driven release pipeline.
+#
+# How to cut a release (see PUBLISHING.md):
+#   1. Bump the version in package.json (e.g. `npm version <patch|minor|major> --no-git-tag-version`)
+#   2. Commit the bump to master
+#   3. Tag the commit `vX.Y.Z` (must match package.json) and push the tag
+#   4. This workflow runs on the tag push and publishes the version already in package.json
+#
+# It does NOT auto-bump. The version published is whatever package.json says on the tagged
+# commit, and the job fails loudly if the tag and package.json disagree.
 on:
   push:
-    branches: [master]
+    tags:
+      - "v*.*.*"
 
 concurrency:
   group: publish-npm
@@ -10,32 +21,60 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # Skip version-bump commits to prevent infinite publish loops
-    if: "!contains(github.event.head_commit.message, 'chore: bump version')"
     permissions:
-      contents: write
-      id-token: write
+      contents: write # create the GitHub Release
+      id-token: write # OIDC token for npm trusted publishing
     steps:
       - uses: actions/checkout@v6
+
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+
+      - name: Assert tag matches package.json version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          echo "Tag version:          $TAG_VERSION"
+          echo "package.json version: $PKG_VERSION"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag ($TAG_VERSION) does not match package.json version ($PKG_VERSION). Aborting publish."
+            exit 1
+          fi
+
       - run: npm ci
+
+      # Quality gates — a bad build must never be published.
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run build
-      - run: npm test
-      - name: Bump patch version
+      - name: Run unit tests (excludes e2e)
+        run: npx vitest run src
+
+      - name: Fail if version already published
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          npm version patch --no-git-tag-version
-          npx biome check --write package.json
-          git add package.json package-lock.json
-          git commit -m "chore: bump version to $(node -p 'require("./package.json").version')"
-          git push
+          PKG_NAME="$(node -p "require('./package.json').name")"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if npm view "${PKG_NAME}@${PKG_VERSION}" version > /dev/null 2>&1; then
+            echo "::error::${PKG_NAME}@${PKG_VERSION} is already published to npm. Bump the version and tag again."
+            exit 1
+          fi
+          echo "${PKG_NAME}@${PKG_VERSION} is not yet published — proceeding."
+
       - name: Publish to npm
-        # Authentication via OIDC trusted publishers — no NPM_TOKEN needed
+        # Authentication via OIDC trusted publishers — no NPM_TOKEN needed.
         # Configure at: npmjs.com → Package Settings → Trusted Publishers
         run: npm publish --access public
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists — skipping."
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi
