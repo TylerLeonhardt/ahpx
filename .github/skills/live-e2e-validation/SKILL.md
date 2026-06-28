@@ -145,7 +145,7 @@ npx vitest run --exclude '**/e2e/**'   # unit suite (no live server needed)
   `ahp-chat://` channel rather than the session URI. Turn/streaming actions,
   `turns`, `activeTurn`, and `steeringMessage` live on the **chat state**, not
   the session state. Code must subscribe to and dispatch turns on the chat
-  channel. (See `SessionHandle` / `TurnController` `resolveChatChannel`.)
+  channel. (See `resolveChatChannel` in `src/bin.ts` + `TurnController`.)
 - **First-delta folding.** When a subscribe races with a turn start, the host
   MAY fold the first delta(s) into the subscribe snapshot's `activeTurn` instead
   of emitting them as `chat/delta` actions. Build the final response text from
@@ -156,8 +156,8 @@ npx vitest run --exclude '**/e2e/**'   # unit suite (no live server needed)
   silently ignored by the host — the steering never takes effect and is never
   echoed.
 - **Agent providers.** Real provider ids are host-specific (e.g. `copilotcli`,
-  `claude`, `codex`), not `copilot`. Prefer `client.openSession()` (defaults to
-  the first advertised agent) over hardcoding a provider.
+  `claude`, `codex`), not `copilot`. The CLI defaults to the first advertised
+  agent when none is specified — prefer that over hardcoding a provider.
 
 ## Reporting
 
@@ -231,3 +231,39 @@ route tunnel profiles through the same resolver (and forward the tunnel auth
 headers). A quick tell: after the fix, the error for a dead tunnel changes from a
 URL-scheme/parse error to a real resolution result (e.g. `Tunnel "..." not
 found.`), proving resolution now runs.
+
+### Official-client deep-swap: validate the adapter, not just the CLI
+
+ahpx's `src/client/*` core was replaced by the official
+`@microsoft/agent-host-protocol` client behind a thin adapter (`AhpClient`
+keeps its EventEmitter surface; internals call the official async-iterator
+client). PRs #98 + #99 landed it; the dead high-level SDK
+(`SessionHandle`/`ConnectionPool`/reconnect/active-client) was deleted. Lessons
+for validating that swap live:
+
+- **Folded-first-delta is THE regression check.** It survives the swap only
+  because the adapter keeps ahpx's `StateMirror` (the official `AhpStateMirror`
+  does **not** track `ahp-chat://` chat state) and `TurnController` still rebuilds
+  responseText from `Turn.responseParts`. Always assert short single-word replies
+  (ELEPHANT/BANANA/MANGO/KIWI) render IN FULL in **text mode** — that exercises
+  the official client's `dispatch()` ordering (it calls `socket.send`
+  synchronously before awaiting, so a `subscribe` immediately followed by a turn
+  `dispatch` preserves frame order and the host still folds the first delta).
+- **Gaps the adapter must keep** (don't expect the official client to cover):
+  (1) WS **custom headers** for auth/tunnels → ahpx `WsTransport` over the `ws`
+  package (the official `/ws` transport uses the header-less global WebSocket);
+  (2) `ahp-chat://` chat state; (3) the EventEmitter bridge; (4) reverse-RPC file
+  serving via `setServerRequestHandler`. If a future upgrade breaks one of these,
+  the live symptom is usually a blank/truncated first reply or an auth failure on
+  connect — not a unit-test failure.
+- **Integration tests now drive the real CLI path.** `src/__tests__/integration/
+  client.test.ts` runs the low-level client + real `TurnController` /
+  `PromptRenderer` / `PermissionHandler` over a real-WS mock server. Tool
+  approve/deny flow through `PermissionMode`; a turn that idles out
+  (`state: "idle_timeout"`) is the signal that no confirmation was dispatched.
+- **`npm version` vs biome.** `npm version <patch>` reflows `package.json`'s
+  `files` array multi-line; biome's formatter wants it single-line, so the
+  tag-driven publish pipeline's **lint gate fails** on the bump commit. After
+  bumping, run `npx biome check --write package.json` (or just push a follow-up
+  formatting commit and move the tag). The publish failed at lint *before*
+  publishing, so re-pointing the tag was safe.

@@ -36,10 +36,6 @@ src/
 │   │                       state the official AhpStateMirror does not track)
 │   ├── response-text.ts    Folded-first-delta recovery from chat responseParts
 │   ├── file-serving.ts     Reverse-RPC file serving (resourceRead/List)
-│   ├── active-client.ts    Session active client management
-│   ├── reconnect.ts        Auto-reconnect with backoff
-│   ├── session-handle.ts   SessionHandle — per-session convenience wrapper
-│   ├── connection-pool.ts  ConnectionPool — URL-keyed connection reuse
 │   └── __tests__/          Adapter + real-WS integration tests
 │
 ├── events/                 Event forwarding (Phase 9)
@@ -234,62 +230,42 @@ via `chatReducer` (lazily creating an empty chat state on first chat action);
 terminal actions (`terminal/*`) go through `terminalReducer`; all remaining
 `session/*` actions go through `sessionReducer`.
 
-### Session handle (`client/session-handle.ts`)
+### Driving turns (`prompt/controller.ts`)
 
-`SessionHandle` wraps a single session on an `AhpClient`, filtering events by
-session URI and providing a cleaner API than raw `dispatchAction()` calls.
+ahpx no longer ships a high-level `SessionHandle`/`ConnectionPool`/reconnect SDK
+— it is a CLI-only wrapper. The CLI opens a session with the low-level client
+(`createSession` + `subscribe`, resolving the `ahp-chat://` channel) and drives
+each turn through a `TurnController`:
 
 ```typescript
-class SessionHandle extends EventEmitter {
-  get uri(): URI
-  get state(): SessionState | undefined    // summary, lifecycle, chats
-  get chat(): ChatState | undefined        // turns, activeTurn
-  get activeTurn(): ActiveTurn | undefined
-  get isReady(): boolean
-
-  async prompt(text: string, options?: PromptOptions): Promise<TurnResult>
-  async cancelTurn(): Promise<void>
-  async waitForReady(timeoutMs?: number): Promise<void>
-  dispose(): void
+class TurnController {
+  constructor(
+    client: AhpClient,
+    sessionUri: URI,
+    renderer: PromptRenderer,
+    permission: PermissionHandler,
+    chatUri?: URI,         // defaults to sessionUri
+    model?: string,        // sent per-message as message.model = { id }
+  )
+  async prompt(text, attachments?, opts?): Promise<TurnResult>
 }
 
 interface TurnResult {
   turnId: string
-  responseText: string
+  responseText: string   // authoritative, rebuilt from chat responseParts
   toolCalls: number
   usage?: UsageInfo
-  state: "complete" | "cancelled" | "error"
+  state: "complete" | "cancelled" | "error" | "idle_timeout"
   error?: string
 }
 ```
 
-Library consumers work with `SessionHandle` instead of raw `AhpClient`:
-- Events are pre-filtered — only actions for this session are emitted
-- `sendPrompt()` drives a full turn and returns a `TurnResult`
-- `waitForReady()` blocks until the session reaches `idle` lifecycle
-- `dispose()` cleans up listeners and marks the handle as disposed
-
-### Connection pool (`client/connection-pool.ts`)
-
-URL-keyed connection reuse for library consumers managing multiple servers.
-
-```typescript
-class ConnectionPool {
-  async getClient(url: string, options?: AhpClientOptions): Promise<AhpClient>
-  async closeAll(): Promise<void>
-  get size(): number
-}
-```
-
-- `getClient(url)` — returns an existing `AhpClient` for the URL or creates a
-  new one, normalizing URLs before comparison
-- Removes clients automatically on disconnect
-- `closeAll()` disconnects all pooled connections
-
-### Auto-reconnect (`client/reconnect.ts`)
-
-Automatic reconnection with exponential backoff. On disconnect, attempts to
-reconnect and replays missed actions or receives fresh snapshots.
+The controller generates the `turnId` client-side, dispatches
+`chat/turnStarted` on the chat channel, filters incoming actions by
+channel + turnId, handles tool-call confirmation via the `PermissionHandler`
+(skipping confirmation for client-owned tools), and at completion rebuilds the
+authoritative `responseText` from chat-state `Turn.responseParts` — recovering
+any folded first delta the host never emitted as a `chat/delta`.
 
 ## Session management
 
@@ -947,6 +923,13 @@ GitHub Actions automates quality enforcement and publishing.
 5. Node.js version matrix (20 + 22)
 
 ## Roadmap (v0.2)
+
+> **Historical.** The phases below describe ahpx's v0.1/v0.2 evolution and are
+> kept for context. Several are now superseded: **Phase 7 (Library Mode) and
+> Phase 8's `SessionHandle`/`ConnectionPool` were removed** — ahpx is now a
+> **CLI-only** wrapper around the official `@microsoft/agent-host-protocol`
+> client (no exported SDK, no `src/index.ts`). The CLI drives turns via the
+> low-level client + `TurnController` (see "Driving turns" above).
 
 ahpx v0.1 (Phases 0–6) shipped the foundation: core AHP client, connection
 management, sessions, prompting, output formatting, observation, and George
