@@ -162,7 +162,9 @@ ahpx session customization toggle <uri> -n my-session
 
 | Command | Description |
 |---------|-------------|
-| `ahpx config show` | Print resolved config with source annotations |
+| `ahpx config show` | Print resolved config with source annotations (alias: `config list`) |
+| `ahpx config get <key>` | Print a single resolved value (dotted path supported) |
+| `ahpx config set <key> <value>` | Set a value in `~/.ahpx/config.json` (dotted path supported) |
 | `ahpx config init` | Create `~/.ahpx/config.json` with defaults |
 
 ### Utilities
@@ -240,6 +242,50 @@ ahpx config init
 # View resolved config with source annotations
 ahpx config show
 ```
+
+Recognized keys: `defaultServer`, `defaultProvider`, `defaultModel`,
+`permissions`, `timeout`, `format`, `verbose`, and `defaultSessionConfig`.
+
+### Persistent session defaults (`defaultSessionConfig`)
+
+The Agent Host Protocol exposes per-session **agent configuration** (the server
+advertises a schema — e.g. `copilotcli` has an `isolation` property with allowed
+values `folder`/`worktree`). You can pass these per session with
+`-c key=value`, but `defaultSessionConfig` lets you persist a default **once**
+so it applies to every new session automatically.
+
+```bash
+# Persist a default once (dotted path sets a nested member):
+ahpx config set defaultSessionConfig.isolation folder
+
+# Equivalent, setting the whole map as JSON:
+ahpx config set defaultSessionConfig '{"isolation":"folder"}'
+
+# Read it back:
+ahpx config get defaultSessionConfig.isolation   # -> folder
+
+# Now every new session runs in folder mode — no -c needed:
+ahpx exec "fix the tests"
+
+# A per-call -c always wins over the persisted default:
+ahpx exec -c isolation=worktree "fix the tests"  # this session uses a worktree
+```
+
+**Precedence (lowest → highest):**
+
+1. `defaultSessionConfig` from global config (`~/.ahpx/config.json`)
+2. `defaultSessionConfig` from project config (`.ahpxrc.json`) — shallow-merged
+   per-key over global (each key overrides individually; other keys survive)
+3. Explicit `-c key=value` flags on the command (always win)
+
+The merged map is applied at session creation everywhere a session is made
+(`session new`, `prompt`, `exec`, and the implicit prompt path). Keys are sent
+to the server as-is; the server validates them against its advertised schema, so
+an unknown key surfaces the server's own error rather than crashing the client.
+
+> **Canonical example:** persisting `isolation=folder` makes `copilotcli`
+> sessions run **in-place** in your working directory instead of creating a git
+> worktree — handy when you want the agent to operate directly on your checkout.
 
 ## Authentication
 

@@ -28,6 +28,16 @@ export interface AhpxConfig {
 	format?: "text" | "json" | "quiet";
 	/** Enable debug logging */
 	verbose?: boolean;
+	/**
+	 * Persistent default values for per-session agent configuration. Merged into
+	 * the effective session config whenever a new session is created, with the
+	 * lowest precedence — explicit `-c key=value` flags always win.
+	 *
+	 * Example: `{ "isolation": "folder" }` makes copilotcli sessions run in-place
+	 * instead of creating a worktree, without passing `-c isolation=folder` every
+	 * time.
+	 */
+	defaultSessionConfig?: Record<string, unknown>;
 }
 
 /** Keys that are valid in AhpxConfig, for filtering unknown properties. */
@@ -39,7 +49,28 @@ const CONFIG_KEYS: ReadonlySet<string> = new Set<string>([
 	"timeout",
 	"format",
 	"verbose",
+	"defaultSessionConfig",
 ]);
+
+/**
+ * Shallow-merge a series of session-config maps (lowest precedence first).
+ * Non-object layers (including `undefined`) are skipped. Returns `undefined`
+ * when no object layer contributed any keys, so callers can treat "no default"
+ * as a no-op rather than sending an empty `{}` to the server.
+ */
+export function mergeSessionConfigMaps(
+	...layers: Array<Record<string, unknown> | undefined>
+): Record<string, unknown> | undefined {
+	const result: Record<string, unknown> = {};
+	let found = false;
+	for (const layer of layers) {
+		if (layer && typeof layer === "object" && !Array.isArray(layer)) {
+			Object.assign(result, layer);
+			found = true;
+		}
+	}
+	return found && Object.keys(result).length > 0 ? result : undefined;
+}
 
 // ── Defaults ─────────────────────────────────────────────────────────────────
 
@@ -106,6 +137,9 @@ export async function loadConfig(options?: {
 	const globalRaw = await readJsonFile(gPath);
 	const projectRaw = await readJsonFile(pPath);
 
+	const globalConfig = globalRaw ? pickConfigKeys(globalRaw) : {};
+	const projectConfig = projectRaw ? pickConfigKeys(projectRaw) : {};
+
 	// Strip undefined values from overrides so they don't clobber
 	const overrides: Partial<AhpxConfig> = {};
 	if (options?.overrides) {
@@ -116,12 +150,27 @@ export async function loadConfig(options?: {
 		}
 	}
 
-	return {
+	const merged: AhpxConfig = {
 		...DEFAULT_CONFIG,
-		...(globalRaw ? pickConfigKeys(globalRaw) : {}),
-		...(projectRaw ? pickConfigKeys(projectRaw) : {}),
+		...globalConfig,
+		...projectConfig,
 		...overrides,
 	};
+
+	// defaultSessionConfig is a map: shallow-merge per-key across layers
+	// (global < project < cli) instead of whole-object replacement.
+	const mergedSessionConfig = mergeSessionConfigMaps(
+		globalConfig.defaultSessionConfig,
+		projectConfig.defaultSessionConfig,
+		overrides.defaultSessionConfig,
+	);
+	if (mergedSessionConfig) {
+		merged.defaultSessionConfig = mergedSessionConfig;
+	} else {
+		merged.defaultSessionConfig = undefined;
+	}
+
+	return merged;
 }
 
 /**
@@ -139,6 +188,64 @@ export async function initGlobalConfig(configPath?: string): Promise<boolean> {
 		await fs.writeFile(p, `${JSON.stringify(DEFAULT_CONFIG, null, "\t")}\n`, "utf-8");
 		return true;
 	}
+}
+
+/** Error thrown when a config-set operation targets an unknown top-level key. */
+export class UnknownConfigKeyError extends Error {
+	constructor(key: string) {
+		super(`Unknown config key "${key}". Valid keys: ${[...CONFIG_KEYS].join(", ")}`);
+		this.name = "UnknownConfigKeyError";
+	}
+}
+
+/**
+ * Set a config value in the global config file, preserving all other values.
+ *
+ * Supports dotted paths for nested maps — e.g.
+ * `setGlobalConfigValue("defaultSessionConfig.isolation", "folder")` sets
+ * `{ defaultSessionConfig: { isolation: "folder" } }`. The first path segment
+ * must be a known top-level config key; nested segments under a map (such as
+ * `defaultSessionConfig`) are agent-defined and accepted as-is.
+ */
+export async function setGlobalConfigValue(keyPath: string, value: unknown, configPath?: string): Promise<void> {
+	const p = configPath ?? globalConfigPath();
+	const segments = keyPath.split(".");
+	const topKey = segments[0];
+	if (!CONFIG_KEYS.has(topKey)) {
+		throw new UnknownConfigKeyError(topKey);
+	}
+
+	const existing = (await readJsonFile(p)) ?? {};
+
+	let target: Record<string, unknown> = existing;
+	for (let i = 0; i < segments.length - 1; i++) {
+		const seg = segments[i];
+		const next = target[seg];
+		if (typeof next !== "object" || next === null || Array.isArray(next)) {
+			target[seg] = {};
+		}
+		target = target[seg] as Record<string, unknown>;
+	}
+	target[segments[segments.length - 1]] = value;
+
+	await fs.mkdir(path.dirname(p), { recursive: true });
+	const tmp = `${p}.tmp`;
+	await fs.writeFile(tmp, `${JSON.stringify(existing, null, "\t")}\n`, "utf-8");
+	await fs.rename(tmp, p);
+}
+
+/** Read a (possibly dotted) value out of a resolved config object. */
+export function getConfigValue(config: AhpxConfig, keyPath: string): unknown {
+	const segments = keyPath.split(".");
+	let cur: unknown = config;
+	for (const seg of segments) {
+		if (cur && typeof cur === "object") {
+			cur = (cur as Record<string, unknown>)[seg];
+		} else {
+			return undefined;
+		}
+	}
+	return cur;
 }
 
 // ── Source-annotated config ──────────────────────────────────────────────────
@@ -185,6 +292,18 @@ export async function loadConfigWithSources(options?: {
 		...projectConfig,
 		...overrides,
 	};
+
+	// defaultSessionConfig is a map: shallow-merge per-key across layers.
+	const mergedSessionConfig = mergeSessionConfigMaps(
+		globalConfig.defaultSessionConfig,
+		projectConfig.defaultSessionConfig,
+		overrides.defaultSessionConfig,
+	);
+	if (mergedSessionConfig) {
+		merged.defaultSessionConfig = mergedSessionConfig;
+	} else {
+		merged.defaultSessionConfig = undefined;
+	}
 
 	// Track sources (in order of priority — later overwrites earlier)
 	const sources: Record<string, ConfigSource> = {};

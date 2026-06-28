@@ -29,12 +29,16 @@ import { bashCompletion, fishCompletion, zshCompletion } from "./completions.js"
 import {
 	ConnectionStore,
 	ConnectionValidationError,
+	UnknownConfigKeyError,
+	getConfigValue,
 	globalConfigPath,
 	initGlobalConfig,
 	isLocalUrl,
 	isValidWsUrl,
 	loadConfig,
 	loadConfigWithSources,
+	mergeSessionConfigMaps,
+	setGlobalConfigValue,
 } from "./config/index.js";
 import type { AhpxConfig, ConfigSource } from "./config/index.js";
 import { discoverCustomizations } from "./customizations/discovery.js";
@@ -1008,6 +1012,7 @@ const config = program.command("config").description("Manage ahpx configuration"
 
 config
 	.command("show")
+	.alias("list")
 	.description("Print resolved configuration with source annotations")
 	.action(async (_opts: Record<string, unknown>, cmd: Command) => {
 		const globalOpts = parseGlobalOpts(cmd);
@@ -1042,7 +1047,8 @@ config
 					for (const [key, value] of Object.entries(result.config)) {
 						if (value !== undefined) {
 							const src = result.sources[key] ?? "default";
-							console.log(`  ${pc.cyan(key)}: ${value}  ${sourceLabel(src)}`);
+							const display = typeof value === "object" && value !== null ? JSON.stringify(value) : value;
+							console.log(`  ${pc.cyan(key)}: ${display}  ${sourceLabel(src)}`);
 						}
 					}
 				},
@@ -1077,6 +1083,74 @@ config
 					}
 				},
 				{ created, path: globalConfigPath() },
+			);
+		} catch (err) {
+			handleError(err, globalOpts);
+		}
+	});
+
+config
+	.command("set")
+	.description("Set a value in the global config (~/.ahpx/config.json)")
+	.argument("<key>", "Config key. Dotted path for nested maps, e.g. defaultSessionConfig.isolation")
+	.argument("<value>", "Value (parsed as JSON when possible, otherwise treated as a string)")
+	.action(async (key: string, rawValue: string, _opts: Record<string, unknown>, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			// Parse as JSON for booleans/numbers/objects; fall back to the raw string.
+			let value: unknown;
+			try {
+				value = JSON.parse(rawValue);
+			} catch {
+				value = rawValue;
+			}
+
+			await setGlobalConfigValue(key, value);
+
+			outputResult(
+				globalOpts,
+				() =>
+					console.log(
+						pc.green("✓"),
+						`Set ${pc.bold(key)} = ${pc.cyan(JSON.stringify(value))} in ${pc.dim(globalConfigPath())}`,
+					),
+				{ key, value, path: globalConfigPath() },
+			);
+		} catch (err) {
+			if (err instanceof UnknownConfigKeyError) {
+				handleError(new UsageError(err.message), globalOpts);
+			} else {
+				handleError(err, globalOpts);
+			}
+		}
+	});
+
+config
+	.command("get")
+	.description("Print a single resolved config value")
+	.argument("<key>", "Config key. Dotted path supported, e.g. defaultSessionConfig.isolation")
+	.action(async (key: string, _opts: Record<string, unknown>, cmd: Command) => {
+		const globalOpts = parseGlobalOpts(cmd);
+		applyGlobalOpts(globalOpts);
+
+		try {
+			const result = await loadConfigWithSources({ overrides: buildConfigOverrides(globalOpts) });
+			const value = getConfigValue(result.config, key);
+
+			outputResult(
+				globalOpts,
+				() => {
+					if (value === undefined) {
+						console.log(pc.dim("(unset)"));
+					} else if (typeof value === "object" && value !== null) {
+						console.log(JSON.stringify(value, null, 2));
+					} else {
+						console.log(String(value));
+					}
+				},
+				{ key, value: value ?? null },
 			);
 		} catch (err) {
 			handleError(err, globalOpts);
@@ -1283,7 +1357,7 @@ session
 				const cwd = opts.cwd ?? process.cwd();
 				const isRemote = await isRemoteServerTarget(opts.server);
 				const gitRoot = isRemote ? undefined : await findGitRoot(cwd);
-				const sessionConfig = parseConfigFlags(opts.config);
+				const sessionConfig = mergeSessionConfigMaps(cfg.defaultSessionConfig, parseConfigFlags(opts.config));
 
 				await withConnection(
 					{
@@ -2571,6 +2645,9 @@ async function runPrompt(
 	await requireCwdForRemoteServer(opts.server, resolvedCwd);
 	const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 	const cwd = resolvedCwd ?? process.cwd();
+	// Effective session config: persisted defaultSessionConfig (lowest precedence)
+	// merged under explicit `-c key=value` flags (highest precedence).
+	const effectiveSessionConfig = mergeSessionConfigMaps(cfg.defaultSessionConfig, opts.sessionConfig);
 	const isRemote = await isRemoteServerTarget(opts.server);
 	const gitRoot = isRemote ? undefined : await findGitRoot(cwd);
 	const permMode = resolvePermissionMode(opts, cfg);
@@ -2614,7 +2691,7 @@ async function runPrompt(
 				// One-shot: create a temporary session
 				const spinner = startSpinner("Creating session...", spinnersEnabled(globalOpts));
 				try {
-					sessionUri = await createTempSession(client, opts, cfg, cwd, opts.sessionConfig, activeClientParam);
+					sessionUri = await createTempSession(client, opts, cfg, cwd, effectiveSessionConfig, activeClientParam);
 					spinner.stop();
 				} catch (err) {
 					spinner.stop();
@@ -2630,7 +2707,7 @@ async function runPrompt(
 					cwd,
 					gitRoot,
 					globalOpts,
-					opts.sessionConfig,
+					effectiveSessionConfig,
 					activeClientParam,
 				);
 				sessionUri = resolved.sessionUri;

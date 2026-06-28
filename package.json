@@ -1,6 +1,6 @@
 {
 	"name": "@tylerl0706/ahpx",
-	"version": "0.4.0",
+	"version": "0.5.0",
 	"type": "module",
 	"description": "Agent Host Protocol CLI — a thin command-line wrapper around the official @microsoft/agent-host-protocol client for managing AHP server connections, sessions, and agent interactions",
 	"license": "MIT",

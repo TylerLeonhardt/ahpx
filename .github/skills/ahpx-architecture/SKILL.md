@@ -512,11 +512,44 @@ interface AhpxConfig {
   timeout?: number
   format?: "text" | "json" | "quiet"
   verbose?: boolean
+  /** Persistent default per-session agent config, merged at session creation. */
+  defaultSessionConfig?: Record<string, unknown>
 }
 ```
 
 Includes source tracking (`ConfigWithSources`) showing where each value came
 from: `"default"`, `"global"`, `"project"`, or `"cli"`.
+
+#### `defaultSessionConfig` — persistent per-session agent config
+
+The protocol exposes per-session **agent configuration** (the server advertises
+a schema via `resolveSessionConfig`; e.g. `copilotcli` has an `isolation`
+property, allowed `folder`/`worktree`, default `worktree`, `sessionMutable:
+false`). `-c key=value` sets these per session; `defaultSessionConfig` persists
+a default so it applies to every new session without `-c`.
+
+- **Layered merge.** Unlike the scalar keys (whole-value replacement),
+  `defaultSessionConfig` is **shallow-merged per-key** across layers via
+  `mergeSessionConfigMaps(global, project, cli)` — project overrides global one
+  key at a time; keys only the lower layer sets survive. Non-object layers are
+  ignored (a stray string value is treated as "unset"). The merged map's
+  `config show` source is annotated as the highest contributing layer.
+- **Precedence at creation.** The effective config sent to the server is
+  `mergeSessionConfigMaps(cfg.defaultSessionConfig, parseConfigFlags(-c))` — the
+  persisted default is lowest, an explicit `-c` always wins. This is applied at
+  **every** session-creation call site: `session new` and `runPrompt`'s
+  `createTempSession` (exec) + `resolveOrCreateSession` (prompt / implicit)
+  paths. Keys are sent as-is; the server (`resolveSessionConfig`) validates them,
+  so an unknown key surfaces the server's error instead of crashing the client.
+- **CLI.** `ahpx config set <key> <value>` writes to the global config
+  (`setGlobalConfigValue`), supporting **dotted paths** for nested members
+  (`config set defaultSessionConfig.isolation folder`) as well as a whole-map
+  JSON value (`config set defaultSessionConfig '{"isolation":"folder"}'`).
+  `config get <key>` reads a (dotted) value; `config show`/`config list`
+  render the map as JSON.
+- **Canonical example.** Persisting `isolation=folder` makes `copilotcli`
+  sessions run in-place instead of creating a worktree — the codified lesson
+  from removing residual contrast-test worktrees.
 
 ### ConnectionStore (`config/connections.ts`)
 
@@ -575,9 +608,10 @@ ahpx history [--limit]   Show turn history
 
 ### Configuration
 ```
-ahpx config show
+ahpx config show                  (alias: config list)
 ahpx config init
-ahpx config set <key> <value>
+ahpx config get <key>             (dotted path supported)
+ahpx config set <key> <value>     (dotted path; e.g. defaultSessionConfig.isolation folder)
 ```
 
 ### Utilities
