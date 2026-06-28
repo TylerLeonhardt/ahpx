@@ -120,17 +120,33 @@ export class WsTransport implements AhpTransport {
 				reject(new TransportError("io", `connection to ${url} timed out after ${connectTimeout}ms`));
 			}, connectTimeout);
 
+			// Once the connect promise has settled via a reject path we still keep
+			// an `error` listener attached, because the `ws` socket can emit a
+			// late asynchronous `error` event after we've given up — e.g. calling
+			// `socket.close()` on a still-CONNECTING socket makes `ws` emit
+			// "WebSocket was closed before the connection was established", and a
+			// refused/reset connection can surface after a timeout. An unhandled
+			// `'error'` EventEmitter event is rethrown by Node and would crash the
+			// whole process, escaping every per-server try/catch (e.g. taking down
+			// `ahpx server status` when one configured server is unreachable). The
+			// swallow keeps the socket's error contract satisfied without leaking.
+			const swallow = () => {};
 			const cleanup = () => {
 				clearTimeout(timer);
 				socket.removeListener("open", onOpen);
 				socket.removeListener("error", onError);
 				socket.removeListener("close", onClose);
+				socket.on("error", swallow);
 			};
 
 			const onOpen = () => {
 				if (settled) return;
 				settled = true;
 				cleanup();
+				// Success path: the WsTransport instance installs its own permanent
+				// `error` listener, so drop the connect-time swallow to avoid a
+				// duplicate no-op handler shadowing real error handling.
+				socket.removeListener("error", swallow);
 				resolve(new WsTransport(socket));
 			};
 
