@@ -22,6 +22,7 @@ import type {
 } from "@microsoft/agent-host-protocol";
 import { MessageKind, SessionLifecycle } from "@microsoft/agent-host-protocol";
 import type { AhpClient } from "./index.js";
+import { textFromResponseParts } from "./response-text.js";
 
 /** Options for sending a prompt via SessionHandle. */
 export interface PromptOptions {
@@ -68,6 +69,13 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 
 	private _disposed = false;
 	private _activeTurnId: string | undefined;
+	/**
+	 * The chat channel turn actions are dispatched on. As of protocol 0.5.0 a
+	 * session's default chat MAY live on a distinct `ahp-chat://` channel rather
+	 * than sharing the session URI. Starts equal to the session URI and is
+	 * upgraded to the resolved `defaultChat` once known (see {@link resolveChatChannel}).
+	 */
+	private _chatUri: URI;
 	private readonly _onAction: (envelope: ActionEnvelope) => void;
 	private readonly _onDisconnect: (code: number, reason: string) => void;
 
@@ -77,16 +85,19 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 		provider: string,
 		model?: string,
 		provisional = false,
+		chatUri: URI = uri,
 	) {
 		super();
 		this.uri = uri;
 		this.provider = provider;
 		this.model = model;
 		this.provisional = provisional;
+		this._chatUri = chatUri;
 
-		// Filter client actions to only this session's events
+		// Filter client actions to this session's coordination channel or its
+		// chat channel (turn/streaming actions live on the chat channel in 0.5.0).
 		this._onAction = (envelope: ActionEnvelope) => {
-			if (envelope.channel !== this.uri) {
+			if (envelope.channel !== this.uri && envelope.channel !== this._chatUri) {
 				return;
 			}
 			const action = envelope.action;
@@ -121,7 +132,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 
 	/** Current chat state (turns / activeTurn) from the state mirror. */
 	get chat(): ChatState | undefined {
-		return this.client.state.getChat(this.uri);
+		return this.client.state.getChat(this._chatUri);
 	}
 
 	/** Whether the session is ready for prompts. */
@@ -237,6 +248,12 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 		const turnId = randomUUID();
 		this._activeTurnId = turnId;
 
+		// Resolve the chat channel before dispatching. As of protocol 0.5.0 a
+		// session's default chat MAY live on a distinct `ahp-chat://` channel; we
+		// subscribe to it (so turn/streaming actions are delivered) and route the
+		// turn there. For hosts that keep chat on the session URI this is a no-op.
+		const chatUri = this.resolveChatChannel();
+
 		let responseText = "";
 		let toolCallCount = 0;
 		let usage: UsageInfo | undefined;
@@ -270,6 +287,12 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 					}
 
 					case ActionType.ChatTurnComplete: {
+						// Prefer the authoritative response text from chat state. Deltas
+						// folded into a subscribe snapshot (when subscribe races with turn
+						// start) never arrive as chat/delta actions, so the accumulated
+						// stream can be missing the first chunk(s).
+						const stateText = this.responseTextFromState(turnId);
+						if (stateText) responseText = stateText;
 						finish("complete");
 						break;
 					}
@@ -339,7 +362,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 			this.on("error", onError);
 
 			// Dispatch turn start
-			this.client.dispatchAction(this.uri, {
+			this.client.dispatchAction(chatUri, {
 				type: ActionType.ChatTurnStarted,
 				turnId,
 				message: {
@@ -359,7 +382,7 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 		this.ensureNotDisposed();
 		if (!this._activeTurnId) return;
 
-		this.client.dispatchAction(this.uri, {
+		this.client.dispatchAction(this._chatUri, {
 			type: ActionType.ChatTurnCancelled,
 			turnId: this._activeTurnId,
 		});
@@ -370,12 +393,51 @@ export class SessionHandle extends EventEmitter<SessionHandleEvents> {
 	/**
 	 * Dispatch a client action for this session.
 	 *
-	 * Automatically injects the session URI into the action. Use this for
-	 * tool call confirmations, permission responses, model changes, etc.
+	 * Chat-scoped actions (`chat/*`, e.g. tool-call confirmations and steering
+	 * messages) are routed to the resolved chat channel; all other actions go to
+	 * the session coordination channel. As of protocol 0.5.0 these MAY be distinct
+	 * URIs.
 	 */
 	dispatchAction(action: Record<string, unknown> & { type: string }): void {
 		this.ensureNotDisposed();
-		this.client.dispatchAction(this.uri, action as StateAction);
+		const channel = action.type.startsWith("chat/") ? this._chatUri : this.uri;
+		this.client.dispatchAction(channel, action as StateAction);
+	}
+
+	/**
+	 * Resolve the session's chat channel and ensure we're subscribed to it. As of
+	 * protocol 0.5.0 the default chat MAY live on a distinct `ahp-chat://` channel;
+	 * subscribing ensures the state mirror receives turn/streaming actions. A no-op
+	 * for hosts that keep chat on the session URI, and when the channel was already
+	 * resolved at session open. The resolved chat URI may only become available
+	 * after a provisional session materializes, so this is also checked before each
+	 * turn.
+	 *
+	 * Synchronous by design: the subscription is fired without awaiting so the
+	 * turn can be dispatched in the same tick. Ordered WebSocket delivery
+	 * guarantees the server registers the subscription before it processes the
+	 * turn dispatched immediately after.
+	 */
+	private resolveChatChannel(): URI {
+		const defaultChat = this.client.state.getSession(this.uri)?.defaultChat;
+		if (defaultChat && defaultChat !== this.uri && defaultChat !== this._chatUri) {
+			void this.client.subscribe(defaultChat).catch(() => {});
+			this._chatUri = defaultChat;
+		}
+		return this._chatUri;
+	}
+
+	/**
+	 * Read the authoritative response text for a turn from the chat state. The
+	 * completed turn is normally in `chat.turns`; fall back to `activeTurn` in
+	 * case completion ordering differs.
+	 */
+	private responseTextFromState(turnId: string): string {
+		const chat = this.chat;
+		if (!chat) return "";
+		const turn =
+			chat.turns.find((t) => t.id === turnId) ?? (chat.activeTurn?.id === turnId ? chat.activeTurn : undefined);
+		return textFromResponseParts(turn?.responseParts);
 	}
 
 	private ensureNotDisposed(): void {

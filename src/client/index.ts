@@ -263,8 +263,20 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		const sessionState = this._state.getSession(sessionUri);
 		const isProvisional = sessionState?.lifecycle === "creating";
 
+		// As of protocol 0.5.0 a session's default chat MAY live on a distinct
+		// `ahp-chat://` channel. When known up front, subscribe to it so turn and
+		// streaming actions are delivered. Provisional sessions may not expose it
+		// until the first prompt materializes them — SessionHandle resolves it
+		// lazily in that case.
+		let chatUri = sessionUri;
+		const defaultChat = sessionState?.defaultChat;
+		if (defaultChat && defaultChat !== sessionUri) {
+			await this.subscribe(defaultChat);
+			chatUri = defaultChat;
+		}
+
 		// Build handle
-		const handle = new SessionHandle(this, sessionUri, provider, model, isProvisional);
+		const handle = new SessionHandle(this, sessionUri, provider, model, isProvisional, chatUri);
 		this._sessions.set(sessionUri, handle);
 
 		// Clean up tracking when handle is disposed

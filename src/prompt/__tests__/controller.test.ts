@@ -146,6 +146,69 @@ describe("TurnController", () => {
 		expect(cap.text()).toContain("[done]");
 	});
 
+	it("recovers a host-folded first-delta prefix in stream order", async () => {
+		const { client, dispatched, emitAction, setSessionState } = createMockClient();
+		const cap = createCapture();
+		const renderer = new PromptRenderer(cap.out);
+		const handler = new PermissionHandler("approve-all", { output: cap.out });
+
+		const controller = new TurnController(client, SESSION_URI, renderer, handler);
+		const resultPromise = controller.prompt("say banana");
+		const turnId = (dispatched[0] as { turnId: string }).turnId;
+
+		// Host folded "B" into the subscribe snapshot; chat state holds the full text.
+		setSessionState(
+			SESSION_URI,
+			makeChatState({
+				activeTurn: {
+					id: turnId,
+					message: message("say banana"),
+					responseParts: [{ kind: ResponsePartKind.Markdown, id: "p1", content: "BANANA" }],
+					usage: undefined,
+				},
+			}),
+		);
+
+		// Only "ANANA" arrives as a streamed delta (the "B" was folded away).
+		emitAction({ type: ActionType.ChatDelta, turnId, partId: "p1", content: "ANANA" });
+		emitAction({ type: ActionType.ChatTurnComplete, turnId });
+
+		const result = await resultPromise;
+		expect(result.responseText).toBe("BANANA");
+		expect(cap.text()).toContain("BANANA");
+		expect(cap.text()).not.toContain("ANANAB");
+	});
+
+	it("renders a fully folded reply that never streamed as a delta", async () => {
+		const { client, dispatched, emitAction, setSessionState } = createMockClient();
+		const cap = createCapture();
+		const renderer = new PromptRenderer(cap.out);
+		const handler = new PermissionHandler("approve-all", { output: cap.out });
+
+		const controller = new TurnController(client, SESSION_URI, renderer, handler);
+		const resultPromise = controller.prompt("say elephant");
+		const turnId = (dispatched[0] as { turnId: string }).turnId;
+
+		setSessionState(
+			SESSION_URI,
+			makeChatState({
+				activeTurn: {
+					id: turnId,
+					message: message("say elephant"),
+					responseParts: [{ kind: ResponsePartKind.Markdown, id: "p1", content: "ELEPHANT" }],
+					usage: undefined,
+				},
+			}),
+		);
+
+		// No ChatDelta arrives — the entire short reply was folded into the snapshot.
+		emitAction({ type: ActionType.ChatTurnComplete, turnId });
+
+		const result = await resultPromise;
+		expect(result.responseText).toBe("ELEPHANT");
+		expect(cap.text()).toContain("ELEPHANT");
+	});
+
 	it("attaches a per-message model and routes turns to a distinct chat channel", async () => {
 		const CHAT_URI = "ahp-chat://default/test-session";
 		const { client, dispatched, dispatchedChannels, emitAction } = createMockClient();
