@@ -745,7 +745,8 @@ export function toolCallScenario(options?: {
 						toolCallId,
 						result: {
 							success: true,
-							output: "Tool executed successfully",
+							pastTenseMessage: `Ran ${toolName}`,
+							content: [{ type: "text", text: "Tool executed successfully" }],
 						},
 					});
 

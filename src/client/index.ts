@@ -58,7 +58,6 @@ import type {
 import type { ProtocolNotification } from "../notifications.js";
 import { NotificationType } from "../notifications.js";
 import { FileServingHandler } from "./file-serving.js";
-import { SessionHandle } from "./session-handle.js";
 import { StateMirror } from "./state.js";
 import { WsTransport } from "./ws-transport.js";
 
@@ -91,24 +90,6 @@ export interface AhpClientEvents {
 	error: [error: Error];
 }
 
-/** Options for opening a session via `AhpClient.openSession()`. */
-export interface OpenSessionOptions {
-	/** Agent provider (e.g. "copilot"). If omitted, uses the first available. */
-	provider?: string;
-	/** Model to use for the session. */
-	model?: string;
-	/** Working directory for the session. */
-	workingDirectory?: string;
-	/** Agent-specific configuration values collected via `resolveSessionConfig`. */
-	config?: Record<string, unknown>;
-	/** Eagerly claim the active client role with tools and customizations. */
-	activeClient?: SessionActiveClient;
-	/** Whether to wait for the session to be ready (default: true). */
-	waitForReady?: boolean;
-	/** Timeout in ms for waiting for ready state (default: 30000). */
-	readyTimeout?: number;
-}
-
 /**
  * High-level AHP client.
  *
@@ -124,7 +105,6 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	private official: OfficialAhpClient | undefined;
 	private transport: WsTransport | undefined;
 	private readonly _state = new StateMirror();
-	private readonly _sessions = new Map<string, SessionHandle>();
 	private readonly _fileServing = new FileServingHandler();
 	private _clientId: string;
 	private _connected = false;
@@ -148,11 +128,6 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	/** The client identifier. */
 	get clientId(): string {
 		return this._clientId;
-	}
-
-	/** All active session handles. */
-	get sessions(): ReadonlyMap<string, SessionHandle> {
-		return this._sessions;
 	}
 
 	/** The file serving handler for reverse-RPC requests. */
@@ -229,17 +204,6 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 * Gracefully disconnect from the server.
 	 */
 	async disconnect(): Promise<void> {
-		// Dispose all session handles
-		const handles = [...this._sessions.values()];
-		for (const handle of handles) {
-			try {
-				await handle.dispose();
-			} catch {
-				// Best-effort cleanup
-			}
-		}
-		this._sessions.clear();
-
 		this._fileServing.clearAllowedPaths();
 		if (this.official) {
 			await this.official.shutdown();
@@ -309,82 +273,6 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		}
 	}
 
-	// ── Session management ────────────────────────────────────────────────
-
-	/**
-	 * Create a session and return a handle for interacting with it.
-	 *
-	 * Creates the session on the server, subscribes to its state, and
-	 * (by default) waits for it to reach the "ready" lifecycle state.
-	 */
-	async openSession(options: OpenSessionOptions = {}): Promise<SessionHandle> {
-		this.ensureConnected();
-
-		const {
-			provider: requestedProvider,
-			model,
-			workingDirectory,
-			config,
-			activeClient,
-			waitForReady = true,
-			readyTimeout = 30_000,
-		} = options;
-
-		// Resolve provider
-		const provider =
-			requestedProvider ?? (this._state.root.agents.length > 0 ? this._state.root.agents[0].provider : undefined);
-
-		if (!provider) {
-			throw new Error("No agent provider available. Specify one in options or ensure the server has agents.");
-		}
-
-		// Generate session URI
-		const sessionId = randomUUID();
-		const sessionUri = `${provider}:/${sessionId}`;
-
-		// Create + subscribe
-		await this.createSession(sessionUri, provider, model, workingDirectory, config, activeClient);
-		await this.subscribe(sessionUri);
-
-		// Check if session is provisional (lifecycle stays "creating" after subscribe)
-		const sessionState = this._state.getSession(sessionUri);
-		const isProvisional = sessionState?.lifecycle === "creating";
-
-		// As of protocol 0.5.0 a session's default chat MAY live on a distinct
-		// `ahp-chat://` channel. When known up front, subscribe to it so turn and
-		// streaming actions are delivered. Provisional sessions may not expose it
-		// until the first prompt materializes them — SessionHandle resolves it
-		// lazily in that case.
-		let chatUri = sessionUri;
-		const defaultChat = sessionState?.defaultChat;
-		if (defaultChat && defaultChat !== sessionUri) {
-			await this.subscribe(defaultChat);
-			chatUri = defaultChat;
-		}
-
-		// Build handle
-		const handle = new SessionHandle(this, sessionUri, provider, model, isProvisional, chatUri);
-		this._sessions.set(sessionUri, handle);
-
-		// Clean up tracking when handle is disposed
-		handle.on("disposed", () => {
-			this._sessions.delete(sessionUri);
-		});
-
-		// Wait for ready (clean up on failure).
-		// Provisional sessions skip this — they stay in "creating" until the first prompt.
-		if (waitForReady && !isProvisional) {
-			try {
-				await handle.waitForReady(readyTimeout);
-			} catch (err) {
-				await handle.dispose().catch(() => {});
-				throw err;
-			}
-		}
-
-		return handle;
-	}
-
 	// ── Commands ──────────────────────────────────────────────────────────
 
 	/**
@@ -399,8 +287,9 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		activeClient?: SessionActiveClient,
 	): Promise<null> {
 		// As of protocol 0.5.0 the model is no longer a session-level concept;
-		// it is carried per-message on `Message.model`. The `model` parameter is
-		// retained on the handle (see SessionHandle) and attached to each turn.
+		// it is carried per-message on `Message.model` (see `TurnController`).
+		// The `model` parameter is accepted for call-site ergonomics but ignored
+		// at session creation.
 		void model;
 		this.ensureConnected();
 		return this.official!.request("createSession", {
@@ -443,8 +332,6 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 			channel: sessionUri,
 		});
 		this._state.removeSession(sessionUri);
-		// Remove tracked handle if one exists (may not if using low-level API)
-		this._sessions.delete(sessionUri);
 		return result;
 	}
 
@@ -617,9 +504,4 @@ function toNotification(sub: SubscriptionEvent): ProtocolNotification | undefine
 export { RpcError, RpcTimeoutError } from "@microsoft/agent-host-protocol/client";
 export { WsTransport, type WsTransportOptions } from "./ws-transport.js";
 export { StateMirror } from "./state.js";
-export { SessionHandle } from "./session-handle.js";
-export type { SessionHandleEvents, PromptOptions, TurnResult as SessionTurnResult } from "./session-handle.js";
-export { ActiveClientManager } from "./active-client.js";
-export { ReconnectManager } from "./reconnect.js";
-export type { ReconnectOptions, ReconnectOutcome } from "./reconnect.js";
 export { FileServingHandler } from "./file-serving.js";
