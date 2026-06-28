@@ -37,6 +37,8 @@ function textOf(v: StringOrMarkdown): string {
 export class PromptRenderer implements OutputFormatter {
 	private hasStreamedText = false;
 	private reasoningOpen = false;
+	/** Text already written to the stream via onDelta — used to recover folded text. */
+	private streamedText = "";
 	/** Track tool calls that have started but not yet shown output. */
 	private pendingToolCalls = new Set<string>();
 
@@ -50,6 +52,7 @@ export class PromptRenderer implements OutputFormatter {
 		}
 		this.closeReasoningIfNeeded();
 		this.out.write(text);
+		this.streamedText += text;
 	}
 
 	/** Show [thinking] block text. */
@@ -124,7 +127,16 @@ export class PromptRenderer implements OutputFormatter {
 	}
 
 	/** Turn completed successfully. */
-	onTurnComplete(_responseText: string): void {
+	onTurnComplete(responseText: string): void {
+		// Render any authoritative text the stream never delivered. As of protocol
+		// 0.5.0 a host MAY fold the first delta(s) of a turn into the subscribe
+		// snapshot's `activeTurn` instead of emitting them as `chat/delta` actions.
+		// The controller recovers the full text from chat state; without rendering
+		// the not-yet-streamed remainder here, short replies render blank or
+		// truncated (e.g. "ELEPHANT" → "", "BANANA" → "ANANA"). See issues #86/#92.
+		if (responseText && responseText.length > this.streamedText.length && responseText.startsWith(this.streamedText)) {
+			this.onDelta(responseText.slice(this.streamedText.length));
+		}
 		this.closeReasoningIfNeeded();
 		this.ensureNewline();
 		this.out.write(`\n${pc.green("[done]")} end_turn\n`);

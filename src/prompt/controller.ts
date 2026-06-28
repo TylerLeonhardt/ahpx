@@ -28,6 +28,7 @@ import {
 import { MessageKind } from "@microsoft/agent-host-protocol";
 import type { MessageAttachment, URI, UsageInfo } from "@microsoft/agent-host-protocol";
 import type { AhpClient } from "../client/index.js";
+import { textFromResponseParts } from "../client/response-text.js";
 import type { OutputFormatter } from "../output/format.js";
 import type { ToolCallInfo } from "../output/renderer.js";
 import type { PermissionHandler } from "../permissions/handler.js";
@@ -132,8 +133,24 @@ export class TurnController {
 				switch (action.type) {
 					case ActionType.ChatDelta: {
 						const a = action as ChatDeltaAction;
-						responseText += a.content;
-						this.renderer.onDelta(a.content);
+						// Prefer the authoritative text assembled in chat state: it includes
+						// any first delta(s) the host folded into the subscribe snapshot
+						// instead of emitting as chat/delta actions. The state mirror is
+						// updated before this listener runs, so emit only the not-yet-shown
+						// remainder — this recovers a folded prefix in stream order (e.g.
+						// "BANANA" rather than "ANANA"). Falls back to the raw delta content
+						// when state is unavailable or has diverged from the stream.
+						const authoritative = this.responseTextFromState(turnId);
+						if (authoritative.length > 0 && authoritative.startsWith(responseText)) {
+							const chunk = authoritative.slice(responseText.length);
+							if (chunk) {
+								responseText = authoritative;
+								this.renderer.onDelta(chunk);
+							}
+						} else {
+							responseText += a.content;
+							this.renderer.onDelta(a.content);
+						}
 						break;
 					}
 
@@ -252,6 +269,12 @@ export class TurnController {
 
 					case ActionType.ChatTurnComplete: {
 						cleanup();
+						// Prefer the authoritative response text from chat state — deltas
+						// folded into a subscribe snapshot never arrive as chat/delta
+						// actions, so the accumulated stream can be missing the first
+						// chunk(s). Fall back to the streamed text if state is empty.
+						const stateText = this.responseTextFromState(turnId);
+						if (stateText) responseText = stateText;
 						this.renderer.onTurnComplete(responseText);
 						resolve({
 							turnId,
@@ -351,5 +374,18 @@ export class TurnController {
 			type: ActionType.ChatTurnCancelled,
 			turnId: this.activeTurnId,
 		});
+	}
+
+	/**
+	 * Read the authoritative response text for a turn from the chat state. The
+	 * completed turn is normally in `chat.turns`; fall back to `activeTurn` in
+	 * case completion ordering differs.
+	 */
+	private responseTextFromState(turnId: string): string {
+		const chat = this.client.state.getChat(this.chatUri);
+		if (!chat) return "";
+		const turn =
+			chat.turns.find((t) => t.id === turnId) ?? (chat.activeTurn?.id === turnId ? chat.activeTurn : undefined);
+		return textFromResponseParts(turn?.responseParts);
 	}
 }
