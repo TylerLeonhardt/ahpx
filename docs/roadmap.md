@@ -1,8 +1,18 @@
 # ahpx v0.2 Roadmap
 
-> **Vision:** ahpx evolves from a CLI tool to a production-grade agent dispatch
-> platform — usable as a Node.js library, capable of managing fleets of AHP
-> servers, and reliable enough to run autonomous agent workflows at scale.
+> **⚠️ Historical document.** This roadmap captures the v0.2 plan as it was
+> conceived, including "Library Mode" (Phase 7). **Direction has since changed:**
+> ahpx is now a **CLI-only thin wrapper** around the official
+> [`@microsoft/agent-host-protocol`](https://www.npmjs.com/package/@microsoft/agent-host-protocol)
+> client and **no longer ships an exported SDK**. References to "library mode",
+> `import { AhpClient } from '@tylerl0706/ahpx'`, and a public TypeScript API
+> below are retained for historical context only and no longer reflect the
+> shipped package. See the README and `docs/user-guide.md` for current
+> architecture.
+
+> **Vision (original):** ahpx evolves from a CLI tool to a production-grade agent
+> dispatch platform — usable as a Node.js library, capable of managing fleets of
+> AHP servers, and reliable enough to run autonomous agent workflows at scale.
 
 ## Where we are
 

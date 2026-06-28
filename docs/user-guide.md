@@ -4,7 +4,7 @@
 
 ![485 Tests Passing](https://img.shields.io/badge/tests-485_passing-brightgreen)
 ![12 Phases Shipped](https://img.shields.io/badge/phases-12_shipped-blue)
-![2-in-1: CLI + Library](https://img.shields.io/badge/2--in--1-CLI_+_Library-blue)
+![CLI](https://img.shields.io/badge/interface-CLI-blue)
 ![v0.2](https://img.shields.io/badge/version-v0.2-brightgreen)
 ![TypeScript](https://img.shields.io/badge/lang-TypeScript-3178C6)
 ![Agent Host Protocol](https://img.shields.io/badge/protocol-AHP-bc8cff)
@@ -15,10 +15,13 @@
 
 The Agent Host Protocol (AHP) is a WebSocket-based JSON-RPC protocol for managing AI agent sessions. It defines how clients create sessions, send prompts, stream model responses, handle tool calls, and manage permissions — all over a persistent, bidirectional connection.
 
-**ahpx** is the first full-featured AHP client. It ships as a single npm package that is both a **CLI for humans** and an **SDK for automation**:
+**ahpx** is a full-featured AHP **command-line client**. It is a thin wrapper
+around the official
+[`@microsoft/agent-host-protocol`](https://www.npmjs.com/package/@microsoft/agent-host-protocol)
+client and focuses entirely on the terminal experience:
 
 - **CLI** — connect to servers, manage sessions, prompt agents, watch activity, browse files, and check fleet health from your terminal
-- **Library** — `import { AhpClient } from '@tylerl0706/ahpx'` for programmatic control of connections, sessions, prompts, event forwarding, and fleet routing
+- **Not a library** — ahpx does not export an SDK. For programmatic AHP access, depend on [`@microsoft/agent-host-protocol`](https://www.npmjs.com/package/@microsoft/agent-host-protocol) directly (see [Using AHP programmatically](#using-ahp-programmatically))
 
 Built by George's engineering team as the dispatch backbone for an autonomous CTO bot, ahpx has shipped 12 phases of development — from basic protocol handling to production-grade fleet management, session persistence, and event streaming.
 
@@ -387,245 +390,30 @@ These flags apply to all commands:
 | `--version` | Print version and exit | |
 | `--help` | Show help for any command | |
 
-## Library SDK Reference
+## Using AHP programmatically
 
-`import { AhpClient, SessionHandle, ConnectionPool } from '@tylerl0706/ahpx'` — the same protocol engine that powers the CLI, available as a fully-typed TypeScript API.
+ahpx is a **command-line tool**, not a library. It does not export an SDK.
 
-### Connect and List Agents
+ahpx is a thin wrapper around the official
+[`@microsoft/agent-host-protocol`](https://www.npmjs.com/package/@microsoft/agent-host-protocol)
+client. If you want to speak the Agent Host Protocol from your own Node.js or
+TypeScript code, depend on that package directly rather than on ahpx:
 
-```typescript
-import { AhpClient } from '@tylerl0706/ahpx';
-
-const client = new AhpClient();
-const info = await client.connect('ws://localhost:8080');
-
-console.log('Protocol version:', info.protocolVersion);
-console.log('Agents:', client.state.root.agents);
-
-// Each agent has a provider name and list of models
-for (const agent of client.state.root.agents) {
-  console.log(`  ${agent.provider}: ${agent.models.join(', ')}`);
-}
-
-await client.disconnect();
+```bash
+npm install @microsoft/agent-host-protocol
 ```
 
-### Sessions and Prompts with SessionHandle
-
 ```typescript
-import { AhpClient, SessionHandle } from '@tylerl0706/ahpx';
+import { AhpClient } from '@microsoft/agent-host-protocol/client';
+import { WebSocketTransport } from '@microsoft/agent-host-protocol/ws';
 
-const client = new AhpClient();
-await client.connect('ws://localhost:8080');
-
-// Open a session — returns a SessionHandle
-const session = await client.openSession({
-  provider: 'copilot',
-  workingDirectory: '/my/project',
-});
-
-// Wait for the session to reach idle state
-await session.waitForReady();
-
-// Listen for real-time events
-session.on('action', (envelope) => {
-  console.log('Action:', envelope.action.type);
-});
-
-// Send a prompt and await the full turn result
-const result = await session.sendPrompt('Explain this codebase', {
-  permissions: 'approve-reads',
-});
-
-console.log(result.responseText);   // Full model response
-console.log(result.toolCalls);       // Number of tool calls made
-console.log(result.state);           // "complete" | "cancelled" | "error"
-
-// Multi-turn: send another prompt in the same session
-const result2 = await session.sendPrompt('Now refactor the auth module');
-
-// Clean up
-session.dispose();
-await client.disconnect();
+// Construct a transport + client and drive sessions/turns directly.
+// See the @microsoft/agent-host-protocol documentation for the full API.
 ```
 
-The `TurnResult` returned by `sendPrompt()`:
-
-```typescript
-interface TurnResult {
-  turnId: string;           // UUID for this turn
-  responseText: string;     // Full model response
-  toolCalls: number;        // How many tool calls were made
-  usage?: IUsageInfo;       // { inputTokens, outputTokens, model? }
-  state: "complete" | "cancelled" | "error";
-  error?: string;           // Error message if state is "error"
-}
-```
-
-### Multi-Session on One Connection
-
-```typescript
-// Open multiple sessions on a single WebSocket connection
-const session1 = await client.openSession({ provider: 'copilot' });
-const session2 = await client.openSession({ provider: 'copilot' });
-
-// Each SessionHandle filters events by its session URI
-// — no cross-talk between sessions
-const [r1, r2] = await Promise.all([
-  session1.sendPrompt('Write unit tests'),
-  session2.sendPrompt('Fix the linting errors'),
-]);
-
-session1.dispose();
-session2.dispose();
-```
-
-### ConnectionPool for URL-Keyed Reuse
-
-```typescript
-import { ConnectionPool } from '@tylerl0706/ahpx';
-
-const pool = new ConnectionPool();
-
-// getClient() returns an existing client for the URL, or creates a new one
-const client1 = await pool.getClient('ws://localhost:8080');
-const client2 = await pool.getClient('ws://localhost:8080');  // Same client!
-const client3 = await pool.getClient('wss://cloud:8082');       // Different server
-
-console.log(pool.size); // 2
-
-// Disconnect all pooled connections
-await pool.closeAll();
-```
-
-### Fleet Management
-
-```typescript
-import { FleetManager, HealthChecker } from '@tylerl0706/ahpx';
-
-// Health-check individual servers
-const checker = new HealthChecker();
-const health = await checker.check('ws://localhost:8080', 'local');
-console.log(health.status);         // "healthy" | "degraded" | "unreachable"
-console.log(health.latencyMs);       // 12
-console.log(health.activeSessions);  // 2
-
-// Fleet-level routing with strategies
-const fleet = new FleetManager({
-  connections: [
-    { name: 'local', url: 'ws://localhost:8080', tags: ['dev'] },
-    { name: 'cloud', url: 'wss://cloud:8082', tags: ['gpu', 'prod'] },
-  ],
-  strategy: 'least-sessions',  // or 'round-robin', 'random', 'preferred'
-});
-
-// Select the best server matching requirements
-const server = await fleet.selectServer({
-  tag: 'gpu',
-  provider: 'copilot',
-});
-console.log(server.name, server.url);  // "cloud", "wss://cloud:8082"
-```
-
-### Event Forwarding
-
-```typescript
-import {
-  WebhookForwarder,
-  WebSocketForwarder,
-  ForwardingFormatter,
-} from '@tylerl0706/ahpx';
-
-// Webhook: batched HTTP POST with retry
-const webhook = new WebhookForwarder({
-  url: 'https://dashboard.example.com/events',
-  batchSize: 10,
-  batchIntervalMs: 1000,
-  retries: 3,
-  filter: ['turn_complete', 'tool_call_complete'],
-});
-
-// WebSocket: real-time streaming with backpressure
-const ws = new WebSocketForwarder({
-  url: 'ws://monitor:9090/events',
-  filter: ['delta', 'turn_complete'],
-});
-
-// Decorate any OutputFormatter to also forward events
-const formatter = new ForwardingFormatter({
-  inner: myOutputFormatter,
-  forwarders: [webhook, ws],
-  tags: { jobId: 'abc-123' },
-});
-
-// Events are forwarded fire-and-forget — errors never propagate
-// to the inner formatter or turn controller
-```
-
-### Session Persistence
-
-```typescript
-import { SessionStore, SessionPersistence } from '@tylerl0706/ahpx';
-
-const store = new SessionStore();      // ~/.ahpx/sessions/
-const persistence = new SessionPersistence(store);
-
-// Resume a session from a previous run
-const record = store.get('session-id-abc');
-const outcome = await persistence.resume(record, client);
-
-if (outcome.status === 'resumed') {
-  console.log('Session resumed successfully');
-} else if (outcome.status === 'not_found') {
-  console.log('Session was disposed on server — creating new one');
-}
-
-// Save a turn result for local history
-await persistence.saveTurn(record.id, {
-  ...turnResult,
-  userMessage: 'Fix the auth bug',
-});
-
-// Sync local records with server state
-const sync = await persistence.sync(client, 'local');
-console.log(`Added: ${sync.added.length}, Removed: ${sync.removed.length}`);
-```
-
-### Authentication
-
-```typescript
-import { AuthHandler } from '@tylerl0706/ahpx';
-
-const auth = new AuthHandler({
-  token: process.env.AHPX_TOKEN,  // Or from CLI flag, file, interactive
-});
-
-// Token resolution order:
-// 1. --token CLI flag
-// 2. $AHPX_TOKEN environment variable
-// 3. ~/.ahpx/auth.json stored token
-// 4. Interactive prompt (if TTY)
-```
-
-### Full Export List
-
-Everything available from `import { ... } from '@tylerl0706/ahpx'`:
-
-| Category | Exports |
-|----------|---------|
-| Core Client | `AhpClient`, `AhpClientOptions`, `AhpClientEvents`, `OpenSessionOptions` |
-| Session Handle | `SessionHandle`, `SessionHandleEvents`, `PromptOptions`, `SessionTurnResult` |
-| Connection Pool | `ConnectionPool`, `ConnectionPoolOptions` |
-| Transport | `Transport`, `TransportOptions` |
-| Protocol Layer | `ProtocolLayer`, `ProtocolLayerOptions`, `RpcError`, `RpcTimeoutError` |
-| State Mirror | `StateMirror` |
-| Reconnection | `ReconnectManager`, `ReconnectOptions`, `ReconnectOutcome` |
-| Event Forwarding | `EventForwarder`, `AhpxEvent`, `WebhookForwarder`, `WebSocketForwarder`, `ForwardingFormatter` |
-| Fleet Management | `FleetManager`, `FleetManagerOptions`, `RoutingStrategy`, `ServerRequirements`, `HealthChecker`, `ServerHealth` |
-| Session Persistence | `SessionStore`, `SessionPersistence`, `SessionRecord`, `TurnSummary`, `ResumeOutcome`, `SyncResult` |
-| Auth | `AuthHandler`, `AuthHandlerOptions` |
-| Config | `ConnectionProfile` |
-| Protocol Types | `IRootState`, `ISessionState`, `IActiveTurn`, `ITurn`, `IToolCallState`, `ActionType`, `IActionEnvelope`, and more |
+Everything ahpx adds on top — connection profiles, session persistence, output
+formatting, permission modes, fleet health, dev tunnels — lives in the `ahpx`
+CLI and is intentionally not exposed as a programmatic API.
 
 ## Output Formats
 
@@ -643,7 +431,7 @@ $ ahpx exec --approve-all "List the files in src/"
 
 Here are the files in the src/ directory:
 - bin.ts — CLI entry point
-- index.ts — Library exports
+- client/ — internal AHP client wrapper
 - errors.ts — Error classes
 ...
 
@@ -894,7 +682,7 @@ flowchart TD
 | Phase | Name | Status |
 |-------|------|--------|
 | 0–6 | Foundation (client, connections, sessions, prompting, output, observation, George integration) | ✅ Complete |
-| 7 | Library Mode — npm package with typed API | ✅ Complete |
+| 7 | ~~Library Mode — npm package with typed API~~ — **retired**: ahpx is now a CLI-only wrapper around the official `@microsoft/agent-host-protocol` client (the exported SDK was removed) | ♻️ Superseded |
 | 8 | Multi-Session — SessionHandle, ConnectionPool | ✅ Complete |
 | 9 | Event Forwarding — Webhook + WebSocket streaming | ✅ Complete |
 | 10 | Fleet Management — HealthChecker, FleetManager, server tags | ✅ Complete |
