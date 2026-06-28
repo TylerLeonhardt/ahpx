@@ -133,8 +133,24 @@ export class TurnController {
 				switch (action.type) {
 					case ActionType.ChatDelta: {
 						const a = action as ChatDeltaAction;
-						responseText += a.content;
-						this.renderer.onDelta(a.content);
+						// Prefer the authoritative text assembled in chat state: it includes
+						// any first delta(s) the host folded into the subscribe snapshot
+						// instead of emitting as chat/delta actions. The state mirror is
+						// updated before this listener runs, so emit only the not-yet-shown
+						// remainder — this recovers a folded prefix in stream order (e.g.
+						// "BANANA" rather than "ANANA"). Falls back to the raw delta content
+						// when state is unavailable or has diverged from the stream.
+						const authoritative = this.responseTextFromState(turnId);
+						if (authoritative.length > 0 && authoritative.startsWith(responseText)) {
+							const chunk = authoritative.slice(responseText.length);
+							if (chunk) {
+								responseText = authoritative;
+								this.renderer.onDelta(chunk);
+							}
+						} else {
+							responseText += a.content;
+							this.renderer.onDelta(a.content);
+						}
 						break;
 					}
 

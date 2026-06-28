@@ -196,6 +196,44 @@ describe("PromptRenderer", () => {
 			expect(cap.text()).toContain("[done]");
 			expect(cap.text()).toContain("end_turn");
 		});
+
+		it("renders authoritative text that was never streamed (fully folded first delta)", () => {
+			// Host folded the entire short reply into the subscribe snapshot, so no
+			// chat/delta actions arrived — onTurnComplete must still display it. (#86/#92)
+			const cap = createCapture();
+			const r = new PromptRenderer(cap.out);
+			r.onTurnComplete("ELEPHANT");
+			expect(cap.text()).toContain("ELEPHANT");
+			expect(cap.text()).toContain("[done]");
+		});
+
+		it("renders only the not-yet-streamed remainder", () => {
+			const cap = createCapture();
+			const r = new PromptRenderer(cap.out);
+			r.onDelta("ELEP");
+			r.onTurnComplete("ELEPHANT");
+			// "ELEP" already streamed; only "HANT" should be appended (no duplication).
+			expect(stripAnsi(cap.text()).split("[done]")[0]).toBe("\nELEPHANT\n");
+		});
+
+		it("does not duplicate when the full text was already streamed", () => {
+			const cap = createCapture();
+			const r = new PromptRenderer(cap.out);
+			r.onDelta("BANANA");
+			r.onTurnComplete("BANANA");
+			const before = stripAnsi(cap.text()).split("[done]")[0];
+			expect(before).toBe("\nBANANA\n");
+		});
+
+		it("does not garble when streamed text is not a prefix of the authoritative text", () => {
+			const cap = createCapture();
+			const r = new PromptRenderer(cap.out);
+			r.onDelta("ANANA");
+			r.onTurnComplete("BANANA");
+			// Defensive: a non-prefix mismatch must not append garbled text.
+			const before = stripAnsi(cap.text()).split("[done]")[0];
+			expect(before).toBe("\nANANA\n");
+		});
 	});
 
 	describe("onTurnError", () => {
