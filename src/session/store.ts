@@ -25,10 +25,21 @@ const PREVIEW_MAX_LEN = 200;
 export interface TurnSummary {
 	/** Turn identifier (UUID from the AHP action). */
 	turnId: string;
-	/** First 200 characters of the user's message. */
+	/** First 200 characters of the user's message (compact listing). */
 	userMessage: string;
-	/** First 200 characters of the agent's response. */
+	/**
+	 * Complete user message text (full transcript). Added in 0.4.0; records
+	 * written by earlier versions will not have this field.
+	 */
+	prompt?: string;
+	/** First 200 characters of the agent's response (compact listing). */
 	responsePreview: string;
+	/**
+	 * Complete agent response text (full transcript). Added in 0.4.0; records
+	 * written by earlier versions only have {@link responsePreview} — readers
+	 * must tolerate a missing `response` and fall back to the preview.
+	 */
+	response?: string;
 	/** Number of tool calls made during this turn. */
 	toolCallCount: number;
 	/** Token usage, if reported by the server. */
@@ -100,10 +111,16 @@ export function buildTurnSummary(result: {
 	state: "complete" | "cancelled" | "error";
 	userMessage: string;
 }): TurnSummary {
+	const responseText = result.responseText || "(no response)";
 	return {
 		turnId: result.turnId,
 		userMessage: truncatePreview(result.userMessage),
-		responsePreview: truncatePreview(result.responseText || "(no response)"),
+		// Full transcript fields (0.4.0+): keep the complete prompt/response so
+		// `session history --full` and `session export` can reproduce the whole
+		// turn long after the host has disposed the session.
+		prompt: result.userMessage,
+		responsePreview: truncatePreview(responseText),
+		response: responseText,
 		toolCallCount: result.toolCalls,
 		tokenUsage: result.usage
 			? { input: result.usage.inputTokens, output: result.usage.outputTokens, model: result.usage.model }

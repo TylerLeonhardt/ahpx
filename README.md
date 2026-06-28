@@ -107,13 +107,13 @@ ahpx prompt -s my-remote -n remote-session "fix the bug"
 | `ahpx session list` | List sessions (default: active only) |
 | `ahpx session show [id]` | Show session details |
 | `ahpx session close [id]` | Close a session (keeps record for history) |
-| `ahpx session history [id]` | Show turn history for a session |
+| `ahpx session history [id]` | Show turn history for a session (`--full` for complete transcript) |
 | `ahpx session active` | Show all active sessions on the server (live query) |
 | `ahpx session config` | View session configuration |
 | `ahpx session config set <key> <value>` | Set a mutable config property |
 | `ahpx session customization list` | List customizations on a session |
 | `ahpx session customization toggle <uri>` | Toggle a customization on/off |
-| `ahpx session export <id>` | Export a session record to JSON |
+| `ahpx session export <id\|name>` | Export a session's full transcript (json record or markdown) |
 | `ahpx session import <file>` | Import a session record from JSON |
 
 `session new` options: `-s <server>`, `-p <provider>`, `-m <model>`, `-n <name>`, `--cwd <dir>`, `-t <timeout>`, `--config <key=value>` (repeatable), `--no-customizations`
@@ -129,6 +129,25 @@ ahpx session config set autoApprove autopilot -n my-session   # update config
 ```
 
 Available config keys depend on the agent. For `copilotcli`: `autoApprove` (default/autoApprove/autopilot), `isolation` (folder/worktree), `mode` (interactive/plan), `branch`, `permissions`.
+
+#### Transcripts & history
+
+Every completed turn is persisted locally with its **complete** prompt and response text
+(not just a preview), so the full transcript survives `session close` and host disposal.
+
+```bash
+ahpx session history my-session                 # compact: one truncated line per turn
+ahpx session history my-session --full          # complete prompt + response for every turn
+ahpx --format json session history my-session   # adds the full `response`/`prompt` per turn
+
+ahpx session export my-session                          # json record (re-importable, full turns)
+ahpx session export my-session --format markdown        # human-readable transcript to stdout
+ahpx session export my-session --format markdown --out transcript.md
+```
+
+`session export` and `session history` accept the session **name** positionally. Records
+written before 0.4.0 only have a 200-char preview; those turns render the preview with a
+clear "full text not recorded — pre-0.4.0 session" note (no migration required).
 
 #### Customizations
 

@@ -288,8 +288,10 @@ Persists session records as JSON files in `~/.ahpx/sessions/`.
 ```typescript
 interface TurnSummary {
   turnId: string               // UUID from AHP action
-  userMessage: string          // First 200 chars
-  responsePreview: string      // First 200 chars
+  userMessage: string          // First 200 chars (compact listing)
+  prompt?: string              // FULL user message (0.4.0+; absent on legacy records)
+  responsePreview: string      // First 200 chars (compact listing)
+  response?: string            // FULL response text (0.4.0+; absent on legacy records)
   toolCallCount: number
   tokenUsage?: { input: number; output: number; model?: string }
   state: "complete" | "cancelled" | "error"
@@ -328,14 +330,27 @@ Key operations:
 - `appendTurn(id, turn)` — append turn summary, cap at 100 entries
 
 > **`session history` sources the LOCAL record as the durable truth.** Each
-> completed turn is persisted locally (prompt, 200-char response preview,
-> tool-call count, token usage, state, timestamp). `session history` renders
-> those local turns first — so history stays useful **even after the session is
-> closed/disposed** and never silently prints empty when turns happened. It only
-> falls back to the live host (`fetchTurns`) when there are **no** local turns
-> (e.g. a session created by another client). This matters under protocol 0.5.0,
-> where turns live on the **chat channel**, not the session URI, so a host
-> `fetchTurns(sessionUri)` returns empty once the session is gone (issue #105).
+> completed turn is persisted locally with the **full** prompt + response text
+> (0.4.0+), plus 200-char previews, tool-call count, token usage, state, and
+> timestamp. `session history` renders those local turns first — so history stays
+> useful **even after the session is closed/disposed** and never silently prints
+> empty when turns happened. It only falls back to the live host (`fetchTurns`)
+> when there are **no** local turns (e.g. a session created by another client).
+> This matters under protocol 0.5.0, where turns live on the **chat channel**,
+> not the session URI, so a host `fetchTurns(sessionUri)` returns empty once the
+> session is gone (issue #105).
+
+> **Full transcripts (0.4.0+, issue #107).** `buildTurnSummary` stores the
+> complete `prompt`/`response` alongside the previews. `session history --full`
+> renders the complete prompt + response of every turn; `--format json` adds the
+> full `response`/`prompt` fields additively (previews retained). `session export
+> <id|name>` writes the whole transcript as either the re-importable json record
+> (`--format json`, default) or human-readable markdown (`--format markdown`,
+> per-turn `## Turn N`), to stdout or `-o/--out <file>`. Backward compatible:
+> records written before 0.4.0 lack `response`/`prompt`, so readers fall back to
+> the preview and surface a "full text not recorded — pre-0.4.0 session" note
+> (no destructive migration). Note `session export`'s `--format` collides with
+> the global text/json/quiet flag, so its value is read from `optsWithGlobals()`.
 
 Utility functions:
 - `truncatePreview(str, maxLen?)` — truncate to preview length (200 chars)
@@ -545,8 +560,8 @@ ahpx session list [--server <name>]
 ahpx session info [<id>]
 ahpx session close [<id>]
 ahpx session watch [--server <name>]
-ahpx session history [<id>] [--local]
-ahpx session export <id> [--output <file>]
+ahpx session history [<id|name>] [--local] [--full]
+ahpx session export <id|name> [--format json|markdown] [-o/--out <file>]
 ahpx session import <file>
 ```
 

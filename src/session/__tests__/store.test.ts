@@ -709,6 +709,39 @@ describe("buildTurnSummary", () => {
 		expect(result.responsePreview.length).toBe(200);
 	});
 
+	it("persists the FULL prompt and response (not just the 200-char previews)", () => {
+		const longResponse = `${"R".repeat(450)} END`;
+		const longPrompt = `${"P".repeat(300)} ASK`;
+		const result = buildTurnSummary({
+			turnId: "t",
+			responseText: longResponse,
+			toolCalls: 0,
+			state: "complete",
+			userMessage: longPrompt,
+		});
+
+		// Previews stay capped for compact listings...
+		expect(result.responsePreview.length).toBe(200);
+		expect(result.userMessage.length).toBe(200);
+		// ...but the full transcript fields carry the complete text.
+		expect(result.response).toBe(longResponse);
+		expect(result.response!.length).toBe(454);
+		expect(result.prompt).toBe(longPrompt);
+	});
+
+	it("stores '(no response)' as the full response when empty", () => {
+		const result = buildTurnSummary({
+			turnId: "t",
+			responseText: "",
+			toolCalls: 0,
+			state: "error",
+			userMessage: "do it",
+		});
+
+		expect(result.responsePreview).toBe("(no response)");
+		expect(result.response).toBe("(no response)");
+	});
+
 	it("handles missing usage", () => {
 		const result = buildTurnSummary({
 			turnId: "t",
