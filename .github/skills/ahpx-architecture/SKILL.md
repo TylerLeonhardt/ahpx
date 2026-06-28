@@ -319,7 +319,23 @@ Key operations:
 - `save(record)` — atomic write (tmp file + rename)
 - `get(id)` / `list(filter?)` / `update(id, updates)` / `close(id)`
 - `getByScope({serverName, workingDirectory, name?})` — find session by scope
+- `getByName(name, serverName?)` — find a session by user-given name across ALL
+  records (active or closed), active preferred then newest. Backs positional
+  name resolution: single-target session subcommands (`close`, `history`,
+  `show`, `resume`, …) resolve their positional arg by exact **id first**, then
+  fall back to this name lookup (id wins on collision). So `ahpx session close
+  <name>` works, not just `-n <name>`.
 - `appendTurn(id, turn)` — append turn summary, cap at 100 entries
+
+> **`session history` sources the LOCAL record as the durable truth.** Each
+> completed turn is persisted locally (prompt, 200-char response preview,
+> tool-call count, token usage, state, timestamp). `session history` renders
+> those local turns first — so history stays useful **even after the session is
+> closed/disposed** and never silently prints empty when turns happened. It only
+> falls back to the live host (`fetchTurns`) when there are **no** local turns
+> (e.g. a session created by another client). This matters under protocol 0.5.0,
+> where turns live on the **chat channel**, not the session URI, so a host
+> `fetchTurns(sessionUri)` returns empty once the session is gone (issue #105).
 
 Utility functions:
 - `truncatePreview(str, maxLen?)` — truncate to preview length (200 chars)
