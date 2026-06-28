@@ -160,6 +160,18 @@ genuinely needs on top:
 `RpcError` / `RpcTimeoutError` are re-exported from `client/index.ts` (sourced
 from the official `/client`) so existing imports keep working.
 
+> **Gotcha — uncaught `'error'` events crash the process, even inside `try/catch`**
+> (issue #100 / PR #101, `client/ws-transport.ts`). An EventEmitter `'error'`
+> event with no listener is **not** a rejected promise: Node rethrows it as an
+> uncaught exception that escapes every promise-based per-call `try/catch` (e.g. a
+> `server status` loop probing all servers crashed wholesale when one was
+> unreachable). When connecting a raw `ws` socket, never remove the socket's
+> `error` listener and then close/abort a still-`CONNECTING` socket — `ws` emits a
+> late async `error` ("WebSocket was closed before the connection was
+> established") that then has no listener. Always keep a swallow/no-op `error`
+> listener attached after a connect attempt settles (on every reject path); the
+> success path hands ownership to the transport's permanent error listener.
+
 ### AhpClient surface (`client/index.ts`)
 
 ```typescript
