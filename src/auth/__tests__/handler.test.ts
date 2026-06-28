@@ -302,4 +302,78 @@ describe("AuthHandler", () => {
 			expect(result).toBe(false);
 		});
 	});
+
+	describe("authenticateResources (upfront)", () => {
+		it("pushes a GitHub env token for a required protected resource (gh-auth path)", async () => {
+			const { client, authenticateCalls } = createMockClient(true);
+
+			const origAhpx = process.env.AHPX_TOKEN;
+			const origGh = process.env.GITHUB_TOKEN;
+			Reflect.deleteProperty(process.env, "AHPX_TOKEN");
+			// Simulates a user authenticated via the gh CLI / GITHUB_TOKEN with
+			// NO explicit token and NO connection-profile token — the exact case
+			// that regressed copilotcli session creation.
+			process.env.GITHUB_TOKEN = "gh-env-token";
+
+			try {
+				const handler = new AuthHandler(client, { configDir: tmpDir, interactive: false });
+				await handler.authenticateResources([{ resource: "https://api.github.com", required: true }]);
+
+				expect(authenticateCalls).toHaveLength(1);
+				expect(authenticateCalls[0]).toEqual({
+					resource: "https://api.github.com",
+					token: "gh-env-token",
+				});
+			} finally {
+				if (origAhpx !== undefined) process.env.AHPX_TOKEN = origAhpx;
+				if (origGh !== undefined) process.env.GITHUB_TOKEN = origGh;
+				else Reflect.deleteProperty(process.env, "GITHUB_TOKEN");
+			}
+		});
+
+		it("prefers an explicit token and deduplicates repeated resources", async () => {
+			const { client, authenticateCalls } = createMockClient(true);
+			const handler = new AuthHandler(client, {
+				configDir: tmpDir,
+				token: "explicit-token",
+				interactive: false,
+			});
+
+			// Multiple agents commonly declare the same resource — it must only
+			// be authenticated once.
+			await handler.authenticateResources([
+				{ resource: "https://api.github.com", required: true },
+				{ resource: "https://api.github.com", required: true },
+				{ resource: "https://api.github.com/repos", required: false },
+			]);
+
+			expect(authenticateCalls).toEqual([
+				{ resource: "https://api.github.com", token: "explicit-token" },
+				{ resource: "https://api.github.com/repos", token: "explicit-token" },
+			]);
+		});
+
+		it("is a no-op when no token can be resolved", async () => {
+			const { client, authenticateCalls } = createMockClient(true);
+
+			const origAhpx = process.env.AHPX_TOKEN;
+			const origGh = process.env.GITHUB_TOKEN;
+			const origGhToken = process.env.GH_TOKEN;
+			Reflect.deleteProperty(process.env, "AHPX_TOKEN");
+			Reflect.deleteProperty(process.env, "GITHUB_TOKEN");
+			Reflect.deleteProperty(process.env, "GH_TOKEN");
+
+			try {
+				const handler = new AuthHandler(client, { configDir: tmpDir, interactive: false });
+				// Non-GitHub resource so the `gh auth token` CLI fallback can't apply.
+				await handler.authenticateResources([{ resource: "https://api.example.com", required: true }]);
+
+				expect(authenticateCalls).toHaveLength(0);
+			} finally {
+				if (origAhpx !== undefined) process.env.AHPX_TOKEN = origAhpx;
+				if (origGh !== undefined) process.env.GITHUB_TOKEN = origGh;
+				if (origGhToken !== undefined) process.env.GH_TOKEN = origGhToken;
+			}
+		});
+	});
 });
