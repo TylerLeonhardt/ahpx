@@ -68,4 +68,50 @@ describe("PermissionHandler", () => {
 			expect(cap.text()).toContain("Allow Tool");
 		});
 	});
+
+	describe("format-aware chatter routing (#103)", () => {
+		it("text mode writes [auto-approved] to stdout (unchanged)", async () => {
+			const stdout = createCapture();
+			const stderr = createCapture();
+			const handler = new PermissionHandler("approve-all", {
+				output: stdout.out,
+				errorOutput: stderr.out,
+				format: "text",
+			});
+			await handler.handleToolConfirmation(makeToolCall());
+			expect(stdout.text()).toContain("[auto-approved]");
+			expect(stderr.text()).toBe("");
+		});
+
+		for (const format of ["json", "quiet"] as const) {
+			it(`${format} mode keeps stdout clean and routes chatter to stderr`, async () => {
+				const stdout = createCapture();
+				const stderr = createCapture();
+				const handler = new PermissionHandler("approve-all", {
+					output: stdout.out,
+					errorOutput: stderr.out,
+					format,
+				});
+				const result = await handler.handleToolConfirmation(makeToolCall());
+				expect(result).toBe(true);
+				// stdout must stay pure (no human chatter) so NDJSON / the answer is clean.
+				expect(stdout.text()).toBe("");
+				expect(stderr.text()).toContain("[auto-approved]");
+			});
+		}
+
+		it("deny-all chatter is also kept off stdout in json mode", async () => {
+			const stdout = createCapture();
+			const stderr = createCapture();
+			const handler = new PermissionHandler("deny-all", {
+				output: stdout.out,
+				errorOutput: stderr.out,
+				format: "json",
+			});
+			const result = await handler.handleToolConfirmation(makeToolCall());
+			expect(result).toBe(false);
+			expect(stdout.text()).toBe("");
+			expect(stderr.text()).toContain("[denied]");
+		});
+	});
 });

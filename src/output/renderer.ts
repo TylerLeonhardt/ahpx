@@ -122,6 +122,13 @@ export class PromptRenderer implements OutputFormatter {
 		}
 		const model = usage.model ? ` (${usage.model})` : "";
 		if (parts.length > 0) {
+			// Separate the stats line from streamed reply text that didn't end on a
+			// newline, so the answer and stats don't run together
+			// (e.g. "ELEPHANTTokens: 24,588 in …"). See issue #103.
+			this.closeReasoningIfNeeded();
+			if (this.hasStreamedText && !this.streamedText.endsWith("\n")) {
+				this.out.write("\n");
+			}
 			this.out.write(pc.dim(`Tokens: ${parts.join(" / ")}${model}\n`));
 		}
 	}

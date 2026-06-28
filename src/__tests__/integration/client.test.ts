@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import type { URI } from "@microsoft/agent-host-protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { AhpClient } from "../../client/index.js";
+import { JsonFormatter } from "../../output/json-formatter.js";
 import { PromptRenderer } from "../../output/renderer.js";
 import type { WritableOutput } from "../../output/renderer.js";
 import { PermissionHandler } from "../../permissions/handler.js";
@@ -357,6 +358,52 @@ describe("AhpClient integration", () => {
 
 			expect(result.state).toBe("complete");
 			expect(result.responseText).toContain("denied");
+		});
+	});
+
+	// ── 4b. JSON output purity (#103) ────────────────────────────────
+
+	describe("json output purity", () => {
+		it("auto-approved tool-call turn yields stdout that is 100% valid NDJSON", async () => {
+			// Real WS flow: a tool call that requires confirmation + --approve-all.
+			// In json mode the renderer is JsonFormatter (pure NDJSON) and the
+			// permission handler's human chatter must NOT leak onto stdout — it is
+			// routed to stderr. Every non-empty stdout line must parse as JSON.
+			server = await createMockServer(toolCallScenario());
+			client = new AhpClient();
+			await client.connect(server.url);
+			const session = await openSession(client, "mock-agent");
+
+			const stdout = createCapture();
+			const stderr = createCapture();
+			const formatter = new JsonFormatter(stdout.out);
+			// Wire the handler exactly as the CLI does for `--format json`.
+			const handler = new PermissionHandler("approve-all", {
+				output: stdout.out,
+				errorOutput: stderr.out,
+				format: "json",
+			});
+			const controller = new TurnController(client, session.uri, formatter, handler, session.chatUri, session.model);
+
+			const result = await controller.prompt("edit the file");
+
+			expect(result.state).toBe("complete");
+			expect(result.toolCalls).toBeGreaterThanOrEqual(1);
+
+			// Pure NDJSON: every non-empty stdout line is a valid JSON object.
+			const lines = stdout
+				.text()
+				.split("\n")
+				.filter((l) => l.length > 0);
+			expect(lines.length).toBeGreaterThan(0);
+			for (const line of lines) {
+				expect(() => JSON.parse(line) as unknown).not.toThrow();
+				expect(JSON.parse(line)).toHaveProperty("type");
+			}
+
+			// Non-vacuous guard: the auto-approval really happened (the leak path was
+			// exercised) — its human chatter was produced, just routed to stderr.
+			expect(stderr.text()).toContain("[auto-approved]");
 		});
 	});
 

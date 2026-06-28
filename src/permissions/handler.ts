@@ -9,6 +9,7 @@
 
 import * as readline from "node:readline";
 import pc from "picocolors";
+import type { OutputFormat } from "../output/format.js";
 import type { ToolCallInfo, WritableOutput } from "../output/renderer.js";
 
 export type PermissionMode = "approve-all" | "approve-reads" | "deny-all";
@@ -16,8 +17,21 @@ export type PermissionMode = "approve-all" | "approve-reads" | "deny-all";
 export interface PermissionHandlerOptions {
 	/** Input stream for interactive prompts (default: process.stdin) */
 	input?: NodeJS.ReadableStream;
-	/** Output stream for messages (default: process.stdout) */
+	/** Output stream for human-readable messages (default: process.stdout) */
 	output?: WritableOutput;
+	/**
+	 * Stream for human-readable messages when stdout must stay machine-parseable
+	 * (default: process.stderr). Used in `json` and `quiet` formats so the
+	 * approval chatter never pollutes the stdout stream.
+	 */
+	errorOutput?: WritableOutput;
+	/**
+	 * Active CLI output format. In `json`/`quiet` modes the human-readable
+	 * approval chatter (`[auto-approved]`, the `Allow …?` prompt, etc.) is routed
+	 * to `errorOutput` (stderr) so stdout stays pure NDJSON / a clean answer.
+	 * Defaults to `text` (chatter on stdout — unchanged behavior).
+	 */
+	format?: OutputFormat;
 }
 
 /**
@@ -25,6 +39,11 @@ export interface PermissionHandlerOptions {
  */
 export class PermissionHandler {
 	private readonly input: NodeJS.ReadableStream;
+	/**
+	 * Where human-readable approval chatter is written. In `text` mode this is
+	 * stdout; in `json`/`quiet` mode it is stderr so the stdout stream stays
+	 * machine-parseable (pure NDJSON / a clean answer).
+	 */
 	private readonly output: WritableOutput;
 
 	constructor(
@@ -32,7 +51,10 @@ export class PermissionHandler {
 		options?: PermissionHandlerOptions,
 	) {
 		this.input = options?.input ?? process.stdin;
-		this.output = options?.output ?? process.stdout;
+		// In json/quiet modes, human chatter must not pollute stdout — route it to
+		// `errorOutput` (stderr) instead. In text mode it goes to `output` (stdout).
+		const routeToStderr = options?.format === "json" || options?.format === "quiet";
+		this.output = routeToStderr ? (options?.errorOutput ?? process.stderr) : (options?.output ?? process.stdout);
 	}
 
 	/**

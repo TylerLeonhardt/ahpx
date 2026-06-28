@@ -186,6 +186,27 @@ describe("PromptRenderer", () => {
 			expect(text).toContain("50 out");
 			expect(text).not.toContain("(");
 		});
+
+		it("separates the stats line from streamed reply text with a newline (#103)", () => {
+			// Regression: the final delta carries no trailing newline, so the reply
+			// text used to abut the stats line ("ELEPHANTTokens: …"). The stats line
+			// must start on its own line.
+			const cap = createCapture();
+			const r = new PromptRenderer(cap.out);
+			r.onDelta("ELEPHANT");
+			r.onUsage({ inputTokens: 24588, outputTokens: 1 });
+			const text = stripAnsi(cap.text());
+			expect(text).toContain("ELEPHANT\nTokens:");
+			expect(text).not.toContain("ELEPHANTTokens:");
+		});
+
+		it("does not add a leading newline when no reply text was streamed", () => {
+			const cap = createCapture();
+			const r = new PromptRenderer(cap.out);
+			r.onUsage({ inputTokens: 100, outputTokens: 50 });
+			// Without streamed text there is nothing to separate from.
+			expect(stripAnsi(cap.text())).toBe("Tokens: 100 in / 50 out\n");
+		});
 	});
 
 	describe("onTurnComplete", () => {
