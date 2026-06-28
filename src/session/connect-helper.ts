@@ -6,7 +6,7 @@
  */
 
 import pc from "picocolors";
-import { AuthHandler } from "../auth/index.js";
+import { AuthHandler, authenticateUpfront } from "../auth/index.js";
 import { AhpClient } from "../client/index.js";
 import type { AhpxConfig } from "../config/index.js";
 import { ConnectionStore, isValidWsUrl } from "../config/index.js";
@@ -118,23 +118,14 @@ export async function withConnection(
 	try {
 		await client.connect(url, { headers });
 
-		// Upfront auth: authenticate for each protected resource declared by agents
-		const agents = client.state.root?.agents ?? [];
-		const resources = agents.flatMap((a) => a.protectedResources ?? []);
-
-		if (token) {
-			for (const r of resources) {
-				await client.authenticate(r.resource, token);
-			}
-		} else {
-			// Proactive auth from environment tokens
-			const envToken = process.env.AHPX_TOKEN ?? process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-			if (envToken) {
-				for (const r of resources) {
-					await client.authenticate(r.resource, envToken).catch(() => {});
-				}
-			}
-		}
+		// Upfront auth: authenticate for each protected resource declared by
+		// agents BEFORE any session is created. AHP 0.5.0 agents such as
+		// copilotcli (the Copilot SDK) require a pushed Bearer token or the host
+		// rejects every turn with "Session was not created with authentication
+		// info or custom provider". Token resolution uses the full chain
+		// (explicit/profile token, env vars, and the `gh auth token` CLI
+		// fallback) so `gh`-authenticated users work without setting an env var.
+		await authenticateUpfront(client, { token });
 
 		// Wire up auth handler for server-initiated auth challenges
 		const authHandler = new AuthHandler(client, { token });

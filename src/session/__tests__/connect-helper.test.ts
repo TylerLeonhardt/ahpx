@@ -46,11 +46,15 @@ vi.mock("../../auth/index.js", () => ({
 	AuthHandler: vi.fn().mockImplementation(() => ({
 		handleAuthRequired: vi.fn().mockResolvedValue(true),
 	})),
+	authenticateUpfront: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ── Import after mocks ──────────────────────────────────────────────────────
 
+import { authenticateUpfront } from "../../auth/index.js";
 import { withConnection } from "../connect-helper.js";
+
+const mockAuthenticateUpfront = vi.mocked(authenticateUpfront);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -205,15 +209,15 @@ describe("withConnection", () => {
 			expect(mockClient.disconnect).toHaveBeenCalledOnce();
 		});
 
-		it("authenticates when connection profile has a token", async () => {
+		it("delegates upfront auth with the connection profile token", async () => {
 			mockStoreGet.mockResolvedValue({ name: "auth", url: "ws://auth.local", token: "my-secret" });
 
 			await withConnection({ server: "auth", config: makeConfig() }, vi.fn());
 
-			expect(mockClient.authenticate).toHaveBeenCalledWith("https://api.github.com", "my-secret");
+			expect(mockAuthenticateUpfront).toHaveBeenCalledWith(mockClient, { token: "my-secret" });
 		});
 
-		it("does not authenticate when there is no token and no env vars", async () => {
+		it("delegates upfront auth with no token when none is configured", async () => {
 			const origAhpx = process.env.AHPX_TOKEN;
 			const origGh = process.env.GITHUB_TOKEN;
 			const origGhToken = process.env.GH_TOKEN;
@@ -223,7 +227,7 @@ describe("withConnection", () => {
 
 			try {
 				await withConnection({ server: "ws://localhost:3000", config: makeConfig() }, vi.fn());
-				expect(mockClient.authenticate).not.toHaveBeenCalled();
+				expect(mockAuthenticateUpfront).toHaveBeenCalledWith(mockClient, { token: undefined });
 			} finally {
 				if (origAhpx !== undefined) process.env.AHPX_TOKEN = origAhpx;
 				if (origGh !== undefined) process.env.GITHUB_TOKEN = origGh;

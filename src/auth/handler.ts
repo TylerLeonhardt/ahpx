@@ -63,44 +63,84 @@ export class AuthHandler {
 	}
 
 	/**
+	 * Resolve a token for a protected resource without prompting.
+	 *
+	 * Resolution order (highest precedence first):
+	 *   1. Explicit token (`--token` flag / connection profile)
+	 *   2. `AHPX_TOKEN` environment variable
+	 *   3. GitHub-specific sources (`GITHUB_TOKEN` / `GH_TOKEN` / `gh auth token`)
+	 *      — only for the `https://api.github.com` resource
+	 *   4. A previously stored token (`~/.ahpx/auth.json`)
+	 *
+	 * Returns `undefined` if no non-interactive source yields a token.
+	 */
+	async resolveToken(resourceUri: string): Promise<string | undefined> {
+		if (this.explicitToken) {
+			return this.explicitToken;
+		}
+
+		const envToken = process.env.AHPX_TOKEN;
+		if (envToken) {
+			return envToken;
+		}
+
+		const githubToken = this.resolveGitHubToken(resourceUri);
+		if (githubToken) {
+			return githubToken;
+		}
+
+		return this.loadToken(resourceUri);
+	}
+
+	/**
+	 * Upfront authentication for a set of protected resources declared by the
+	 * connected agents (see `AgentInfo.protectedResources`).
+	 *
+	 * AHP 0.5.0 agents such as `copilotcli` (the Copilot SDK agent) declare a
+	 * `required: true` protected resource and the host rejects session turns
+	 * that were not authenticated — the Copilot SDK fails with "Session was not
+	 * created with authentication info or custom provider". Clients are expected
+	 * to push a Bearer token via the `authenticate` command BEFORE creating
+	 * sessions. This resolves a token for each distinct resource (including the
+	 * `gh auth token` fallback) and pushes it. Failures are non-fatal: a missing
+	 * or rejected token simply leaves the resource unauthenticated.
+	 */
+	async authenticateResources(resources: ProtectedResourceMetadata[]): Promise<void> {
+		const seen = new Set<string>();
+		for (const resource of resources) {
+			if (seen.has(resource.resource)) {
+				continue;
+			}
+			seen.add(resource.resource);
+			const token = await this.resolveToken(resource.resource);
+			if (token) {
+				await this.tryAuthenticate(resource.resource, token);
+			}
+		}
+	}
+
+	/**
 	 * Handle an authRequired notification — find a token and authenticate.
 	 * Returns true if authentication succeeded, false otherwise.
 	 */
 	async handleAuthRequired(resource: ProtectedResourceMetadata): Promise<boolean> {
 		const resourceUri = resource.resource;
 
-		// 1. Check explicit token (--token flag)
-		if (this.explicitToken) {
-			return this.tryAuthenticate(resourceUri, this.explicitToken);
-		}
-
-		// 2. Check AHPX_TOKEN environment variable
-		const envToken = process.env.AHPX_TOKEN;
-		if (envToken) {
-			return this.tryAuthenticate(resourceUri, envToken);
-		}
-
-		// 3. Check GitHub-specific env vars for GitHub resources
-		const githubToken = this.resolveGitHubToken(resourceUri);
-		if (githubToken) {
-			return this.tryAuthenticate(resourceUri, githubToken);
-		}
-
-		// 4. Check stored token
-		const stored = await this.loadToken(resourceUri);
-		if (stored) {
-			const success = await this.tryAuthenticate(resourceUri, stored);
+		// 1-4. Non-interactive resolution (explicit → env → GitHub → stored).
+		const token = await this.resolveToken(resourceUri);
+		if (token) {
+			const success = await this.tryAuthenticate(resourceUri, token);
 			if (success) return true;
-			// Token expired or invalid — fall through to prompting
+			// Token expired or invalid — fall through to prompting.
 		}
 
 		// 5. Interactive prompt (if available)
 		if (this.interactive) {
-			const token = await this.promptForToken(resource);
-			if (token) {
-				const success = await this.tryAuthenticate(resourceUri, token);
+			const entered = await this.promptForToken(resource);
+			if (entered) {
+				const success = await this.tryAuthenticate(resourceUri, entered);
 				if (success) {
-					await this.storeToken(resourceUri, token);
+					await this.storeToken(resourceUri, entered);
 				}
 				return success;
 			}
@@ -111,10 +151,12 @@ export class AuthHandler {
 
 	/**
 	 * Resolve a GitHub token from environment variables or the `gh` CLI.
-	 * Only applies when the resource is `https://api.github.com`.
+	 * Applies to the GitHub API protected resources (`https://api.github.com`
+	 * and its sub-resources such as `https://api.github.com/repos`), which share
+	 * the same authorization server.
 	 */
 	private resolveGitHubToken(resourceUri: string): string | undefined {
-		if (resourceUri !== "https://api.github.com") {
+		if (resourceUri !== "https://api.github.com" && !resourceUri.startsWith("https://api.github.com/")) {
 			return undefined;
 		}
 
