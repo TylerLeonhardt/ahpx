@@ -177,6 +177,17 @@ describe("HealthChecker", () => {
 			expect(mockInstances[0].options.connectTimeout).toBe(3000);
 		});
 
+		it("passes headers through to the client (tunnel auth, #88)", async () => {
+			const { HealthChecker } = await import("../health.js");
+			const checker = new HealthChecker();
+			await checker.check("wss://tunnel.example/", "tunnel-server", {
+				headers: { "X-Tunnel-Authorization": "tunnel abc123" },
+			});
+
+			expect(mockInstances).toHaveLength(1);
+			expect(mockInstances[0].options.headers).toEqual({ "X-Tunnel-Authorization": "tunnel abc123" });
+		});
+
 		it("authenticates when token is provided", async () => {
 			const { HealthChecker } = await import("../health.js");
 			const checker = new HealthChecker();

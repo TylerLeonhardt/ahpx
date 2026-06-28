@@ -1,5 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -71,10 +73,13 @@ describe("CLI integration: --help and --version", () => {
 		expect(result.stdout).toContain("exec");
 	});
 
-	it("ahpx --version exits 0 and outputs a semver string", async () => {
+	it("ahpx --version exits 0 and outputs the package.json version (#87)", async () => {
 		const result = await runCli("--version");
 		expect(result.exitCode).toBe(0);
 		expect(result.stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
+		const pkgPath = path.resolve(fileURLToPath(new URL("../../package.json", import.meta.url)));
+		const pkgVersion = (JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string }).version;
+		expect(result.stdout.trim()).toBe(pkgVersion);
 	});
 });
 
