@@ -1,13 +1,23 @@
 # ahpx
 
-**Agent Host Protocol client** — CLI and Node.js library for managing AHP server connections, sessions, and agent interactions.
+**Agent Host Protocol CLI** — a thin command-line wrapper around the official [`@microsoft/agent-host-protocol`](https://www.npmjs.com/package/@microsoft/agent-host-protocol) client for managing AHP server connections, sessions, and agent interactions.
 
 [![CI](https://github.com/TylerLeonhardt/ahpx/actions/workflows/ci.yml/badge.svg)](https://github.com/TylerLeonhardt/ahpx/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@tylerl0706/ahpx)](https://www.npmjs.com/package/@tylerl0706/ahpx)
 
 ## What is ahpx?
 
-ahpx is a client for the Agent Host Protocol (AHP) — a WebSocket-based JSON-RPC protocol for managing AI agent sessions. Use ahpx to connect to AHP servers, create sessions, send prompts, stream responses, and handle tool confirmations, either from the command line or programmatically as a Node.js library.
+ahpx is a **command-line client** for the Agent Host Protocol (AHP) — a WebSocket-based JSON-RPC protocol for managing AI agent sessions. Use ahpx to connect to AHP servers, create sessions, send prompts, stream responses, and handle tool confirmations from your terminal.
+
+ahpx is a thin CLI wrapper: the protocol client itself is the official
+`@microsoft/agent-host-protocol` package. ahpx focuses on the command-line
+experience — connection profiles, session persistence, output formatting, fleet
+health, dev tunnels — and delegates the wire protocol to the official client.
+
+> **Not a library.** ahpx no longer ships an exported SDK. If you need to speak
+> AHP programmatically, depend on
+> [`@microsoft/agent-host-protocol`](https://www.npmjs.com/package/@microsoft/agent-host-protocol)
+> directly. ahpx exposes only the `ahpx` CLI.
 
 ## Features
 
@@ -17,7 +27,6 @@ ahpx is a client for the Agent Host Protocol (AHP) — a WebSocket-based JSON-RP
 - 🔄 **Event forwarding** — webhook and WebSocket targets for dashboards and pipelines
 - 🏗️ **Fleet management** — health checks, status monitoring, and server tagging
 - 💾 **Session persistence** — resume sessions, export/import history
-- 📦 **Use as CLI or Node.js library** with full TypeScript types
 - 🔒 **Configurable permission modes** — approve-all, approve-reads, deny-all, autopilot
 - 🔑 **Automatic auth** — token resolution from env vars, CLI, or interactive prompt
 - 🌐 **Dev Tunnel support** — connect to remote agent hosts via Dev Tunnels
@@ -159,125 +168,26 @@ ahpx session customization toggle <uri> -n my-session
 | `--version` | Print version |
 | `--help` | Show help |
 
-## Library Usage
+## Using AHP programmatically
 
-ahpx exports a full TypeScript API. Install it as a dependency:
+ahpx is a CLI, not a library — it does not export an SDK. To speak the Agent
+Host Protocol from your own Node.js or TypeScript code, depend on the official
+client directly:
 
 ```bash
-npm install @tylerl0706/ahpx
+npm install @microsoft/agent-host-protocol
 ```
-
-### Connect and list agents
 
 ```typescript
-import { AhpClient } from '@tylerl0706/ahpx';
+import { AhpClient } from '@microsoft/agent-host-protocol/client';
+import { WebSocketTransport } from '@microsoft/agent-host-protocol/ws';
 
-const client = new AhpClient({ initialSubscriptions: ['ahp-root://'] });
-const result = await client.connect('ws://localhost:8082');
-
-console.log('Agents:', result.agents);
-console.log('Connected:', client.connected);
-
-await client.disconnect();
+// See the @microsoft/agent-host-protocol docs for the full client API.
 ```
 
-### Create a session and send a prompt
-
-```typescript
-import { AhpClient, ActionType } from '@tylerl0706/ahpx';
-import { randomUUID } from 'node:crypto';
-
-const client = new AhpClient({ initialSubscriptions: ['ahp-root://'] });
-await client.connect('ws://localhost:8082');
-
-// Create a session
-const sessionUri = `copilot:/${randomUUID()}`;
-await client.createSession(sessionUri, { provider: 'copilot' });
-await client.subscribe(sessionUri);
-
-// Listen for streaming events
-client.on('action', (envelope) => {
-  const { action } = envelope;
-  switch (action.type) {
-    case ActionType.SessionDelta:
-      process.stdout.write(action.content);
-      break;
-    case ActionType.SessionTurnComplete:
-      console.log('\n--- Turn complete ---');
-      break;
-    case ActionType.SessionError:
-      console.error('Error:', action.error);
-      break;
-  }
-});
-
-// Send a prompt
-client.dispatchAction({
-  type: ActionType.SessionTurnStarted,
-  session: sessionUri,
-  turnId: randomUUID(),
-  userMessage: { text: 'Fix the failing test' },
-});
-```
-
-### Handle authentication
-
-```typescript
-import { AhpClient, AuthHandler } from '@tylerl0706/ahpx';
-
-const client = new AhpClient();
-const auth = new AuthHandler(client, { token: process.env.MY_TOKEN });
-
-client.on('notification', async (notification) => {
-  if (notification.type === 'authRequired') {
-    await auth.handleAuthRequired(notification.resource);
-  }
-});
-
-await client.connect('ws://localhost:8082');
-```
-
-### Read state from the state mirror
-
-```typescript
-const client = new AhpClient();
-await client.connect('ws://localhost:8082');
-
-// Root state (agents, active sessions)
-console.log('Agents:', client.state.root.agents);
-
-// Session state (after subscribing)
-const session = client.state.getSession('copilot:/my-session');
-console.log('Title:', session?.summary?.title);
-console.log('Active turn:', session?.activeTurn);
-```
-
-### Error handling
-
-```typescript
-import { AhpClient, RpcError, RpcTimeoutError } from '@tylerl0706/ahpx';
-
-const client = new AhpClient();
-
-try {
-  await client.connect('ws://localhost:8082');
-} catch (err) {
-  if (err instanceof RpcTimeoutError) {
-    console.error(`Request ${err.method} timed out after ${err.timeoutMs}ms`);
-  } else if (err instanceof RpcError) {
-    console.error(`RPC error ${err.code}: ${err.message}`);
-  }
-}
-```
-
-### Additional APIs
-
-- **`SessionHandle`** — per-session wrapper with scoped event listeners and lifecycle management
-- **`ConnectionPool`** — connection reuse across multiple sessions to the same server
-- **`WebhookForwarder` / `WebSocketForwarder`** — forward NDJSON events to external targets
-- **`HealthChecker`** — fleet-level health monitoring across saved servers
-
-See the exported TypeScript declarations for the full API reference.
+ahpx itself is built on top of this package and simply adds a polished
+command-line experience (connection profiles, session persistence, output
+formatting, fleet health, dev tunnels) around it.
 
 ## Exit Codes
 
@@ -345,7 +255,7 @@ ahpx exec --config autoApprove=autopilot "fix the tests"        # server-side au
 |----------|-------------|
 | [PUBLISHING.md](PUBLISHING.md) | Publishing setup — OIDC trusted publishers, auto-bump pipeline, first-time config |
 | [docs/quick-reference.md](docs/quick-reference.md) | One-page command cheat sheet |
-| [docs/user-guide.md](docs/user-guide.md) | Comprehensive user guide — CLI reference, SDK API, architecture |
+| [docs/user-guide.md](docs/user-guide.md) | Comprehensive user guide — CLI reference and architecture |
 | [docs/roadmap.md](docs/roadmap.md) | v0.2 roadmap with phase details and acceptance criteria |
 | [docs/errors.md](docs/errors.md) | Error catalog and exit code reference |
 | [docs/george-integration.md](docs/george-integration.md) | Integration guide for George agent dispatch |

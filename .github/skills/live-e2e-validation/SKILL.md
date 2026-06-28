@@ -14,9 +14,15 @@ Protocol (AHP) server — not the mocked unit tests. It connects to a running
 host, creates/resumes sessions, sends real agent interactions, and asserts the
 responses are valid.
 
-The codified harness lives at `e2e/sdk.test.ts` (SDK path, server-gated) and
-`e2e/cli.test.ts` (offline CLI surface). This skill explains how to get a live
-server reachable so the SDK suite actually runs, plus the manual CLI smoke flow.
+The codified harness lives at `e2e/cli.test.ts` (offline CLI surface). This skill
+explains how to get a live server reachable plus the manual CLI smoke flow that
+exercises the real protocol end-to-end.
+
+> **Note:** ahpx is now a **CLI-only** wrapper around the official
+> `@microsoft/agent-host-protocol` client and no longer exports an SDK. The old
+> `e2e/sdk.test.ts` (which drove the deprecated `SessionHandle` SDK surface) was
+> removed. Validate the live flow through the **CLI** (`exec`/`prompt`/`session`),
+> which is the supported path.
 
 ## 1. Discover the running server
 
@@ -104,17 +110,26 @@ done
 # Each responseText must contain the FULL word (no dropped first character).
 ```
 
-## 5. Run the live SDK e2e suite
+## 5. Live multi-turn CLI validation
 
-With the bridge up, the server-gated suite runs automatically (it self-skips if
-`ws://127.0.0.1:8090` is unreachable):
+ahpx no longer ships an SDK e2e suite. Validate the live protocol flow through
+the CLI instead — it drives the same official client under the hood:
 
 ```bash
-npx vitest run e2e/sdk.test.ts
-# Expect: 3 passed (send prompt, steering mid-turn, observe state mid-stream)
-```
+# Short + long replies, asserting full text in TEXT mode (folded-delta check)
+for w in ELEPHANT BANANA "alpha bravo charlie delta echo"; do
+  node dist/bin.js exec --approve-all "Reply with exactly: $w"
+done
+# Each reply must render in full (no dropped first character/chunk).
 
-Run it 2–3 times to confirm it's stable (turn streaming can be timing-sensitive).
+# Persistent session resume across multiple turns
+node dist/bin.js session new -n e2e-cli-verify
+for w in PINEAPPLE MANGO KIWI; do
+  node dist/bin.js prompt -n e2e-cli-verify --format json \
+    "Reply with exactly one word and nothing else: $w" \
+    | grep -oE '"responseText":"[^"]*"'
+done
+```
 
 ## 6. Full quality gates
 
@@ -150,3 +165,69 @@ Report concrete evidence: the exact commands, the server's actual output
 (protocol version, responseText values, pass/fail counts), and whether each gate
 passed. If something fails against the live server, that is a finding worth
 reporting — capture it (issue + an e2e assertion) rather than faking a pass.
+
+## Lessons learned (CLI-wrapper migration, June 2026)
+
+Hard-won findings from validating ahpx live against a protocol-0.5.0 host while
+reducing ahpx to a thin CLI wrapper around `@microsoft/agent-host-protocol`.
+
+### Data layer vs. text renderer are two separate fixes
+
+The folded-first-delta bug has **two halves**, and fixing one is not enough:
+
+1. **Data layer** — `TurnController` must rebuild the authoritative response text
+   from chat-state `Turn.responseParts` at turn completion (recovering any
+   folded first delta the host never emitted as a `chat/delta`). JSON/quiet
+   modes and persisted history read this layer, so they can look correct while
+   text mode is still broken.
+2. **Text renderer** — `PromptRenderer.onTurnComplete(responseText)` must
+   actually *display* the authoritative text that wasn't already streamed. If it
+   ignores that argument and prints only streamed deltas, short/folded replies
+   render blank or truncated (ELEPHANT→blank, BANANA→"ANANA") **even though the
+   data layer is correct**.
+
+When validating, assert in **text mode** too — not just `--format json`. A JSON
+pass can hide a renderer regression. The renderer tracks `streamedText` and on
+completion emits only the remainder (`authoritative.startsWith(streamed)`),
+recovering the folded prefix without duplicating already-streamed text.
+
+### Version-bump-before-fix release trap
+
+`0.2.31` was cut **before** the bug fixes landed, so the published version
+advertised a fix it didn't contain — and `--version` itself was separately
+hardcoded (`#87`). Two rules:
+
+- `--version` must read the real `package.json` version (resolved via
+  `import.meta.url` relative to the bundled `dist/bin.js`), never a literal.
+  Test that it **equals** `package.json`'s version, not just that it's semver.
+- **Never cut/publish a release before the fixes merge.** Merge fixes → then
+  bump → then publish. Validate `node dist/bin.js --version` against the live
+  build before trusting a release.
+
+### Model selection: plumbing vs. host gap
+
+`exec -m gpt-5-mini` reported usage for a *different* model. Wire tracing showed
+ahpx sends the correct 0.5.0 shape — `message.model = { id: "gpt-5-mini" }` —
+and `CreateSessionParams` has **no** model field (model is strictly per-message
+in 0.5.0). The host (VS Code Insiders) simply **ignores** the per-message model
+and returns its own default. So:
+
+- This is a **host-side limitation**, not an ahpx plumbing bug. Don't chase it as
+  a client fix — verify on the wire before concluding.
+- The genuine ahpx bug was **precedence on resume**: a persisted session model
+  shadowed an explicit `-m`. Correct order is
+  `opts.model ?? sessionRecord?.model ?? cfg.defaultModel`.
+- When validating model selection, distinguish "did the client send the right
+  request?" (assert on the wire / NDJSON) from "did the host honor it?" (assert
+  on `usage.model`). They can disagree.
+
+### Tunnel resolution must cover health/status, not just connect
+
+`server test`/`connect` resolved `tunnel://<id>` profiles to a `wss://` URL +
+auth headers, but `server status`/`server health` passed the raw `tunnel://` URL
+straight to the health checker — so every tunnel reported `unreachable` with a
+URL/protocol error (`#88`). Any code path that takes a saved connection URL must
+route tunnel profiles through the same resolver (and forward the tunnel auth
+headers). A quick tell: after the fix, the error for a dead tunnel changes from a
+URL-scheme/parse error to a real resolution result (e.g. `Tunnel "..." not
+found.`), proving resolution now runs.
