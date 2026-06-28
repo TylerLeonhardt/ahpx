@@ -1,6 +1,6 @@
 ---
 description: >-
-  ahpx codebase architecture — the 3-layer client, session management,
+  ahpx codebase architecture — the official-client adapter, session management,
   prompting system, config, and the official AHP protocol package. Use when
   implementing features, fixing bugs, or understanding how ahpx works.
 ---
@@ -12,9 +12,10 @@ WebSocket, speaks JSON-RPC 2.0, and manages AI agent sessions with streaming
 responses, tool calls, and permissions.
 
 **700+ tests across 30+ test files.** ~9,600 lines of application TypeScript.
-Protocol types, reducers, and constants come from the official
+Protocol types, reducers, constants — **and now the client, transport, and state
+machinery** — come from the official
 [`@microsoft/agent-host-protocol`](https://www.npmjs.com/package/@microsoft/agent-host-protocol)
-npm package (pinned at `^0.4.0`) — ahpx no longer vendors them.
+npm package (pinned at `^0.5.0`) — ahpx no longer vendors them.
 
 ## Directory structure
 
@@ -25,16 +26,21 @@ src/
 ├── logger.ts               Structured logging to stderr
 ├── completions.ts          Shell completions (bash/zsh/fish)
 │
-├── client/                 Three-layer AHP client
-│   ├── transport.ts        Layer 1: WebSocket I/O
-│   ├── protocol.ts         Layer 2: JSON-RPC 2.0 routing
-│   ├── index.ts            Layer 3: High-level typed API
-│   ├── state.ts            Client-side state mirror
+├── client/                 Thin adapter over the official AHP client
+│   ├── index.ts            AhpClient — EventEmitter facade wrapping the
+│   │                       official async-iterator client (the CLI surface)
+│   ├── ws-transport.ts     WsTransport — `ws`-based AhpTransport with custom
+│   │                       headers (auth / dev-tunnel); the official `/ws`
+│   │                       transport uses the header-less global WebSocket
+│   ├── state.ts            Client-side state mirror (incl. ahp-chat:// chat
+│   │                       state the official AhpStateMirror does not track)
+│   ├── response-text.ts    Folded-first-delta recovery from chat responseParts
+│   ├── file-serving.ts     Reverse-RPC file serving (resourceRead/List)
 │   ├── active-client.ts    Session active client management
 │   ├── reconnect.ts        Auto-reconnect with backoff
 │   ├── session-handle.ts   SessionHandle — per-session convenience wrapper
 │   ├── connection-pool.ts  ConnectionPool — URL-keyed connection reuse
-│   └── __tests__/          Tests for all client layers
+│   └── __tests__/          Adapter + real-WS integration tests
 │
 ├── events/                 Event forwarding (Phase 9)
 │   ├── forwarder.ts        AhpxEvent + EventForwarder interface
@@ -89,101 +95,108 @@ src/
                             (the package discriminates by JSON-RPC method)
 
 # Protocol types, the ActionType enum, reducers (rootReducer, sessionReducer,
-# chatReducer, terminalReducer), notification params, and version constants are
-# all imported from `@microsoft/agent-host-protocol`. The official client,
-# WebSocket transport, and multi-host helpers live under its `/client`, `/ws`,
-# and `/hosts` subpaths (ahpx keeps its own custom 3-layer client).
+# chatReducer, terminalReducer), notification params, version constants, AND the
+# JSON-RPC client/transport/state machinery are all imported from
+# `@microsoft/agent-host-protocol`. The official client, WebSocket transport, and
+# multi-host helpers live under its `/client`, `/ws`, and `/hosts` subpaths. ahpx
+# wraps the official `/client` in a thin EventEmitter adapter (see below).
 
 docs/
 ├── errors.md               Error catalog and troubleshooting
 ├── roadmap.md              Phase-by-phase roadmap and protocol dependencies
 ```
 
-## Three-layer client architecture
+## Client architecture: a thin adapter over the official client
 
-The core client is composed of three independently testable layers:
+ahpx no longer hand-rolls its transport/JSON-RPC/state machinery. `client/index.ts`
+is a **thin `EventEmitter` adapter** that wraps the official async-iterator
+`@microsoft/agent-host-protocol/client` `AhpClient`, preserving the low-level
+surface every CLI consumer (bin.ts, `TurnController`, connect-helper, watcher,
+health, auth, persistence) already depends on.
 
 ```
-┌──────────────────────────────────────────────┐
-│  AhpClient (client/index.ts)                 │
-│  High-level API: connect, createSession,     │
-│  dispatchAction, subscribe, state mirror     │
-├──────────────────────────────────────────────┤
-│  ProtocolLayer (client/protocol.ts)          │
-│  JSON-RPC 2.0: request/response correlation, │
-│  notifications, timeouts, error mapping      │
-├──────────────────────────────────────────────┤
-│  Transport (client/transport.ts)             │
-│  WebSocket: connect, send, close, reconnect  │
-│  Events: open, close, error, message         │
-└──────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  AhpClient (client/index.ts) — EventEmitter facade        │
+│  connect / createSession / subscribe / dispatchAction /   │
+│  on('action'|'notification'|'disconnected') / state / …   │
+│                                                            │
+│  bridges the official client's async iterators:           │
+│   • events()        → 'action' / 'notification' events    │
+│   • stateChanges()  → 'disconnected' event                │
+│   • setServerRequestHandler() → FileServingHandler        │
+├──────────────────────────────────────────────────────────┤
+│  official @microsoft/agent-host-protocol/client AhpClient │
+│  JSON-RPC 2.0, request/notify/subscribe/dispatch,         │
+│  per-URI subscriptions + top-level events() fan-in        │
+├──────────────────────────────────────────────────────────┤
+│  WsTransport (client/ws-transport.ts) — AhpTransport      │
+│  `ws`-based socket with custom headers (auth / tunnel)    │
+└──────────────────────────────────────────────────────────┘
 ```
 
-### Layer 1: Transport (`client/transport.ts`)
+### What the adapter adds (gaps the official client does not cover)
 
-Manages the raw WebSocket connection. Extends `EventEmitter`.
+The official client owns the wire protocol; ahpx keeps **only** the pieces it
+genuinely needs on top:
 
-- `connect(url, options?)` — opens WebSocket with configurable timeout
-  (default 10s), custom headers, and race between open/error/timeout
-- `send(data)` — JSON-serializes and sends, throws if disconnected
-- `close()` — tears down the connection
-- Events: `open`, `close(code, reason)`, `error(err)`, `message(parsed)`
+1. **`WsTransport` (`client/ws-transport.ts`)** — implements the official
+   `AhpTransport` interface over the `ws` package so the WebSocket handshake can
+   carry custom **headers** (`Authorization`, dev-tunnel auth). The official
+   `/ws` `WebSocketTransport` uses the header-less global `WebSocket`. Static
+   `connect(url, { headers, connectTimeout })` resolves on open, rejects with the
+   official `TransportError` on timeout/error; `send`/`recv`/`close` follow the
+   transport contract (clean close drains `recv()` waiters with `null`).
+2. **Chat state in `StateMirror` (`client/state.ts`)** — the official
+   `AhpStateMirror` tracks sessions/terminals/changesets but **not** `ahp-chat://`
+   chat state (turns / activeTurn / responseParts). The folded-first-delta
+   recovery depends on chat state, so ahpx keeps its own `StateMirror`.
+3. **EventEmitter ergonomics** — `startStreams()` drains the official
+   `events()` and `stateChanges()` async iterators and re-emits them as the
+   `action` / `notification` / `disconnected` events consumers expect. The
+   `events()` drain loop is started **before** `initialize()` so no inbound
+   action is missed (initialize snapshots are applied from the result).
+4. **Reverse-RPC file serving (`client/file-serving.ts`)** — bridges the official
+   `setServerRequestHandler` to `FileServingHandler.handleServerRequest(method,
+   params)`, which serves allowed `file://` customizations back to the server
+   (`resourceRead`/`resourceList`), throwing the official `RpcError`
+   (`-32601` unknown method, `-32008` access denied) on failure.
 
-All incoming messages are JSON-parsed before being emitted.
+`RpcError` / `RpcTimeoutError` are re-exported from `client/index.ts` (sourced
+from the official `/client`) so existing imports keep working.
 
-### Layer 2: Protocol (`client/protocol.ts`)
-
-JSON-RPC 2.0 message correlation on top of Transport. Extends `EventEmitter`.
-
-- `request<M>(method, params, timeout?)` — sends request with auto-incremented
-  ID, returns typed promise, default 30s timeout
-- `notify(method, params)` — sends notification (no ID, fire-and-forget)
-- `cancelAll(reason)` — rejects all pending requests (used on disconnect)
-- Events: `action(envelope)`, `notification(notification)`
-
-Handles response routing: messages with `id` + `result`/`error` resolve pending
-promises; messages with `method` but no `id` are classified as `action` or
-`notification` events.
-
-Error classes: `RpcError` (with `code` and `data`), `RpcTimeoutError`.
-
-### Layer 3: AhpClient (`client/index.ts`)
-
-High-level typed API. Extends `EventEmitter`.
+### AhpClient surface (`client/index.ts`)
 
 ```typescript
-class AhpClient {
-  async connect(url: string): Promise<IInitializeResult>
+class AhpClient extends EventEmitter {
+  async connect(url, { headers?, connectTimeout? }?): Promise<InitializeResult>
   async disconnect(): Promise<void>
 
-  // Commands
-  async createSession(uri, provider?, model?, workingDir?): Promise<null>
+  // Commands → delegate to official.request(...) / official.dispatch(...)
+  async createSession(uri, provider?, model?, workingDir?, config?): Promise<null>
   async disposeSession(uri): Promise<null>
-  async listSessions(): Promise<IListSessionsResult>
-  async subscribe(uri): Promise<ISubscribeResult>
+  async listSessions(): Promise<ListSessionsResult>
+  async subscribe(uri): Promise<SubscribeResult>   // applies snapshot to mirror
   unsubscribe(uri): void
-  async fetchTurns(uri, before?, limit?): Promise<IFetchTurnsResult>
-  async fetchContent(uri): Promise<IFetchContentResult>
-  async browseDirectory(uri?): Promise<IBrowseDirectoryResult>
+  async fetchTurns(uri, before?, limit?): Promise<FetchTurnsResult>
+  async resourceRead/Write/List/Copy/Delete/Move(...): Promise<...>
   async authenticate(resource, token): Promise<void>
+  dispatchAction(channel, action): void            // official.dispatch (write-ahead)
 
-  // Actions
-  dispatchAction(action: IStateAction): void
-
-  // State
   get state(): StateMirror
   get connected(): boolean
   get clientId(): string
+  get fileServing(): FileServingHandler
 }
 ```
 
 On `connect()`:
-1. Creates Transport and ProtocolLayer
-2. Wires events: protocol actions → state mirror + client events
-3. Calls `transport.connect(url)`
-4. Sends `initialize` request
-5. Applies initial snapshots to state mirror
-6. Returns `IInitializeResult`
+1. `WsTransport.connect(url, { headers, connectTimeout })` opens the socket
+2. Constructs the official `AhpClient(transport, { requestTimeoutMs })`
+3. Installs the reverse-RPC handler via `setServerRequestHandler`
+4. `official.connect()` starts the receive loop; `startStreams()` begins draining
+   `events()` / `stateChanges()` **before** initialize
+5. `official.initialize(...)` handshake; applies returned snapshots to the mirror
+6. Emits `connected`, returns `InitializeResult`
 
 ### State mirror (`client/state.ts`)
 
@@ -605,8 +618,9 @@ entrypoint:
 
 Subpath entrypoints provide the official client (`/client` — `AhpClient`,
 `AhpStateMirror`, `InMemoryTransport`), the WebSocket transport (`/ws`), and
-multi-host helpers (`/hosts`). ahpx currently keeps its own custom 3-layer client
-and only consumes types/reducers/constants from the package.
+multi-host helpers (`/hosts`). ahpx **wraps the official `/client`** in a thin
+EventEmitter adapter (see "Client architecture" above) and also consumes
+types/reducers/constants from the package.
 
 ### ahpx-local compat shims
 
@@ -616,7 +630,8 @@ locally:
 - `src/notifications.ts` — the package's notification `*Params` carry no `type`
   field (it discriminates by JSON-RPC method). ahpx defines a `NotificationType`
   enum and `*Notification` types (params intersected with `{ type }`), and the
-  ProtocolLayer injects the method as `type` so consumers keep a `type`-switch.
+  adapter's `toNotification()` injects the method as `type` so consumers keep a
+  `type`-switch.
 - `src/customizations/types.ts` — `CustomizationRef`/`Icon` for workspace
   discovery, plus `toClientCustomization()` which maps a discovered file to the
   official `ClientPluginCustomization` (Open Plugins container) wire shape before
@@ -870,25 +885,24 @@ cloud   wss://cloud:8082       healthy      45ms      0         copilot
 
 By default, unreachable servers are hidden unless `--all` is passed.
 
-## Library exports (`src/index.ts`)
+## Internal client modules (no public SDK)
 
-ahpx is both a CLI tool (`src/bin.ts`) and an npm library (`src/index.ts`).
-The library exports:
+ahpx is **CLI-only** — there is no `src/index.ts` and no published library surface
+(removed in v0.3.0). The modules under `src/client/*` are internal to the CLI and
+are not an exported SDK. The notable internal building blocks:
 
-| Category | Exports |
+| Category | Modules |
 |----------|---------|
-| Core client | `AhpClient`, `AhpClientOptions`, `AhpClientEvents`, `OpenSessionOptions` |
-| Session handle | `SessionHandle`, `SessionHandleEvents`, `PromptOptions`, `SessionTurnResult` |
-| Session persistence | `SessionStore`, `SessionPersistence`, `SessionRecord`, `SessionFilter`, `TurnSummary`, `ResumeOutcome`, `SyncResult`, `buildTurnSummary`, `truncatePreview` |
-| Connection pool | `ConnectionPool`, `ConnectionPoolOptions` |
-| Transport | `Transport`, `TransportOptions` |
-| Protocol layer | `ProtocolLayer`, `ProtocolLayerOptions`, `RpcError`, `RpcTimeoutError` |
-| State mirror | `StateMirror` |
-| Event forwarding | `EventForwarder`, `AhpxEvent`, `WebhookForwarder`, `WebSocketForwarder`, `ForwardingFormatter` |
-| Fleet management | `HealthChecker`, `ServerHealth`, `FleetManager`, `FleetManagerOptions`, `RoutingStrategy`, `ServerRequirements` |
-| Connection config | `ConnectionProfile` |
-| Auth | `AuthHandler`, `AuthHandlerOptions` |
-| Protocol types | State types (`RootState`, `SessionState`, `ChatState`, …), action types, command result types |
+| Client adapter | `AhpClient` (`client/index.ts`) — EventEmitter facade over the official `/client` |
+| WS transport | `WsTransport` (`client/ws-transport.ts`) — `ws`-based `AhpTransport` with headers |
+| State mirror | `StateMirror` (`client/state.ts`) — incl. `ahp-chat://` chat state |
+| File serving | `FileServingHandler` (`client/file-serving.ts`) — reverse-RPC `resourceRead`/`List` |
+| RPC errors | `RpcError`, `RpcTimeoutError` — re-exported from the official `/client` |
+| Session persistence | `SessionStore`, `SessionPersistence`, `SessionRecord` (`session/*`) |
+| Event forwarding | `EventForwarder`, `WebhookForwarder`, `WebSocketForwarder`, `ForwardingFormatter` |
+| Fleet management | `HealthChecker`, `FleetManager`, `RoutingStrategy` |
+| Auth | `AuthHandler` |
+| Protocol types | imported from `@microsoft/agent-host-protocol` (`RootState`, `SessionState`, `ChatState`, action/command types) |
 
 ## Build and test
 

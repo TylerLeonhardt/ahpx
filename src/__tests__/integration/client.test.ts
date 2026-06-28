@@ -503,11 +503,16 @@ describe("AhpClient integration", () => {
 
 			// Start a request that will never resolve
 			const pending = client.listSessions();
+			// Attach the rejection expectation *before* disconnecting so the
+			// handler is registered when shutdown rejects the pending request
+			// with ClientClosedError (otherwise it surfaces as a transient
+			// unhandled rejection).
+			const assertion = expect(pending).rejects.toThrow();
 
 			// Disconnect while request is pending
 			await client.disconnect();
 
-			await expect(pending).rejects.toThrow();
+			await assertion;
 		});
 	});
 

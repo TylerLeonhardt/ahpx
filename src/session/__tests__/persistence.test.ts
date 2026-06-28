@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AhpClient } from "../../client/index.js";
-import { RpcError } from "../../client/protocol.js";
+import { RpcError } from "../../client/index.js";
 import { SessionPersistence } from "../persistence.js";
 import type { SessionRecord } from "../store.js";
 import { SessionStore } from "../store.js";
