@@ -100,8 +100,11 @@ function resolveTurnResponse(turn: TurnSummary): { text: string; legacy: boolean
 }
 
 /** Resolve the full prompt text of a locally-persisted turn (falls back to the preview). */
-function resolveTurnPrompt(turn: TurnSummary): string {
-	return typeof turn.prompt === "string" ? turn.prompt : turn.userMessage;
+function resolveTurnPrompt(turn: TurnSummary): { text: string; legacy: boolean } {
+	if (typeof turn.prompt === "string") return { text: turn.prompt, legacy: false };
+	// Pre-0.4.0 records only kept the ≤200-char userMessage preview; flag it so we
+	// never present a silently-truncated prompt as the verbatim full text.
+	return { text: turn.userMessage, legacy: true };
 }
 
 // ── Global options (parsed before Commander routes to a subcommand) ──────────
@@ -1699,6 +1702,8 @@ function formatTurnEntry(
 		timestamp?: string;
 		/** Complete prompt text (full mode). */
 		promptFull?: string;
+		/** True when the full prompt could not be recovered (pre-0.4.0 record). */
+		promptLegacy?: boolean;
 		/** Complete response text (full mode). */
 		responseFull?: string;
 		/** True when the full response could not be recovered (pre-0.4.0 record). */
@@ -1715,6 +1720,9 @@ function formatTurnEntry(
 		// Full transcript: show the complete prompt + response, unwrapped, so the
 		// durable local record can be read back verbatim even after session close.
 		console.log(`    ${pc.bold("User:")}`);
+		if (entry.promptLegacy) {
+			console.log(`      ${pc.yellow(LEGACY_NO_FULL_TEXT)}`);
+		}
 		console.log(indentBlock(entry.promptFull ?? entry.userMessage));
 		console.log(`    ${pc.bold("Response:")}`);
 		if (entry.responseLegacy) {
@@ -1880,12 +1888,14 @@ function showLocalHistory(record: SessionRecord, limit: number, globalOpts: Glob
 
 			for (const turn of display) {
 				const resolved = resolveTurnResponse(turn);
+				const resolvedPrompt = resolveTurnPrompt(turn);
 				formatTurnEntry(
 					{
 						id: turn.turnId,
 						userMessage: turn.userMessage,
 						responsePreview: turn.responsePreview,
-						promptFull: resolveTurnPrompt(turn),
+						promptFull: resolvedPrompt.text,
+						promptLegacy: resolvedPrompt.legacy,
 						responseFull: resolved.text,
 						responseLegacy: resolved.legacy,
 						toolCalls: turn.toolCallCount,
@@ -1907,13 +1917,15 @@ function showLocalHistory(record: SessionRecord, limit: number, globalOpts: Glob
 			sessionId: record.id,
 			turns: display.map((t) => {
 				const resolved = resolveTurnResponse(t);
+				const resolvedPrompt = resolveTurnPrompt(t);
 				return {
 					turnId: t.turnId,
 					userMessage: t.userMessage,
 					responsePreview: t.responsePreview,
-					// Full transcript fields (0.4.0+). `response` is null for turns
-					// persisted before 0.4.0 (only the preview was recorded).
-					prompt: resolveTurnPrompt(t),
+					// Full transcript fields (0.4.0+). `prompt`/`response` are null for
+					// turns persisted before 0.4.0 (only the previews were recorded), so a
+					// truncated preview is never presented as the verbatim full text.
+					prompt: resolvedPrompt.legacy ? null : resolvedPrompt.text,
 					response: resolved.legacy ? null : resolved.text,
 					toolCallCount: t.toolCallCount,
 					tokenUsage: t.tokenUsage,
@@ -2273,8 +2285,13 @@ function buildMarkdownTranscript(record: SessionRecord): string {
 
 	turns.forEach((turn, i) => {
 		const resolved = resolveTurnResponse(turn);
+		const resolvedPrompt = resolveTurnPrompt(turn);
 		lines.push(`## Turn ${i + 1} — ${turn.timestamp}`, "");
-		lines.push("**Prompt:**", "", resolveTurnPrompt(turn), "");
+		lines.push("**Prompt:**", "");
+		if (resolvedPrompt.legacy) {
+			lines.push(`_${LEGACY_NO_FULL_TEXT}_`, "");
+		}
+		lines.push(resolvedPrompt.text, "");
 		lines.push("**Response:**", "");
 		if (resolved.legacy) {
 			lines.push(`_${LEGACY_NO_FULL_TEXT}_`, "");

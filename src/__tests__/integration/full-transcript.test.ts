@@ -227,9 +227,12 @@ describe("full transcript support (issue #107)", () => {
 			.trim()
 			.split("\n")
 			.filter(Boolean)
-			.map((l) => JSON.parse(l)) as Array<{ turns?: Array<{ response: string | null; responsePreview: string }> }>;
+			.map((l) => JSON.parse(l)) as Array<{
+			turns?: Array<{ response: string | null; prompt: string | null; responsePreview: string }>;
+		}>;
 		const turns = parsed.flatMap((p) => p.turns ?? []);
 		expect(turns[0].response).toBeNull();
+		expect(turns[0].prompt).toBeNull();
 		expect(turns[0].responsePreview).toBe("an old truncated preview");
 	});
 });
