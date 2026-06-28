@@ -2462,7 +2462,10 @@ async function runPrompt(
 			// was silently ignored.)
 			const turnModel = opts.model ?? sessionRecord?.model ?? cfg.defaultModel;
 
-			const permHandler = new PermissionHandler(permMode);
+			// Route the permission handler's human-readable chatter to stderr in
+			// json/quiet modes so stdout stays pure NDJSON / a clean answer
+			// (the [auto-approved]/prompt lines must not pollute the stream).
+			const permHandler = new PermissionHandler(permMode, { format: globalOpts.format });
 			const controller = new TurnController(client, sessionUri, formatter, permHandler, chatUri, turnModel);
 
 			// Set up Ctrl+C handling
