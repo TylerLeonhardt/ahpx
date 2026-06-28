@@ -287,4 +287,21 @@ export class SessionStore {
 		});
 		return records.find((r) => r.name === name);
 	}
+
+	/**
+	 * Find a session by its user-given name across ALL records (active or closed).
+	 *
+	 * Unlike {@link getByNameAndServer}, this does not require a workingDirectory
+	 * or active status — it is used as the fallback when a positional session
+	 * target is a name rather than an id (so commands like `close`/`history`
+	 * accept the name the user thinks in). Active sessions are preferred; among
+	 * equal candidates the most recently created wins (records are returned
+	 * newest-first). An optional serverName narrows the search.
+	 */
+	async getByName(name: string, serverName?: string): Promise<SessionRecord | undefined> {
+		const records = await this.list(serverName ? { serverName } : undefined);
+		const matches = records.filter((r) => r.name === name);
+		// Records are sorted createdAt-descending; prefer an active match, else the newest.
+		return matches.find((r) => r.status === "active") ?? matches[0];
+	}
 }
