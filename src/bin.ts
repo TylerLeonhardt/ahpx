@@ -16,6 +16,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { type ActionEnvelope, ActionType } from "@microsoft/agent-host-protocol";
@@ -44,6 +45,7 @@ import { ForwardingFormatter } from "./events/forwarding-formatter.js";
 import { WebhookForwarder } from "./events/webhook-forwarder.js";
 import { WebSocketForwarder } from "./events/ws-forwarder.js";
 import { HealthChecker } from "./fleet/health.js";
+import type { ServerHealth } from "./fleet/health.js";
 import { setVerbose } from "./logger.js";
 import { createFormatter, startSpinner } from "./output/index.js";
 import type { OutputFormat, OutputFormatter } from "./output/index.js";
@@ -199,6 +201,24 @@ function spinnersEnabled(globalOpts: GlobalOpts): boolean {
 
 // ── Program ──────────────────────────────────────────────────────────────────
 
+/**
+ * Read the package version from package.json at runtime.
+ *
+ * Resolved relative to this module so it works both from the bundled
+ * `dist/bin.js` (where `../package.json` is the published package root) and from
+ * `src/bin.ts` during development. Falls back to `0.0.0` if unreadable.
+ */
+function readPackageVersion(): string {
+	try {
+		const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+			version?: string;
+		};
+		return pkg.version ?? "0.0.0";
+	} catch {
+		return "0.0.0";
+	}
+}
+
 const program = new Command()
 	.name("ahpx")
 	.description(
@@ -217,7 +237,7 @@ Examples:
   ahpx --format json exec "summarize this repo"
   echo "review changes" | ahpx`,
 	)
-	.version("0.1.0")
+	.version(readPackageVersion())
 	.option("--format <format>", "Output format: text, json, or quiet", "text")
 	.option("--json-strict", "Suppress non-JSON stderr output (only with --format json)")
 	.option("-v, --verbose", "Enable debug logging to stderr");
@@ -292,6 +312,44 @@ async function resolveTunnelTarget(
 	const githubToken = resolveGitHubToken();
 	const { wssUrl, accessToken } = await resolveTunnelUrl(githubToken, tunnelId, clusterId);
 	return { url: wssUrl, token: undefined, headers: buildTunnelHeaders(accessToken) };
+}
+
+/**
+ * Health-check a single saved connection, resolving tunnel profiles first.
+ *
+ * `server test`/`connect` route through `resolveTarget`, but health/status used
+ * to pass the saved `url` (which is `tunnel://<id>` for tunnel profiles) straight
+ * to the checker, so tunnels always reported "unreachable". This resolves the
+ * tunnel to its `wss://` URL + auth headers before probing, and reports a
+ * resolution failure as `unreachable` (rather than aborting the whole command).
+ * The returned `url` is kept as the saved form for display consistency. (#88)
+ */
+async function healthCheckConnection(
+	checker: HealthChecker,
+	conn: { name: string; url: string; token?: string; tunnelId?: string; tunnelClusterId?: string },
+	timeout: number,
+): Promise<ServerHealth> {
+	try {
+		const resolved = await resolveConnectionProfile(conn);
+		const health = await checker.check(resolved.url, conn.name, {
+			timeout,
+			token: resolved.token,
+			headers: resolved.headers,
+		});
+		health.url = conn.url;
+		return health;
+	} catch (err) {
+		return {
+			name: conn.name,
+			url: conn.url,
+			status: "unreachable",
+			latencyMs: 0,
+			agents: [],
+			activeSessions: 0,
+			checkedAt: new Date().toISOString(),
+			error: err instanceof Error ? err.message : String(err),
+		};
+	}
 }
 
 /** Print server information after a successful connect (text mode). */
@@ -657,7 +715,9 @@ server
 
 			const spinner = startSpinner(`Checking ${connections.length} server(s)...`, spinnersEnabled(globalOpts));
 			const checker = new HealthChecker({ timeout: Number.parseInt(opts.timeout, 10) });
-			const results = await checker.checkAll(connections);
+			const results = await Promise.all(
+				connections.map((conn) => healthCheckConnection(checker, conn, Number.parseInt(opts.timeout, 10))),
+			);
 			spinner.stop();
 
 			const displayed = opts.all ? results : results.filter((r) => r.status !== "unreachable");
@@ -727,7 +787,7 @@ server
 
 			const spinner = startSpinner(`Checking ${name}...`, spinnersEnabled(globalOpts));
 			const checker = new HealthChecker({ timeout: Number.parseInt(opts.timeout, 10) });
-			const health = await checker.check(conn.url, conn.name);
+			const health = await healthCheckConnection(checker, conn, Number.parseInt(opts.timeout, 10));
 			spinner.stop();
 
 			outputResult(
@@ -2395,9 +2455,12 @@ async function runPrompt(
 			// that keep chat on the session channel.
 			const chatUri = await resolveChatChannel(client, sessionUri);
 
-			// Model selection moved to per-message in protocol 0.5.0. Resolve from
-			// the persisted session record, explicit option, then config default.
-			const turnModel = sessionRecord?.model ?? opts.model ?? cfg.defaultModel;
+			// Model selection moved to per-message in protocol 0.5.0. An explicit
+			// `-m`/`--model` flag takes precedence, then the persisted session
+			// record's model, then the config default. (Previously the persisted
+			// model shadowed an explicit `-m` on resume, so the requested model
+			// was silently ignored.)
+			const turnModel = opts.model ?? sessionRecord?.model ?? cfg.defaultModel;
 
 			const permHandler = new PermissionHandler(permMode);
 			const controller = new TurnController(client, sessionUri, formatter, permHandler, chatUri, turnModel);

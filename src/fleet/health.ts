@@ -28,10 +28,15 @@ export class HealthChecker {
 	}
 
 	/** Check a single server's health. */
-	async check(url: string, name: string, options?: { timeout?: number; token?: string }): Promise<ServerHealth> {
+	async check(
+		url: string,
+		name: string,
+		options?: { timeout?: number; token?: string; headers?: Record<string, string> },
+	): Promise<ServerHealth> {
 		const start = performance.now();
 		const client = new AhpClient({
 			connectTimeout: options?.timeout ?? this._defaultTimeout,
+			...(options?.headers ? { headers: options.headers } : {}),
 		});
 
 		try {
