@@ -53,7 +53,7 @@ import { PermissionHandler } from "./permissions/index.js";
 import type { PermissionMode } from "./permissions/index.js";
 import { TurnController } from "./prompt/index.js";
 import { SessionPersistence, SessionStore, findGitRoot, resolveSession, withConnection } from "./session/index.js";
-import type { SessionRecord } from "./session/index.js";
+import type { SessionRecord, TurnSummary } from "./session/index.js";
 import { ensureFileUri } from "./uri.js";
 import { SessionWatcher } from "./watch/index.js";
 
@@ -81,6 +81,30 @@ function turnToolCallCount(turn: Turn): number {
 		}
 	}
 	return count;
+}
+
+/** Note shown for turns persisted before 0.4.0 (full text was not recorded). */
+const LEGACY_NO_FULL_TEXT = "(full text not recorded — pre-0.4.0 session)";
+
+/**
+ * Resolve the full response text of a locally-persisted turn.
+ *
+ * Turns written by 0.4.0+ carry the complete `response`. Records written by
+ * earlier versions only have the 200-char `responsePreview`; for those we fall
+ * back to the preview and flag the turn as legacy so callers can surface the
+ * "full text not recorded" note instead of pretending the preview is complete.
+ */
+function resolveTurnResponse(turn: TurnSummary): { text: string; legacy: boolean } {
+	if (typeof turn.response === "string") return { text: turn.response, legacy: false };
+	return { text: turn.responsePreview, legacy: true };
+}
+
+/** Resolve the full prompt text of a locally-persisted turn (falls back to the preview). */
+function resolveTurnPrompt(turn: TurnSummary): { text: string; legacy: boolean } {
+	if (typeof turn.prompt === "string") return { text: turn.prompt, legacy: false };
+	// Pre-0.4.0 records only kept the ≤200-char userMessage preview; flag it so we
+	// never present a silently-truncated prompt as the verbatim full text.
+	return { text: turn.userMessage, legacy: true };
 }
 
 // ── Global options (parsed before Commander routes to a subcommand) ──────────
@@ -1668,22 +1692,48 @@ session
 // ── session history ──────────────────────────────────────────────────────────
 
 /** Format a turn for text output (shared by server and local history). */
-function formatTurnEntry(entry: {
-	id: string;
-	userMessage: string;
-	responsePreview: string;
-	toolCalls: number;
-	usage?: { inputTokens?: number; outputTokens?: number; model?: string } | null;
-	timestamp?: string;
-}): void {
-	const userMsg = truncate(entry.userMessage, 80);
-	const responseMsg = truncate(entry.responsePreview, 80);
+function formatTurnEntry(
+	entry: {
+		id: string;
+		userMessage: string;
+		responsePreview: string;
+		toolCalls: number;
+		usage?: { inputTokens?: number; outputTokens?: number; model?: string } | null;
+		timestamp?: string;
+		/** Complete prompt text (full mode). */
+		promptFull?: string;
+		/** True when the full prompt could not be recovered (pre-0.4.0 record). */
+		promptLegacy?: boolean;
+		/** Complete response text (full mode). */
+		responseFull?: string;
+		/** True when the full response could not be recovered (pre-0.4.0 record). */
+		responseLegacy?: boolean;
+	},
+	full = false,
+): void {
 	const usageStr = entry.usage ? `${entry.usage.inputTokens ?? "?"}→${entry.usage.outputTokens ?? "?"}t` : "";
 	const timeStr = entry.timestamp ? pc.dim(` (${formatAge(entry.timestamp)})`) : "";
 
 	console.log(pc.bold(pc.cyan(`  Turn ${entry.id.slice(0, 8)}`)) + timeStr);
-	console.log(`    ${pc.bold("User:")} ${userMsg}`);
-	console.log(`    ${pc.bold("Response:")} ${responseMsg}`);
+
+	if (full) {
+		// Full transcript: show the complete prompt + response, unwrapped, so the
+		// durable local record can be read back verbatim even after session close.
+		console.log(`    ${pc.bold("User:")}`);
+		if (entry.promptLegacy) {
+			console.log(`      ${pc.yellow(LEGACY_NO_FULL_TEXT)}`);
+		}
+		console.log(indentBlock(entry.promptFull ?? entry.userMessage));
+		console.log(`    ${pc.bold("Response:")}`);
+		if (entry.responseLegacy) {
+			console.log(`      ${pc.yellow(LEGACY_NO_FULL_TEXT)}`);
+		}
+		console.log(indentBlock(entry.responseFull ?? entry.responsePreview));
+	} else {
+		console.log(`    ${pc.bold("User:")} ${truncate(entry.userMessage, 80)}`);
+		console.log(`    ${pc.bold("Response:")} ${truncate(entry.responsePreview, 80)}`);
+	}
+
 	if (entry.toolCalls > 0) {
 		console.log(`    ${pc.bold("Tool calls:")} ${entry.toolCalls}`);
 	}
@@ -1696,6 +1746,14 @@ function formatTurnEntry(entry: {
 	console.log();
 }
 
+/** Indent a (possibly multi-line) block of text by six spaces for readable full output. */
+function indentBlock(text: string): string {
+	return text
+		.split("\n")
+		.map((line) => `      ${line}`)
+		.join("\n");
+}
+
 session
 	.command("history")
 	.description("Show turn history for a session")
@@ -1705,10 +1763,11 @@ session
 	.option("-l, --limit <n>", "Maximum number of turns to show", "10")
 	.option("-t, --timeout <ms>", "Connection timeout in milliseconds", "10000")
 	.option("--local", "Show only locally-cached turn history (no server connection)")
+	.option("--full", "Show the complete prompt and response of every turn (durable local record)")
 	.action(
 		async (
 			id: string | undefined,
-			opts: { name?: string; server?: string; limit: string; timeout: string; local?: boolean },
+			opts: { name?: string; server?: string; limit: string; timeout: string; local?: boolean; full?: boolean },
 			cmd: Command,
 		) => {
 			const globalOpts = parseGlobalOpts(cmd);
@@ -1717,22 +1776,23 @@ session
 			try {
 				const record = await resolveSessionRecord(id, opts);
 				const limit = Number.parseInt(opts.limit, 10);
+				const full = opts.full ?? false;
 
 				// --local flag: show only locally-cached turns
 				if (opts.local) {
-					showLocalHistory(record, limit, globalOpts);
+					showLocalHistory(record, limit, globalOpts, full);
 					return;
 				}
 
 				// The local record is the DURABLE source of truth for turn history:
-				// each completed turn is persisted locally (prompt, response preview,
+				// each completed turn is persisted locally (prompt, full response,
 				// tool-call count, token usage, timestamp). Prefer it so history stays
 				// useful even after the session is closed/disposed on the host — and so
 				// it never silently prints empty when turns actually happened. (As of
 				// protocol 0.5.0 turns live on the chat channel, so fetching from the
 				// session URI returns empty once the session is gone.)
 				if ((record.turns?.length ?? 0) > 0) {
-					showLocalHistory(record, limit, globalOpts);
+					showLocalHistory(record, limit, globalOpts, full);
 					return;
 				}
 
@@ -1764,13 +1824,19 @@ session
 									console.log();
 
 									for (const turn of result.turns) {
-										formatTurnEntry({
-											id: turn.id,
-											userMessage: turn.message.text,
-											responsePreview: turnResponseText(turn) || "(no response)",
-											toolCalls: turnToolCallCount(turn),
-											usage: turn.usage,
-										});
+										const responseFull = turnResponseText(turn) || "(no response)";
+										formatTurnEntry(
+											{
+												id: turn.id,
+												userMessage: turn.message.text,
+												responsePreview: responseFull,
+												responseFull,
+												promptFull: turn.message.text,
+												toolCalls: turnToolCallCount(turn),
+												usage: turn.usage,
+											},
+											full,
+										);
 									}
 								},
 								{
@@ -1793,7 +1859,7 @@ session
 					if (globalOpts.format === "text") {
 						console.error(pc.yellow("Server unavailable. Showing locally-cached history.\n"));
 					}
-					showLocalHistory(record, limit, globalOpts);
+					showLocalHistory(record, limit, globalOpts, full);
 				}
 			} catch (err) {
 				handleError(err, globalOpts);
@@ -1802,7 +1868,7 @@ session
 	);
 
 /** Display locally-cached turn history from a session record. */
-function showLocalHistory(record: SessionRecord, limit: number, globalOpts: GlobalOpts): void {
+function showLocalHistory(record: SessionRecord, limit: number, globalOpts: GlobalOpts, full = false): void {
 	const turns = record.turns ?? [];
 	const display = turns.slice(-limit);
 
@@ -1821,30 +1887,52 @@ function showLocalHistory(record: SessionRecord, limit: number, globalOpts: Glob
 			console.log();
 
 			for (const turn of display) {
-				formatTurnEntry({
-					id: turn.turnId,
-					userMessage: turn.userMessage,
-					responsePreview: turn.responsePreview,
-					toolCalls: turn.toolCallCount,
-					usage: turn.tokenUsage
-						? { inputTokens: turn.tokenUsage.input, outputTokens: turn.tokenUsage.output, model: turn.tokenUsage.model }
-						: undefined,
-					timestamp: turn.timestamp,
-				});
+				const resolved = resolveTurnResponse(turn);
+				const resolvedPrompt = resolveTurnPrompt(turn);
+				formatTurnEntry(
+					{
+						id: turn.turnId,
+						userMessage: turn.userMessage,
+						responsePreview: turn.responsePreview,
+						promptFull: resolvedPrompt.text,
+						promptLegacy: resolvedPrompt.legacy,
+						responseFull: resolved.text,
+						responseLegacy: resolved.legacy,
+						toolCalls: turn.toolCallCount,
+						usage: turn.tokenUsage
+							? {
+									inputTokens: turn.tokenUsage.input,
+									outputTokens: turn.tokenUsage.output,
+									model: turn.tokenUsage.model,
+								}
+							: undefined,
+						timestamp: turn.timestamp,
+					},
+					full,
+				);
 			}
 		},
 		{
 			source: "local",
 			sessionId: record.id,
-			turns: display.map((t) => ({
-				turnId: t.turnId,
-				userMessage: t.userMessage,
-				responsePreview: t.responsePreview,
-				toolCallCount: t.toolCallCount,
-				tokenUsage: t.tokenUsage,
-				state: t.state,
-				timestamp: t.timestamp,
-			})),
+			turns: display.map((t) => {
+				const resolved = resolveTurnResponse(t);
+				const resolvedPrompt = resolveTurnPrompt(t);
+				return {
+					turnId: t.turnId,
+					userMessage: t.userMessage,
+					responsePreview: t.responsePreview,
+					// Full transcript fields (0.4.0+). `prompt`/`response` are null for
+					// turns persisted before 0.4.0 (only the previews were recorded), so a
+					// truncated preview is never presented as the verbatim full text.
+					prompt: resolvedPrompt.legacy ? null : resolvedPrompt.text,
+					response: resolved.legacy ? null : resolved.text,
+					toolCallCount: t.toolCallCount,
+					tokenUsage: t.tokenUsage,
+					state: t.state,
+					timestamp: t.timestamp,
+				};
+			}),
 		},
 	);
 }
@@ -2171,35 +2259,110 @@ sessionCustomization
 
 // ── session export / import ─────────────────────────────────────────────────
 
+/** Render a session record's full turn history as a human-readable markdown transcript. */
+function buildMarkdownTranscript(record: SessionRecord): string {
+	const turns = record.turns ?? [];
+	const title = record.name ? `${record.name} (${record.id.slice(0, 8)})` : record.id;
+	const lines: string[] = [];
+
+	lines.push(`# Session Transcript: ${title}`, "");
+	lines.push(`- **Session ID:** ${record.id}`);
+	if (record.name) lines.push(`- **Name:** ${record.name}`);
+	if (record.title) lines.push(`- **Title:** ${record.title}`);
+	lines.push(`- **Server:** ${record.serverName}`);
+	lines.push(`- **Provider:** ${record.provider}`);
+	if (record.model) lines.push(`- **Model:** ${record.model}`);
+	lines.push(`- **Status:** ${record.status}`);
+	lines.push(`- **Created:** ${record.createdAt}`);
+	if (record.closedAt) lines.push(`- **Closed:** ${record.closedAt}`);
+	lines.push(`- **Turns:** ${turns.length}`);
+	lines.push("");
+
+	if (turns.length === 0) {
+		lines.push("_No turns recorded for this session._", "");
+		return `${lines.join("\n")}\n`;
+	}
+
+	turns.forEach((turn, i) => {
+		const resolved = resolveTurnResponse(turn);
+		const resolvedPrompt = resolveTurnPrompt(turn);
+		lines.push(`## Turn ${i + 1} — ${turn.timestamp}`, "");
+		lines.push("**Prompt:**", "");
+		if (resolvedPrompt.legacy) {
+			lines.push(`_${LEGACY_NO_FULL_TEXT}_`, "");
+		}
+		lines.push(resolvedPrompt.text, "");
+		lines.push("**Response:**", "");
+		if (resolved.legacy) {
+			lines.push(`_${LEGACY_NO_FULL_TEXT}_`, "");
+		}
+		lines.push(resolved.text, "");
+
+		const meta: string[] = [];
+		if (turn.toolCallCount > 0) meta.push(`tool calls: ${turn.toolCallCount}`);
+		if (turn.tokenUsage) {
+			meta.push(`tokens: ${turn.tokenUsage.input}→${turn.tokenUsage.output}`);
+			if (turn.tokenUsage.model) meta.push(`model: ${turn.tokenUsage.model}`);
+		}
+		meta.push(`state: ${turn.state}`);
+		lines.push(`_${meta.join(" · ")}_`, "");
+	});
+
+	return `${lines.join("\n")}\n`;
+}
+
 session
 	.command("export")
-	.description("Export a session record (with local turn history) to JSON")
-	.argument("<id>", "Session ID")
-	.option("-o, --output <file>", "Write to file instead of stdout")
-	.action(async (id: string, opts: { output?: string }, cmd: Command) => {
-		const globalOpts = parseGlobalOpts(cmd);
-		applyGlobalOpts(globalOpts);
+	.description("Export a session's full transcript (json record or markdown)")
+	.argument("<id>", "Session ID or name")
+	.option("-n, --name <name>", "Session name (for scoped lookup)")
+	.option("-s, --server <name>", "Server name")
+	.option("--format <format>", "Transcript format: json or markdown", "json")
+	.option("-o, --out <file>", "Write to a file instead of stdout")
+	.option("--output <file>", "Alias for --out")
+	.action(
+		async (
+			id: string,
+			opts: { name?: string; server?: string; format?: string; out?: string; output?: string },
+			cmd: Command,
+		) => {
+			const globalOpts = parseGlobalOpts(cmd);
+			applyGlobalOpts(globalOpts);
 
-		try {
-			const record = await sessionStore.get(id);
-			if (!record) {
-				throw new NoSessionError(`Session "${id}" not found.`);
-			}
+			try {
+				// The `--format` flag collides with the global text/json/quiet option,
+				// so commander stores its value on the program; read the merged value.
+				// markdown is opt-in; anything else (incl. the global "text" default and
+				// explicit "json") exports the re-importable json record.
+				const merged = cmd.optsWithGlobals() as { format?: string };
+				const rawFormat = (merged.format ?? "json").toLowerCase();
+				const format = rawFormat === "markdown" ? "markdown" : "json";
 
-			const exported = JSON.stringify(record, null, "\t");
+				// Accept a NAME positionally (consistent with history/close), resolving
+				// by exact id first and then by name across all records.
+				const record = await resolveSessionRecord(id, opts);
 
-			if (opts.output) {
-				await fs.writeFile(path.resolve(opts.output), `${exported}\n`, "utf-8");
-				if (globalOpts.format === "text") {
-					console.error(pc.green(`Session exported to ${opts.output}`));
+				// The JSON record already carries the complete transcript: each turn
+				// holds the full `prompt` + `response` (0.4.0+), so json export is both a
+				// re-importable record AND a complete structured transcript. Markdown is
+				// the human-readable rendering of the same data.
+				const exported =
+					format === "markdown" ? buildMarkdownTranscript(record) : `${JSON.stringify(record, null, "\t")}\n`;
+
+				const outFile = opts.out ?? opts.output;
+				if (outFile) {
+					await fs.writeFile(path.resolve(outFile), exported, "utf-8");
+					// Confirmation goes to stderr so it never pollutes a json/markdown file
+					// redirect or a `--format json` stdout consumer.
+					console.error(pc.green(`Transcript exported to ${outFile}`));
+				} else {
+					process.stdout.write(exported);
 				}
-			} else {
-				console.log(exported);
+			} catch (err) {
+				handleError(err, globalOpts);
 			}
-		} catch (err) {
-			handleError(err, globalOpts);
-		}
-	});
+		},
+	);
 
 session
 	.command("import")
