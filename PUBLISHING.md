@@ -34,6 +34,15 @@ Pushing the `vX.Y.Z` tag fires the publish workflow. Watch it with:
 gh run watch
 ```
 
+Once the workflow finishes, confirm the new version is live on npm. The package
+is published under the **scoped** name `@tylerl0706/ahpx` — verifying with the
+bare, unscoped `ahpx` returns a 404 and makes a successful release look failed:
+
+```bash
+npm view @tylerl0706/ahpx version   # ✅ scoped name — the published package
+# npm view ahpx version             # ❌ 404 — wrong (unscoped) package
+```
+
 > **Tip:** You can also bump + tag in one step with `npm version <patch|minor|major>`
 > (no `--no-git-tag-version`), which creates the commit and tag for you. Then
 > `git push origin master --follow-tags`. Run `biome check --write package.json`
@@ -49,7 +58,7 @@ The publish workflow triggers on pushed tags matching `v*.*.*` and runs a single
 | **Tag/version assertion** | Strips the leading `v` from the tag and compares it to `package.json`'s `version`. **Fails loudly on mismatch** — the pipeline never publishes a version that disagrees with its tag. |
 | **`npm ci`** | Clean install from the lockfile |
 | **Quality gates** | `typecheck` → `lint` → `build` → unit tests (`vitest run src`, which excludes the `e2e/` suite). A failing gate blocks the publish. |
-| **Already-published guard** | `npm view <pkg>@<version>` — if the version already exists on npm, the job **fails clearly** instead of erroring opaquely on `npm publish`. |
+| **Already-published guard** | `npm view <pkg>@<version>` (where `<pkg>` is the scoped `@tylerl0706/ahpx`, read from `package.json`) — if the version already exists on npm, the job **fails clearly** instead of erroring opaquely on `npm publish`. |
 | **Publish** | `npm publish --access public` — authenticated via OIDC trusted publishers, no `NPM_TOKEN`. |
 | **GitHub Release** | Creates a Release from the tag with auto-generated notes (skipped if one already exists). |
 
@@ -139,7 +148,8 @@ The pipeline aborts before publishing if the tag (minus the `v`) doesn't equal
 
 ### "version already published"
 
-The already-published guard ran `npm view <pkg>@<version>` and found the version
+The already-published guard ran `npm view <pkg>@<version>` (the scoped
+`@tylerl0706/ahpx`) and found the version
 already on npm. Bump to a new version, commit, and tag again — npm versions are
 immutable and cannot be overwritten.
 
