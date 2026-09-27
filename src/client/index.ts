@@ -295,7 +295,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		return this.official!.request("createSession", {
 			channel: sessionUri,
 			provider,
-			workingDirectory,
+			...(workingDirectory ? { workingDirectories: [workingDirectory] } : {}),
 			...(config && Object.keys(config).length > 0 ? { config } : {}),
 			...(activeClient ? { activeClient } : {}),
 		});
@@ -394,14 +394,14 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	}
 
 	/**
-	 * Fetch historical turns for a session.
+	 * Request older historical turns for a chat. The host updates chat state
+	 * before returning; the result itself is intentionally empty.
 	 */
-	async fetchTurns(sessionUri: URI, before?: string, limit?: number): Promise<FetchTurnsResult> {
+	async fetchTurns(chatUri: URI, cursor?: string): Promise<FetchTurnsResult> {
 		this.ensureConnected();
 		return this.official!.request("fetchTurns", {
-			channel: sessionUri,
-			before,
-			limit,
+			channel: chatUri,
+			cursor,
 		});
 	}
 

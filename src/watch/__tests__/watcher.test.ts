@@ -85,6 +85,7 @@ function makeChatState(overrides: Partial<ChatState> = {}): ChatState {
 }
 
 const SESSION_URI = "copilot:/test-session";
+const CHAT_URI = "ahp-chat://default/test-chat";
 
 /** Flush the microtask queue so watch()'s async setup completes. */
 const tick = () => Promise.resolve();
@@ -170,6 +171,32 @@ describe("SessionWatcher", () => {
 		expect(toolStartCall!.args[1]).toBe("Read File");
 	});
 
+	it("streams actions from a distinct default chat channel", async () => {
+		const { client, emitAction, setSessionState } = createMockClient();
+		setSessionState(SESSION_URI, makeSessionState({ defaultChat: CHAT_URI }));
+		const formatter = createMockFormatter();
+		const watcher = new SessionWatcher(client, SESSION_URI, formatter);
+
+		const watchPromise = watcher.watch();
+		await tick();
+
+		emitAction(
+			{
+				type: ActionType.ChatDelta,
+				turnId: "t1",
+				partId: "part-1",
+				content: "Hello from chat",
+			},
+			CHAT_URI,
+		);
+
+		watcher.stop();
+		await watchPromise;
+
+		const deltaCall = formatter.calls.find((c) => c.method === "onDelta");
+		expect(deltaCall?.args[0]).toBe("Hello from chat");
+	});
+
 	it("shows current state when joining mid-turn", async () => {
 		const { client, setSessionState, setChatState } = createMockClient();
 
@@ -186,6 +213,7 @@ describe("SessionWatcher", () => {
 				status: SessionStatus.InProgress,
 				activeTurn: {
 					id: "t1",
+					startedAt: "2025-01-01T00:00:00.000Z",
 					message: message("Hello"),
 					responseParts: [
 						{ kind: ResponsePartKind.Reasoning, id: "reason-1", content: "thinking..." },
@@ -298,6 +326,7 @@ describe("SessionWatcher", () => {
 			turns: [
 				{
 					id: "t1",
+					startedAt: "2025-01-01T00:00:00.000Z",
 					message: message("Hello"),
 					responseParts: [{ kind: ResponsePartKind.Markdown, id: "part-1", content: "Hi there!" }],
 					usage: undefined,
@@ -314,18 +343,24 @@ describe("SessionWatcher", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId: "t2",
 		});
 
 		emitAction({
 			type: ActionType.ChatError,
 			turnId: "t3",
-			error: { errorType: "runtime", message: "Something went wrong" },
+			duration: 0,
+			part: {
+				kind: ResponsePartKind.Error,
+				error: { errorType: "runtime", message: "Something went wrong" },
+			},
 		});
 
 		emitAction({
 			type: ActionType.ChatTurnCancelled,
 			turnId: "t4",
+			duration: 0,
 		});
 
 		watcher.stop();

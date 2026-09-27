@@ -20,7 +20,7 @@ import { WebSocket, WebSocketServer } from "ws";
 
 // ── Protocol constants (mirroring src/protocol) ─────────────────────────
 
-const PROTOCOL_VERSION = "0.5.0";
+const PROTOCOL_VERSION = "0.9.0";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -480,7 +480,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 					sendResponse(ws, req.id, scenario.onFetchTurns(params));
 					return;
 				}
-				sendResponse(ws, req.id, { turns: [], hasMore: false });
+				sendResponse(ws, req.id, {});
 				break;
 			}
 
@@ -665,6 +665,7 @@ export function echoScenario(): MockServerScenario {
 					type: "chat/turnComplete",
 					session: sessionUri,
 					turnId,
+					duration: 0,
 				});
 			}
 		},
@@ -775,6 +776,7 @@ export function toolCallScenario(options?: {
 						type: "chat/turnComplete",
 						session: sessionUri,
 						turnId,
+						duration: 0,
 					});
 				} else if (!approved) {
 					// Tool was denied — send response and complete
@@ -801,6 +803,7 @@ export function toolCallScenario(options?: {
 						type: "chat/turnComplete",
 						session: sessionUri,
 						turnId,
+						duration: 0,
 					});
 				}
 			}

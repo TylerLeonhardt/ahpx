@@ -20,8 +20,13 @@ import { readFileSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { type ActionEnvelope, ActionType } from "@microsoft/agent-host-protocol";
-import { ResponsePartKind, SessionStatus } from "@microsoft/agent-host-protocol";
-import type { SessionActiveClient, Turn } from "@microsoft/agent-host-protocol";
+import {
+	CustomizationEnablementKind,
+	ResponsePartKind,
+	SessionLifecycle,
+	SessionStatus,
+} from "@microsoft/agent-host-protocol";
+import type { CustomizationEnablement, SessionActiveClient, Turn } from "@microsoft/agent-host-protocol";
 import { Command } from "commander";
 import pc from "picocolors";
 import { authenticateUpfront } from "./auth/index.js";
@@ -1433,7 +1438,7 @@ session
 							const sessionStateAfterSub = client.state.getSession(sessionUri);
 							const isProvisional = sessionStateAfterSub?.lifecycle === "creating";
 
-							// Wait for session/ready or session/creationFailed.
+							// Wait for session/ready or session/failed.
 							// Provisional sessions skip this — they stay in "creating" until the first prompt.
 							let ready = true;
 							if (!isProvisional) {
@@ -1460,7 +1465,7 @@ session
 									if (sessionState?.lifecycle === "ready") {
 										clearTimeout(timeout);
 										resolve(true);
-									} else if (sessionState?.lifecycle === "creationFailed") {
+									} else if (sessionState?.lifecycle === SessionLifecycle.Failed) {
 										clearTimeout(timeout);
 										resolve(false);
 									}
@@ -1850,23 +1855,31 @@ session
 							timeout: Number.parseInt(opts.timeout, 10),
 						},
 						async (client) => {
-							const result = await client.fetchTurns(record.sessionUri, undefined, limit);
+							const chatUri = await resolveChatChannel(client, record.sessionUri);
+							await client.fetchTurns(chatUri);
+							let chatState = client.state.getChat(chatUri);
+							while (chatState?.turnsNextCursor && chatState.turns.length < limit) {
+								await client.fetchTurns(chatUri, chatState.turnsNextCursor);
+								chatState = client.state.getChat(chatUri);
+							}
+							const turns = (chatState?.turns ?? []).slice(-limit);
+							const hasMore = Boolean(chatState?.turnsNextCursor);
 
 							outputResult(
 								globalOpts,
 								() => {
-									if (result.turns.length === 0) {
+									if (turns.length === 0) {
 										console.log(pc.dim("No turns in this session."));
 										return;
 									}
 
 									console.log(
 										pc.bold(`History for session ${record.id.slice(0, 8)}`),
-										result.hasMore ? pc.dim(`(showing last ${result.turns.length}, more available)`) : "",
+										hasMore ? pc.dim(`(showing last ${turns.length}, more available)`) : "",
 									);
 									console.log();
 
-									for (const turn of result.turns) {
+									for (const turn of turns) {
 										const responseFull = turnResponseText(turn) || "(no response)";
 										formatTurnEntry(
 											{
@@ -1885,8 +1898,8 @@ session
 								{
 									source: "server",
 									sessionId: record.id,
-									hasMore: result.hasMore,
-									turns: result.turns.map((t) => ({
+									hasMore,
+									turns: turns.map((t) => ({
 										id: t.id,
 										userMessage: t.message.text,
 										responseText: turnResponseText(t),
@@ -2276,11 +2289,20 @@ sessionCustomization
 							);
 						}
 
-						const newEnabled = !("enabled" in target ? target.enabled : true);
+						const currentEnablement = "enablement" in target ? target.enablement : undefined;
+						const currentSessionEnablement = currentEnablement?.find((entry) => entry.kind === "session");
+						const currentEnabled = currentSessionEnablement?.enabled ?? ("enabled" in target ? target.enabled : true);
+						const newEnabled = !currentEnabled;
+						const enablement: CustomizationEnablement[] = currentEnablement
+							? [
+									...currentEnablement.filter((entry) => entry.kind !== "session"),
+									{ kind: CustomizationEnablementKind.Session, enabled: newEnabled },
+								]
+							: [{ kind: CustomizationEnablementKind.Session, enabled: newEnabled }];
 						client.dispatchAction(record.sessionUri, {
 							type: ActionType.SessionCustomizationToggled,
 							id: target.id,
-							enabled: newEnabled,
+							enablement,
 						});
 
 						outputResult(
@@ -2951,7 +2973,7 @@ async function resolveOrCreateSession(
 	return { sessionUri, record: newRecord };
 }
 
-/** Wait for session/ready or session/creationFailed. */
+/** Wait for session/ready or session/failed. */
 function waitForReady(client: AhpClient, sessionUri: string): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		const timeout = setTimeout(() => {
@@ -2984,7 +3006,7 @@ function waitForReady(client: AhpClient, sessionUri: string): Promise<void> {
 		if (sessionState?.lifecycle === "ready") {
 			cleanup();
 			resolve();
-		} else if (sessionState?.lifecycle === "creationFailed") {
+		} else if (sessionState?.lifecycle === SessionLifecycle.Failed) {
 			cleanup();
 			const errMsg = sessionState?.creationError?.message ?? "Unknown error";
 			reject(new AhpxError(`Session creation failed: ${errMsg}`, ExitCode.Error));
@@ -3175,7 +3197,8 @@ program
 			const cfg = await loadConfig({ overrides: buildConfigOverrides(globalOpts) });
 			await withConnection({ server: opts.server, config: cfg }, async (client) => {
 				await client.subscribe(record.sessionUri);
-				const chatState = client.state.getChat(record.sessionUri);
+				const chatUri = await resolveChatChannel(client, record.sessionUri);
+				const chatState = client.state.getChat(chatUri);
 
 				if (!chatState?.activeTurn) {
 					if (globalOpts.format === "text") {
@@ -3184,9 +3207,10 @@ program
 					return;
 				}
 
-				client.dispatchAction(record.sessionUri, {
+				client.dispatchAction(chatUri, {
 					type: ActionType.ChatTurnCancelled,
 					turnId: chatState.activeTurn.id,
+					duration: 0,
 				});
 				outputResult(globalOpts, () => console.log(pc.green("✓"), "Cancellation dispatched."), {
 					cancelled: true,
@@ -3217,8 +3241,11 @@ program
 			const formatter = formatterFromOpts(globalOpts);
 
 			await withConnection({ server: opts.server, config: cfg }, async (client) => {
+				await client.subscribe(record.sessionUri);
+				const chatUri = client.state.getSession(record.sessionUri)?.defaultChat;
 				const watcher = new SessionWatcher(client, record.sessionUri, formatter, {
 					statusOut: process.stderr,
+					chatUri,
 				});
 
 				const onSigint = () => watcher.stop();

@@ -12,7 +12,7 @@ import type { AhpxConfig } from "../config/index.js";
 import { ConnectionStore, isValidWsUrl } from "../config/index.js";
 import type { ConnectionProfile } from "../config/index.js";
 import { NotificationType } from "../notifications.js";
-import type { AuthRequiredNotification } from "../notifications.js";
+import type { AuthRequiredNotification, ProtocolNotification } from "../notifications.js";
 
 export interface WithConnectionOptions {
 	/** Server name or WebSocket URL (from --server flag) */
@@ -129,10 +129,10 @@ export async function withConnection(
 
 		// Wire up auth handler for server-initiated auth challenges
 		const authHandler = new AuthHandler(client, { token });
-		const onNotification = (notification: { type: string; resource?: string }) => {
+		const onNotification = (notification: ProtocolNotification) => {
 			if (notification.type === NotificationType.AuthRequired) {
 				const authNotification = notification as AuthRequiredNotification;
-				authHandler.handleAuthRequired({ resource: authNotification.resource }).catch(() => {
+				authHandler.handleAuthRequired(authNotification.resource).catch(() => {
 					// Auth failure during session is non-fatal — server will retry or error
 				});
 			}

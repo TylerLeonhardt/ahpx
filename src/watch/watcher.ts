@@ -1,9 +1,9 @@
 /**
  * SessionWatcher — Attaches to an existing session as an observer.
  *
- * Subscribes to a session URI and streams all incoming actions through
- * an OutputFormatter in real-time. Handles mid-turn join (shows current
- * streaming state) and clean exit on session dispose or SIGINT.
+ * Subscribes to a session and its default chat URI, then streams all incoming
+ * actions through an OutputFormatter in real-time. Handles mid-turn join
+ * (shows current streaming state) and clean exit on session dispose or SIGINT.
  */
 
 import type { ActionEnvelope } from "@microsoft/agent-host-protocol";
@@ -34,6 +34,8 @@ export interface StatusOutput {
 export interface SessionWatcherOptions {
 	/** Stream for status messages (default: process.stderr) */
 	statusOut?: StatusOutput;
+	/** Resolved default chat channel, when distinct from the session channel. */
+	chatUri?: URI;
 }
 
 /**
@@ -45,6 +47,7 @@ export class SessionWatcher {
 	private stopped = false;
 	private resolveWatch: (() => void) | undefined;
 	private readonly statusOut: StatusOutput;
+	private chatUri: URI;
 
 	constructor(
 		private readonly client: AhpClient,
@@ -53,6 +56,7 @@ export class SessionWatcher {
 		options: SessionWatcherOptions = {},
 	) {
 		this.statusOut = options.statusOut ?? process.stderr;
+		this.chatUri = options.chatUri ?? sessionUri;
 	}
 
 	/**
@@ -94,8 +98,13 @@ export class SessionWatcher {
 				throw new Error(`Session ${this.sessionUri} not found after subscribe`);
 			}
 
+			this.chatUri = sessionState.defaultChat ?? this.sessionUri;
+			if (this.chatUri !== this.sessionUri) {
+				await this.client.subscribe(this.chatUri);
+			}
+
 			// Show current state if there's an active turn (turns live on the chat)
-			this.showCurrentState(this.client.state.getChat(this.sessionUri));
+			this.showCurrentState(this.client.state.getChat(this.chatUri));
 		} catch (err) {
 			this.cleanup();
 			throw err;
@@ -143,7 +152,7 @@ export class SessionWatcher {
 							toolName: tc.toolName,
 							displayName: tc.displayName,
 							invocationMessage: tc.invocationMessage,
-							toolInput: tc.toolInput,
+							toolInput: tc.toolInput && typeof tc.toolInput === "object" ? tc.toolInput.uri : tc.toolInput,
 						};
 						this.formatter.onToolCallReady(tc.toolCallId, info);
 					} else if (tc.status === ToolCallStatus.Completed) {
@@ -164,8 +173,9 @@ export class SessionWatcher {
 	 */
 	private handleAction(envelope: ActionEnvelope): void {
 		const action = envelope.action;
-		// Only handle actions for our session
-		if (envelope.channel !== this.sessionUri) {
+		// Session actions remain on the session channel; chat actions may be on
+		// the session URI for older hosts or a distinct default chat channel.
+		if (envelope.channel !== this.sessionUri && envelope.channel !== this.chatUri) {
 			return;
 		}
 
@@ -197,7 +207,7 @@ export class SessionWatcher {
 
 			case ActionType.ChatToolCallDelta: {
 				const a = action as ChatToolCallDeltaAction;
-				this.formatter.onToolCallDelta(a.toolCallId, a.content);
+				this.formatter.onToolCallDelta(a.toolCallId, a.content ?? "");
 				break;
 			}
 
@@ -208,11 +218,11 @@ export class SessionWatcher {
 					toolName: a.toolCallId,
 					displayName: a.toolCallId,
 					invocationMessage: a.invocationMessage,
-					toolInput: a.toolInput,
+					toolInput: a.toolInput && typeof a.toolInput === "object" ? a.toolInput.uri : a.toolInput,
 				};
 
 				// Try to get actual names from state
-				const chat = this.client.state.getChat(this.sessionUri);
+				const chat = this.client.state.getChat(this.chatUri);
 				if (chat?.activeTurn) {
 					for (const part of chat.activeTurn.responseParts) {
 						if (part.kind === ResponsePartKind.ToolCall && part.toolCall.toolCallId === a.toolCallId) {
@@ -246,7 +256,7 @@ export class SessionWatcher {
 			}
 
 			case ActionType.ChatTurnComplete: {
-				const chat = this.client.state.getChat(this.sessionUri);
+				const chat = this.client.state.getChat(this.chatUri);
 				const lastTurn = chat?.turns[chat.turns.length - 1];
 				// Derive response text from markdown response parts
 				let responseText = "";
@@ -263,7 +273,7 @@ export class SessionWatcher {
 
 			case ActionType.ChatError: {
 				const a = action as ChatErrorAction;
-				this.formatter.onTurnError(a.error);
+				this.formatter.onTurnError(a.part.error);
 				break;
 			}
 

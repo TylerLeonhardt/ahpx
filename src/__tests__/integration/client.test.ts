@@ -224,7 +224,7 @@ describe("AhpClient integration", () => {
 						const turnId = action.turnId as string;
 						const message = action.message as { model?: { id: string } };
 						seenModel = message.model?.id;
-						ctx.sendAction({ type: "chat/turnComplete", session: sessionUri, turnId });
+						ctx.sendAction({ type: "chat/turnComplete", session: sessionUri, turnId, duration: 0 });
 					}
 				},
 			});
@@ -708,6 +708,7 @@ describe("AhpClient integration", () => {
 							type: "chat/turnComplete",
 							session: sessionUri,
 							turnId,
+							duration: 0,
 						});
 					}
 				},
@@ -722,18 +723,9 @@ describe("AhpClient integration", () => {
 			expect(result.responseText).toBe("Custom response");
 		});
 
-		it("fetchTurns returns configured history", async () => {
+		it("fetchTurns completes under the event-driven history contract", async () => {
 			server = await createMockServer({
-				onFetchTurns: () => ({
-					turns: [
-						{
-							id: "turn-1",
-							message: { text: "hello", origin: { kind: "user" } },
-							responseParts: [{ kind: "markdown", id: "p1", content: "Hi there" }],
-						},
-					],
-					hasMore: false,
-				}),
+				onFetchTurns: () => ({}),
 			});
 			client = new AhpClient();
 			await client.connect(server.url);
@@ -741,8 +733,7 @@ describe("AhpClient integration", () => {
 			const { uri } = await openSession(client, "mock-agent");
 			const result = await client.fetchTurns(uri);
 
-			expect(result.turns).toHaveLength(1);
-			expect(result.hasMore).toBe(false);
+			expect(result).toEqual({});
 		});
 	});
 

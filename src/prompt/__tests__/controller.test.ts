@@ -135,6 +135,7 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -162,6 +163,7 @@ describe("TurnController", () => {
 			makeChatState({
 				activeTurn: {
 					id: turnId,
+					startedAt: "2025-01-01T00:00:00.000Z",
 					message: message("say banana"),
 					responseParts: [{ kind: ResponsePartKind.Markdown, id: "p1", content: "BANANA" }],
 					usage: undefined,
@@ -171,7 +173,7 @@ describe("TurnController", () => {
 
 		// Only "ANANA" arrives as a streamed delta (the "B" was folded away).
 		emitAction({ type: ActionType.ChatDelta, turnId, partId: "p1", content: "ANANA" });
-		emitAction({ type: ActionType.ChatTurnComplete, turnId });
+		emitAction({ type: ActionType.ChatTurnComplete, duration: 0, turnId });
 
 		const result = await resultPromise;
 		expect(result.responseText).toBe("BANANA");
@@ -194,6 +196,7 @@ describe("TurnController", () => {
 			makeChatState({
 				activeTurn: {
 					id: turnId,
+					startedAt: "2025-01-01T00:00:00.000Z",
 					message: message("say elephant"),
 					responseParts: [{ kind: ResponsePartKind.Markdown, id: "p1", content: "ELEPHANT" }],
 					usage: undefined,
@@ -202,7 +205,7 @@ describe("TurnController", () => {
 		);
 
 		// No ChatDelta arrives — the entire short reply was folded into the snapshot.
-		emitAction({ type: ActionType.ChatTurnComplete, turnId });
+		emitAction({ type: ActionType.ChatTurnComplete, duration: 0, turnId });
 
 		const result = await resultPromise;
 		expect(result.responseText).toBe("ELEPHANT");
@@ -228,7 +231,7 @@ describe("TurnController", () => {
 
 		// Stream + complete on the chat channel
 		emitAction({ type: ActionType.ChatDelta, turnId, partId: "part-1", content: "Hi!" }, CHAT_URI);
-		emitAction({ type: ActionType.ChatTurnComplete, turnId }, CHAT_URI);
+		emitAction({ type: ActionType.ChatTurnComplete, duration: 0, turnId }, CHAT_URI);
 
 		const result = await resultPromise;
 		expect(result.state).toBe("complete");
@@ -262,7 +265,11 @@ describe("TurnController", () => {
 		emitAction({
 			type: ActionType.ChatError,
 			turnId,
-			error: { errorType: "runtime", message: "model overloaded" },
+			duration: 0,
+			part: {
+				kind: ResponsePartKind.Error,
+				error: { errorType: "runtime", message: "model overloaded" },
+			},
 		});
 
 		const result = await resultPromise;
@@ -285,6 +292,7 @@ describe("TurnController", () => {
 		emitAction({
 			type: ActionType.ChatTurnCancelled,
 			turnId,
+			duration: 0,
 		});
 
 		const result = await resultPromise;
@@ -319,6 +327,7 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -348,6 +357,7 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -386,6 +396,7 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -408,6 +419,7 @@ describe("TurnController", () => {
 			makeChatState({
 				activeTurn: {
 					id: "placeholder",
+					startedAt: "2025-01-01T00:00:00.000Z",
 					message: message("test"),
 					responseParts: [
 						{
@@ -449,6 +461,7 @@ describe("TurnController", () => {
 		// Complete the turn
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -479,6 +492,7 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -508,6 +522,7 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -537,6 +552,7 @@ describe("TurnController", () => {
 		emitAction({
 			type: ActionType.ChatTurnCancelled,
 			turnId,
+			duration: 0,
 		});
 
 		const result = await resultPromise;
@@ -555,6 +571,7 @@ describe("TurnController", () => {
 			makeChatState({
 				activeTurn: {
 					id: "placeholder",
+					startedAt: "2025-01-01T00:00:00.000Z",
 					message: message("test"),
 					responseParts: [
 						{
@@ -601,6 +618,7 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -619,6 +637,7 @@ describe("TurnController", () => {
 			makeChatState({
 				activeTurn: {
 					id: "placeholder",
+					startedAt: "2025-01-01T00:00:00.000Z",
 					message: message("test"),
 					responseParts: [
 						{
@@ -664,6 +683,7 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -682,6 +702,7 @@ describe("TurnController", () => {
 			makeChatState({
 				activeTurn: {
 					id: "placeholder",
+					startedAt: "2025-01-01T00:00:00.000Z",
 					message: message("test"),
 					responseParts: [
 						{
@@ -726,6 +747,7 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -744,6 +766,7 @@ describe("TurnController", () => {
 			makeChatState({
 				activeTurn: {
 					id: "placeholder",
+					startedAt: "2025-01-01T00:00:00.000Z",
 					message: message("test"),
 					responseParts: [
 						{
@@ -789,6 +812,7 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -833,6 +857,7 @@ describe("TurnController", () => {
 		// Complete before idle timeout fires
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 
@@ -857,6 +882,7 @@ describe("TurnController", () => {
 
 		emitAction({
 			type: ActionType.ChatTurnComplete,
+			duration: 0,
 			turnId,
 		});
 

@@ -19,6 +19,14 @@ health, dev tunnels — and delegates the wire protocol to the official client.
 > [`@microsoft/agent-host-protocol`](https://www.npmjs.com/package/@microsoft/agent-host-protocol)
 > directly. ahpx exposes only the `ahpx` CLI.
 
+### Agent Host compatibility
+
+The current release targets the latest published
+`@microsoft/agent-host-protocol` package and is compatible with AHP 0.9.0
+hosts, including VS Code Copilot and GitHub Copilot Agent Hosts. History
+loading follows the protocol's event-driven chat-state model, and tool
+permissions use the standard chat tool-call confirmation flow.
+
 ## Features
 
 - 🔌 **Connect to AHP servers** via WebSocket with saved connection profiles

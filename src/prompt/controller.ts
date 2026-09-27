@@ -47,6 +47,7 @@ export interface TurnResult {
  */
 export class TurnController {
 	private activeTurnId: string | undefined;
+	private activeTurnStartedAt: number | undefined;
 	private cancelled = false;
 
 	constructor(
@@ -83,6 +84,7 @@ export class TurnController {
 	): Promise<TurnResult> {
 		const turnId = randomUUID();
 		this.activeTurnId = turnId;
+		this.activeTurnStartedAt = Date.now();
 		this.cancelled = false;
 
 		let responseText = "";
@@ -169,7 +171,7 @@ export class TurnController {
 
 					case ActionType.ChatToolCallDelta: {
 						const a = action as ChatToolCallDeltaAction;
-						this.renderer.onToolCallDelta(a.toolCallId, a.content);
+						this.renderer.onToolCallDelta(a.toolCallId, a.content ?? "");
 						break;
 					}
 
@@ -212,7 +214,7 @@ export class TurnController {
 							toolName,
 							displayName: stateDisplayName ?? a.toolCallId,
 							invocationMessage: a.invocationMessage,
-							toolInput: a.toolInput,
+							toolInput: a.toolInput && typeof a.toolInput === "object" ? a.toolInput.uri : a.toolInput,
 						};
 
 						this.renderer.onToolCallReady(a.toolCallId, callInfo);
@@ -295,7 +297,7 @@ export class TurnController {
 					case ActionType.ChatError: {
 						const a = action as ChatErrorAction;
 						cleanup();
-						this.renderer.onTurnError(a.error);
+						this.renderer.onTurnError(a.part.error);
 						resolve({
 							turnId,
 							responseText,
@@ -308,7 +310,7 @@ export class TurnController {
 									}
 								: undefined,
 							state: "error",
-							error: a.error.message,
+							error: a.part.error.message,
 						});
 						break;
 					}
@@ -342,6 +344,7 @@ export class TurnController {
 				if (idleTimer !== undefined) clearTimeout(idleTimer);
 				this.client.removeListener("action", onAction);
 				this.activeTurnId = undefined;
+				this.activeTurnStartedAt = undefined;
 			};
 
 			// Listen for actions
@@ -351,6 +354,7 @@ export class TurnController {
 			this.client.dispatchAction(this.chatUri, {
 				type: ActionType.ChatTurnStarted,
 				turnId,
+				startedAt: new Date().toISOString(),
 				message: {
 					text,
 					origin: { kind: MessageKind.User },
@@ -373,6 +377,7 @@ export class TurnController {
 		this.client.dispatchAction(this.chatUri, {
 			type: ActionType.ChatTurnCancelled,
 			turnId: this.activeTurnId,
+			duration: Math.max(0, Date.now() - (this.activeTurnStartedAt ?? Date.now())),
 		});
 	}
 

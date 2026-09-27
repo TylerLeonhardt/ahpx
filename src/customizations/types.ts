@@ -11,6 +11,7 @@
  * boundary via {@link toClientCustomization}.
  */
 
+import { CustomizationEnablementKind } from "@microsoft/agent-host-protocol";
 import type { SessionActiveClient, URI } from "@microsoft/agent-host-protocol";
 
 /** The customization shape a client publishes in `activeClient.customizations`. */
@@ -62,7 +63,7 @@ export function toClientCustomization(ref: CustomizationRef): ClientCustomizatio
 		type: PLUGIN_TYPE,
 		uri: ref.uri,
 		name: ref.displayName,
-		enabled: true,
+		enablement: [{ kind: CustomizationEnablementKind.Session, enabled: true }],
 		...(ref.icons ? { icons: ref.icons } : {}),
 		...(ref.nonce ? { nonce: ref.nonce } : {}),
 	};
