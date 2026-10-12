@@ -50,7 +50,7 @@ _ahpx_completions() {
     esac
 
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=( $(compgen -W "--format --verbose --json-strict --help --version" -- "$cur") )
+        COMPREPLY=( $(compgen -W "--format --verbose --json-strict --protocol-version --help --version" -- "$cur") )
         return 0
     fi
 
@@ -82,6 +82,7 @@ _ahpx() {
         '--format[Output format]:format:(${FORMATS.join(" ")})' \\
         '--verbose[Enable debug logging]' \\
         '--json-strict[Suppress non-JSON stderr output]' \\
+        '--protocol-version[AHP protocol versions to offer]:versions:' \\
         '--help[Show help]' \\
         '--version[Show version]' \\
         '1:command:->command' \\
@@ -131,6 +132,7 @@ ${COMMANDS.map((c) => `complete -c ahpx -n "__fish_use_subcommand" -a "${c}"`).j
 complete -c ahpx -l format -d "Output format" -xa "${FORMATS.join(" ")}"
 complete -c ahpx -l verbose -d "Enable debug logging"
 complete -c ahpx -l json-strict -d "Suppress non-JSON stderr output"
+complete -c ahpx -l protocol-version -d "AHP protocol versions to offer" -x
 
 # server subcommands
 ${SERVER_SUBCOMMANDS.map((s) => `complete -c ahpx -n "__fish_seen_subcommand_from server" -a "${s}"`).join("\n")}

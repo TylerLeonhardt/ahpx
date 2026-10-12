@@ -47,17 +47,19 @@ import type {
 	SubscribeResult,
 } from "@microsoft/agent-host-protocol";
 import type { SessionActiveClient, TerminalClaim, URI } from "@microsoft/agent-host-protocol";
-import { PROTOCOL_VERSION } from "@microsoft/agent-host-protocol";
-import { AhpClient as OfficialAhpClient } from "@microsoft/agent-host-protocol/client";
+import { AhpErrorCodes } from "@microsoft/agent-host-protocol";
+import { AhpClient as OfficialAhpClient, RpcError } from "@microsoft/agent-host-protocol/client";
 import type {
 	ClientEvent,
 	ClosedReason,
 	ServerRequestHandler,
 	SubscriptionEvent,
 } from "@microsoft/agent-host-protocol/client";
+import { AhpxError, ExitCode } from "../errors.js";
 import type { ProtocolNotification } from "../notifications.js";
 import { NotificationType } from "../notifications.js";
 import { FileServingHandler } from "./file-serving.js";
+import { PROTOCOL_VERSIONS_ENV, resolveProtocolVersions } from "./protocol-versions.js";
 import { StateMirror } from "./state.js";
 import { WsTransport } from "./ws-transport.js";
 
@@ -80,6 +82,11 @@ export interface AhpClientOptions {
 	requestTimeout?: number;
 	/** Headers to include in the WebSocket handshake */
 	headers?: Record<string, string>;
+	/**
+	 * Protocol versions to offer in `initialize` (default: `AHPX_PROTOCOL_VERSIONS`,
+	 * else the official client's `SUPPORTED_PROTOCOL_VERSIONS`).
+	 */
+	protocolVersions?: string[];
 }
 
 export interface AhpClientEvents {
@@ -139,6 +146,9 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 	 * Connect to an AHP server and perform the initialization handshake.
 	 */
 	async connect(url: string, connectOptions?: ConnectOptions): Promise<InitializeResult> {
+		// Resolve (and validate) the offered versions before opening a socket.
+		const protocolVersions = resolveProtocolVersions(this.options.protocolVersions);
+
 		// Merge constructor headers with per-connect overrides.
 		const headers = { ...this.options.headers, ...connectOptions?.headers };
 		const connectTimeout = connectOptions?.connectTimeout ?? this.options.connectTimeout;
@@ -166,7 +176,7 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 		this.startStreams(official);
 
 		const initParams = {
-			protocolVersions: [PROTOCOL_VERSION],
+			protocolVersions,
 			clientId: this._clientId,
 			initialSubscriptions: this.options.initialSubscriptions ?? ["ahp-root://"],
 		};
@@ -183,6 +193,13 @@ export class AhpClient extends EventEmitter<AhpClientEvents> {
 			this.official = undefined;
 			this.transport = undefined;
 			this._connected = false;
+			if (err instanceof RpcError && err.code === AhpErrorCodes.UnsupportedProtocolVersion) {
+				throw new AhpxError(
+					`${err.message}
+Hint: the server needs a different protocol version — retry with --protocol-version <version> or ${PROTOCOL_VERSIONS_ENV}=<version>.`,
+					ExitCode.Error,
+				);
+			}
 			throw err;
 		}
 

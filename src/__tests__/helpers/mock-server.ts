@@ -16,11 +16,27 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { AhpErrorCodes, SUPPORTED_PROTOCOL_VERSIONS, negotiateProtocolVersion } from "@microsoft/agent-host-protocol";
 import { WebSocket, WebSocketServer } from "ws";
 
-// ── Protocol constants (mirroring src/protocol) ─────────────────────────
+// ── Protocol negotiation ─────────────────────────────────────────────────
 
-const PROTOCOL_VERSION = "0.9.0";
+/**
+ * Pick the version to speak from the client's offer. With `hostVersion` unset
+ * the mock negotiates like a released 1.0.0 host (`negotiateProtocolVersion`);
+ * otherwise it behaves like a pre-release snapshot host that only accepts the
+ * caret range of its own version (e.g. `^0.10.0` ⇒ `>=0.10.0 <0.11.0`).
+ */
+function negotiate(offered: string[], hostVersion: string | undefined): string | undefined {
+	if (hostVersion === undefined) return negotiateProtocolVersion(offered);
+	const [hMajor, hMinor, hPatch] = hostVersion.split(".").map(Number);
+	return offered.find((v) => {
+		const [major, minor, patch] = v.split(".").map(Number);
+		if (major !== hMajor) return false;
+		if (major === 0 && minor !== hMinor) return false;
+		return minor > hMinor || (minor === hMinor && patch >= hPatch);
+	});
+}
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -64,6 +80,11 @@ interface MockSession {
 export interface MockServerScenario {
 	/** Override initialize response */
 	onInitialize?: (params: Record<string, unknown>) => Record<string, unknown>;
+	/**
+	 * Behave like a pre-release host at this protocol version, accepting only
+	 * its own caret range (default: negotiate like a released 1.0.0 host).
+	 */
+	hostProtocolVersion?: string;
 	/** Override createSession handling. Return actions to send after creation. */
 	onCreateSession?: (params: Record<string, unknown>) => ActionEnvelope[] | undefined;
 	/** Override subscribe handling */
@@ -339,6 +360,20 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 					return;
 				}
 
+				const offered = (params.protocolVersions ?? []) as string[];
+				const protocolVersion = negotiate(offered, scenario.hostProtocolVersion);
+				if (protocolVersion === undefined) {
+					const host = scenario.hostProtocolVersion;
+					sendError(
+						ws,
+						req.id,
+						AhpErrorCodes.UnsupportedProtocolVersion,
+						`Client offered protocol versions [${offered.join(", ")}], none of which are compatible with this server`,
+						{ supportedVersions: host ? [`^${host}`] : [...SUPPORTED_PROTOCOL_VERSIONS] },
+					);
+					return;
+				}
+
 				const initialSubs = (params.initialSubscriptions ?? []) as string[];
 				const snapshots = initialSubs.map((uri) => {
 					if (uri === "ahp-root://") return makeRootSnapshot();
@@ -348,7 +383,7 @@ export async function createMockServer(scenario: MockServerScenario = {}): Promi
 				});
 
 				sendResponse(ws, req.id, {
-					protocolVersion: PROTOCOL_VERSION,
+					protocolVersion,
 					serverSeq,
 					snapshots,
 				});

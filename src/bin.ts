@@ -31,6 +31,7 @@ import { Command } from "commander";
 import pc from "picocolors";
 import { authenticateUpfront } from "./auth/index.js";
 import { AhpClient, RpcError } from "./client/index.js";
+import { PROTOCOL_VERSIONS_ENV } from "./client/protocol-versions.js";
 import { bashCompletion, fishCompletion, zshCompletion } from "./completions.js";
 import {
 	ConnectionStore,
@@ -274,7 +275,19 @@ Examples:
 	.version(readPackageVersion())
 	.option("--format <format>", "Output format: text, json, or quiet", "text")
 	.option("--json-strict", "Suppress non-JSON stderr output (only with --format json)")
-	.option("-v, --verbose", "Enable debug logging to stderr");
+	.option("-v, --verbose", "Enable debug logging to stderr")
+	.option(
+		"--protocol-version <versions>",
+		"Comma-separated AHP protocol versions to offer (overrides the defaults, e.g. 0.10.0 for pre-release hosts)",
+	)
+	.hook("preAction", (thisCommand) => {
+		// Routed through the env var so every AhpClient construction site
+		// (connect-helper, health checks, …) picks it up without extra plumbing.
+		const protocolVersion = thisCommand.opts().protocolVersion as string | undefined;
+		if (protocolVersion !== undefined) {
+			process.env[PROTOCOL_VERSIONS_ENV] = protocolVersion;
+		}
+	});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -3483,6 +3496,9 @@ async function handleImplicitPrompt(): Promise<boolean> {
 			globalOpts.jsonStrict = true;
 		} else if (args[i] === "--verbose" || args[i] === "-v") {
 			globalOpts.verbose = true;
+		} else if (args[i] === "--protocol-version" && i + 1 < args.length) {
+			process.env[PROTOCOL_VERSIONS_ENV] = args[i + 1];
+			i++;
 		}
 	}
 	applyGlobalOpts(globalOpts);
@@ -3502,7 +3518,7 @@ async function handleImplicitPrompt(): Promise<boolean> {
 	const flags: Record<string, string | boolean> = {};
 	let i = 0;
 	while (i < args.length) {
-		if (args[i] === "--format") {
+		if (args[i] === "--format" || args[i] === "--protocol-version") {
 			i += 2;
 			continue;
 		}

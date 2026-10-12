@@ -21,11 +21,23 @@ health, dev tunnels — and delegates the wire protocol to the official client.
 
 ### Agent Host compatibility
 
-The current release targets the latest published
-`@microsoft/agent-host-protocol` package and is compatible with AHP 0.9.0
-hosts, including VS Code Copilot and GitHub Copilot Agent Hosts. History
+The current release targets `@microsoft/agent-host-protocol` 1.0.0. During the
+`initialize` handshake it offers every released compatibility baseline
+(`1.0.0`, `0.9.0`), so it works with AHP 1.0.x and 0.9.x hosts, including VS Code
+Copilot and GitHub Copilot Agent Hosts. History
 loading follows the protocol's event-driven chat-state model, and tool
 permissions use the standard chat tool-call confirmation flow.
+
+Some hosts are built from an unreleased AHP snapshot and accept only their own
+version range. For example, a `0.10.0` host accepts only `^0.10.0`. These hosts
+reject the default offer with error `-32005`. To connect to one, override the
+offered versions with `--protocol-version` (comma-separated) or
+`AHPX_PROTOCOL_VERSIONS`:
+
+```bash
+ahpx --protocol-version 0.10.0 connect my-server
+AHPX_PROTOCOL_VERSIONS=0.10.0 ahpx session new -s my-server
+```
 
 ## Features
 
@@ -194,6 +206,7 @@ ahpx session customization toggle <uri> -n my-session
 | `--format <format>` | Output format: `text`, `json`, or `quiet` (default: `text`) |
 | `--json-strict` | Suppress non-JSON stderr output (use with `--format json`) |
 | `-v, --verbose` | Enable debug logging to stderr |
+| `--protocol-version <versions>` | Comma-separated AHP protocol versions to offer instead of the defaults (also `AHPX_PROTOCOL_VERSIONS`) |
 | `--version` | Print version |
 | `--help` | Show help |
 

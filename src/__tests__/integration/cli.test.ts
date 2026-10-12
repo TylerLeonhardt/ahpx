@@ -73,6 +73,24 @@ describe("CLI integration", () => {
 		expect(result.exitCode).toBe(0);
 	});
 
+	it("ahpx connect against a ^0.10.0-only host fails with a --protocol-version hint", async () => {
+		server = await createMockServer({ hostProtocolVersion: "0.10.0" });
+
+		const result = await runCli("connect", server.url);
+
+		expect(result.exitCode).not.toBe(0);
+		expect(result.stderr).toContain("--protocol-version");
+	});
+
+	it("ahpx --protocol-version 0.10.0 connect reaches a ^0.10.0-only host", async () => {
+		server = await createMockServer({ hostProtocolVersion: "0.10.0" });
+
+		const result = await runCli("--protocol-version", "0.10.0", "connect", server.url);
+
+		expect(result.exitCode).toBe(0);
+		expect(result.stdout).toContain("0.10.0");
+	});
+
 	it("ahpx agents lists available agents from mock server", async () => {
 		server = await createMockServer();
 

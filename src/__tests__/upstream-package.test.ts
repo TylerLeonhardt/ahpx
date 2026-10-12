@@ -14,9 +14,10 @@ describe("@microsoft/agent-host-protocol package", () => {
 		const ahp = await import("@microsoft/agent-host-protocol");
 		expect(typeof ahp.PROTOCOL_VERSION).toBe("string");
 		expect(Array.isArray(ahp.SUPPORTED_PROTOCOL_VERSIONS)).toBe(true);
-		// The published package targets the 0.3+ protocol line.
-		expect(ahp.SUPPORTED_PROTOCOL_VERSIONS).toContain(ahp.PROTOCOL_VERSION);
-		expect(ahp.PROTOCOL_VERSION.startsWith("0.")).toBe(true);
+		// SUPPORTED_PROTOCOL_VERSIONS lists released compatibility baselines and is
+		// independent of the development PROTOCOL_VERSION, so only pin the 1.x
+		// baseline ahpx targets.
+		expect(ahp.SUPPORTED_PROTOCOL_VERSIONS).toContain("1.0.0");
 	});
 
 	it("exposes the central action enum and reducers from the root entrypoint", async () => {
